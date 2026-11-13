@@ -22,7 +22,8 @@
 
 # Types
 
-- There should be primitive types, `string`, `number`, `bool`
+- There should be primitive types, `string`, `number`, `bool`, for strings you can use both double quotes or single quotes
+- For strings you can use for no escaping `#" Content I can put "double quotes" and \n doesn't get escaped "#`, they can also use double or singlue quotes, both are good.
 - Collections:
     - `List`, like in PHP, defined with `[1,2,3,4]`.
     - `Map`, like in PHP, defined with `{'Folgue' => 14, 'Daniel' => 24}`
@@ -39,7 +40,7 @@
 - Should allow calling them while naming parameters
 - Should allow specifying return types
 - Should allow one line definitions
-- Should allow being called with parenthesis if its not ambiguous
+- Should allow being called without parenthesis if its not ambiguous
 
 Examples:
 ```
@@ -49,6 +50,8 @@ string greet(string $name) = f"Hello {$name}";
 
 // Execution
 greet "Folgue";
+greet greet("Folgue");
+greet(greet('Folgue'));
 
 // ---------------------
 // Definition
@@ -62,7 +65,19 @@ greet "Folgue";
 
 // ---------------------
 // Definition
-string 
+string greet(...string $names) {
+    // ...
+}
+
+greet "Folgue", "Daniel", "James";
+
+// ---------------------
+// Definition
+string createFile(string $name, string $extension)
+    = f"{$name}.{$extension}";
+
+// Execution
+createFile(extension: "jpg", name: "daniel");
 ```
 
 ### Classes
@@ -82,7 +97,7 @@ Example:
 interface Worker {
     bool working?();
     string name() {
-    
+        // Code
     }
 }
 ```
@@ -123,5 +138,21 @@ Defined just like in PHP
 let $fruits = ['Oranges', 'Apples', 'Tomatoes'];
 ```
 
-There should also be two 
+There should also be two special ways to create arrays:
+```
+const $words = %w[Oranges Apples Tomatoes];
+const $symbols = %i[oranges apples tomatoes]; // Same as `const $symbols = [:oranges, :apples, :tomatoes];`
+```
 
+
+## Map
+
+Defined just like in PHP
+```
+let $scores = {
+    'Daniel' => 23,
+    'Folgue' => 24
+};
+
+print $scores['Daniel'];
+```
