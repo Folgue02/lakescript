@@ -7,9 +7,9 @@
 
 Examples:
 ```
-if ($name.isUpperCase()) {
+if ($name.upper?()) {
 
-} else if ($name.isBlank()) {
+} else if ($name.blank?()) {
 
 } else {
 

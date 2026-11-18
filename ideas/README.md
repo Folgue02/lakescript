@@ -18,6 +18,7 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
 
 ## Notes
 
+- [roadmap.md](roadmap.md): the phases the interpreter is built in.
 - [language/](language): the language itself.
     - [syntax.md](language/syntax.md): general syntax, comments, names and reserved words.
     - [variables.md](language/variables.md): declarations, scopes and destructuring.

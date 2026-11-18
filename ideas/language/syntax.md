@@ -37,7 +37,7 @@
 | Control flow    | `if` `else` `for` `in` `while` `switch` `case` `default` `break` `continue` `return` `yield` |
 | Errors          | `try` `catch` |
 | Values          | `true` `false` `null` |
-| Built-in types  | `void` `any` `string` `number` `bool` `symbol` `list` `map` `range` `regex` `result` |
+| Built-in types  | `void` `any` `string` `number` `bool` `symbol` `list` `map` `range` `regex` `result` `command` |
 
 - `as` and `is` are reserved method names *(see [builtin_types.md](builtin_types.md))*.
 - Variables can use any of these names, since they start with `$` *(i.e. `$type`, `$default`)*.

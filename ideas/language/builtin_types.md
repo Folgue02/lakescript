@@ -2,7 +2,9 @@
 
 ## Base types
 
-All base types can have methods called on *(i.e. `1.even?()`, `'hello world'.replaceAll('o', 'a')`, `true.toNumber()`)*
+All base types can have methods called on *(i.e. `1.even?()`, `'hello world'.replace('o', 'a')`, `true.toNumber()`)*
+
+The full list of methods of each type is in [stdlib/types](../stdlib/types).
 
 ### Methods on every value
 
@@ -43,6 +45,7 @@ if ($value.is(string))
     - String interpolation, similar to python's: `f"Hello {$name}"`. It accepts any expression *(i.e. `f"{$i + 1}. {$name.upper()}"`)*. A literal `{` or `}` is written twice: `f"{{not interpolated}}"`.
     - Raw strings, with no escaping, just like in Rust: `r#"Text here"#`
     - Regexes: `%r"^\d+$"` *(see [Regex](#regex))*
+    - Commands: `%x"git status"`, with interpolation like `f""` *(see [Command](#command))*
 - Escape sequences work in both single and double quotes (but not in raw strings):
 
 | Escape | Meaning         |
@@ -265,6 +268,39 @@ const $size = (try readFile($path)).map(($text) = $text.length()).orNull();
 ```
 
 **NOTE**: `try` applies to the whole expression after it, so `try readFile($path).orElse('')` would mean `try (readFile($path).orElse(''))`. Parentheses are needed to call methods on the result.
+
+### Command
+
+Type: `command`
+
+`%x"..."` creates a shell command, like Perl's backticks. It doesn't run when it's created: it runs when one of its methods is called, so it can be set up first.
+
+```
+const $branch = %x"git rev-parse --abbrev-ref HEAD".output();   // runs it and returns stdout
+%x"cargo build --release".run();                               // runs it, output goes to the terminal
+
+%x"make install"
+    .cwd($projectDir)
+    .env('PREFIX', '/usr/local')
+    .run();
+
+const $count = %x"ls | wc -l".output().toNumber();    // pipes and redirects work
+```
+
+- `{...}` interpolates like in `f""`, but every value is quoted as a single argument, so values can never run as shell code:
+
+```
+const $file = 'my notes; rm -rf ~.txt';
+%x"rm {$file}".run();             // removes one file with that exact name, nothing else runs
+
+const $files = ['a.txt', 'b.txt'];
+%x"cp {$files} backup/".run();    // a list becomes several arguments
+```
+
+- The rest of the text runs through the shell (`sh` on Linux and macOS), so `|`, `>`, `&&` and `*` work.
+- A literal `{` or `}` is written twice, like in `f""` *(i.e. `%x"echo {{a,b}}"`)*.
+- If the command fails (its exit code isn't 0), `run()` and `output()` throw a `CommandFailed`, like `set -e` in bash. With `try` you get a fallback: `(try %x"git describe".output()).orElse('dev')`. `status()` runs it without throwing.
+- The methods are listed in [command.md](../stdlib/types/command.md).
 
 ### Regex
 
