@@ -1,13 +1,22 @@
+mod ast;
+mod diagnostic;
+mod lexer;
+mod parser;
+mod token;
+
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let Some(path) = args.next() else {
-        eprintln!("usage: lks <script.lks>");
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    // Debugging aids while the interpreter doesn't exist yet
+    let show_tokens = args.iter().any(|a| a == "--tokens");
+    let show_ast = args.iter().any(|a| a == "--ast");
+    let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("usage: lks [--tokens] [--ast] <script.lks>");
         return ExitCode::from(2);
     };
 
-    let source = match std::fs::read_to_string(&path) {
+    let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(err) => {
             eprintln!("error: can't read {path}: {err}");
@@ -15,7 +24,32 @@ fn main() -> ExitCode {
         }
     };
 
-    // Phase 1: the lexer, parser and interpreter go here.
-    println!("{path}: {} lines read", source.lines().count());
+    let tokens = match lexer::tokenize(&source) {
+        Ok(tokens) => tokens,
+        Err(diagnostic) => {
+            eprintln!("{}", diagnostic.render(path));
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if show_tokens {
+        for token in &tokens {
+            println!("{}:{}\t{:?}", token.span.line, token.span.column, token.kind);
+        }
+    }
+
+    let program = match parser::parse(tokens) {
+        Ok(program) => program,
+        Err(diagnostic) => {
+            eprintln!("{}", diagnostic.render(path));
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if show_ast {
+        for stmt in &program {
+            println!("{stmt}");
+        }
+    }
     ExitCode::SUCCESS
 }

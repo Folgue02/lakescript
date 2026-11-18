@@ -1,0 +1,11 @@
+#!/usr/bin/lks
+const $name = 'Folgue';
+let $count = 0;
+
+string greet(string $who) = f"Hello {$who}!";
+
+for ($i in 1..=3) {
+    $count += $i ** 2;
+}
+outln(greet($name));
+outln(f"Sum of squares: {$count}");

@@ -72,7 +72,7 @@ Name: {$name}
 Age: {$age}
 """;
 ```
-- The indentation that all the lines of a multi-line string share is removed, like in Java and Kotlin, so the string can be indented along with the code. The new line right after the opening `"""` is removed too:
+- The indentation that all the lines of a multi-line string share is removed, like in Java and Kotlin, so the string can be indented along with the code. The new line right after the opening `"""` is removed too. When the closing `"""` is on its own line, it counts for the indentation and the string ends with a new line, like in Java:
 
 ```
 void help() {
@@ -299,6 +299,7 @@ const $files = ['a.txt', 'b.txt'];
 
 - The rest of the text runs through the shell (`sh` on Linux and macOS), so `|`, `>`, `&&` and `*` work.
 - A literal `{` or `}` is written twice, like in `f""` *(i.e. `%x"echo {{a,b}}"`)*.
+- Backslashes are passed to the shell as they are, like in regexes *(i.e. `%x"grep 'a\.b' notes.txt"`)*. Only `\"` is turned into `"`. A command can span several lines.
 - If the command fails (its exit code isn't 0), `run()` and `output()` throw a `CommandFailed`, like `set -e` in bash. With `try` you get a fallback: `(try %x"git describe".output()).orElse('dev')`. `status()` runs it without throwing.
 - The methods are listed in [command.md](../stdlib/types/command.md).
 
