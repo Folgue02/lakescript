@@ -1,0 +1,307 @@
+//! Values while a script runs.
+
+use std::cell::RefCell;
+use std::fmt;
+use std::rc::Rc;
+
+use indexmap::IndexMap;
+
+use crate::ast::FunctionDecl;
+use crate::scope::Env;
+
+#[derive(Clone)]
+pub enum Value {
+    Null,
+    Bool(bool),
+    /// A `number` stored as an integer. The user never sees the difference with `Float`.
+    Int(i64),
+    Float(f64),
+    Str(Rc<str>),
+    Symbol(Rc<str>),
+    List(Rc<RefCell<Vec<Value>>>),
+    Map(Rc<RefCell<IndexMap<Key, Value>>>),
+    Range(Range),
+    Function(Rc<Function>),
+}
+
+/// A range of whole numbers. `end` is excluded unless `inclusive`. It counts
+/// down when `start` is bigger than `end`. `step` is always positive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Range {
+    pub start: i64,
+    pub end: i64,
+    pub inclusive: bool,
+    pub step: i64,
+}
+
+impl Range {
+    pub fn iter(self) -> impl Iterator<Item = i64> {
+        let down = self.start > self.end;
+        let mut next = Some(self.start);
+        std::iter::from_fn(move || {
+            let current = next?;
+            let inside = match (down, self.inclusive) {
+                (false, false) => current < self.end,
+                (false, true) => current <= self.end,
+                (true, false) => current > self.end,
+                (true, true) => current >= self.end,
+            };
+            if !inside {
+                next = None;
+                return None;
+            }
+            next = if down { current.checked_sub(self.step) } else { current.checked_add(self.step) };
+            Some(current)
+        })
+    }
+
+    pub fn contains(self, n: i64) -> bool {
+        let (low, high) = if self.start <= self.end { (self.start, self.end) } else { (self.end, self.start) };
+        let in_bounds = if self.inclusive {
+            low <= n && n <= high
+        } else if self.start <= self.end {
+            low <= n && n < high
+        } else {
+            low < n && n <= high
+        };
+        in_bounds && (n - self.start).abs() % self.step == 0
+    }
+}
+
+/// A map key. Numbers that are whole are always stored as `Int`, so `1` and
+/// `1.0` are the same key.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Key {
+    Int(i64),
+    /// The bits of a float that isn't whole.
+    Float(u64),
+    Str(Rc<str>),
+    Symbol(Rc<str>),
+}
+
+impl Key {
+    pub fn from_value(value: &Value) -> Option<Key> {
+        Some(match value {
+            Value::Int(n) => Key::Int(*n),
+            Value::Float(f) => match whole(*f) {
+                Some(n) => Key::Int(n),
+                None => Key::Float(f.to_bits()),
+            },
+            Value::Str(s) => Key::Str(s.clone()),
+            Value::Symbol(s) => Key::Symbol(s.clone()),
+            _ => return None,
+        })
+    }
+
+    pub fn to_value(&self) -> Value {
+        match self {
+            Key::Int(n) => Value::Int(*n),
+            Key::Float(bits) => Value::Float(f64::from_bits(*bits)),
+            Key::Str(s) => Value::Str(s.clone()),
+            Key::Symbol(s) => Value::Symbol(s.clone()),
+        }
+    }
+}
+
+/// The value of a float if it's a whole number that fits in an `i64`.
+pub fn whole(f: f64) -> Option<i64> {
+    (f.fract() == 0.0 && f >= -9.223_372_036_854_776e18 && f < 9.223_372_036_854_776e18).then_some(f as i64)
+}
+
+pub enum Function {
+    User(UserFunction),
+    Native(NativeFunction),
+}
+
+pub struct UserFunction {
+    pub decl: Rc<FunctionDecl>,
+    /// The scope the function was defined in, so it can use the variables around it.
+    pub env: Env,
+}
+
+/// What a native function can use besides its arguments.
+pub struct NativeContext<'a> {
+    pub output: &'a mut dyn std::io::Write,
+}
+
+pub type NativeFn = dyn Fn(&mut NativeContext, Vec<Value>) -> Result<Value, String>;
+
+pub struct NativeFunction {
+    pub name: String,
+    pub func: Box<NativeFn>,
+}
+
+impl Function {
+    pub fn name(&self) -> &str {
+        match self {
+            Function::User(f) => &f.decl.name,
+            Function::Native(f) => &f.name,
+        }
+    }
+}
+
+impl Value {
+    pub fn string(s: &str) -> Value {
+        Value::Str(Rc::from(s))
+    }
+
+    pub fn list(items: Vec<Value>) -> Value {
+        Value::List(Rc::new(RefCell::new(items)))
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Int(_) | Value::Float(_) => "number",
+            Value::Str(_) => "string",
+            Value::Symbol(_) => "symbol",
+            Value::List(_) => "list",
+            Value::Map(_) => "map",
+            Value::Range(_) => "range",
+            Value::Function(_) => "function",
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            Value::Int(n) => Some(*n as f64),
+            Value::Float(f) => Some(*f),
+            _ => None,
+        }
+    }
+
+    /// The value as a whole number, if it is one *(i.e. `4.0` works, `4.5` doesn't)*.
+    pub fn as_whole(&self) -> Option<i64> {
+        match self {
+            Value::Int(n) => Some(*n),
+            Value::Float(f) => whole(*f),
+            _ => None,
+        }
+    }
+
+    /// `==`: by contents for numbers, booleans, symbols, null, strings and
+    /// ranges, by reference for the rest. Values of different types are never equal.
+    pub fn same(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Value::Null, Value::Null) => true,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (a @ (Value::Int(_) | Value::Float(_)), b @ (Value::Int(_) | Value::Float(_))) => a.as_f64() == b.as_f64(),
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Symbol(a), Value::Symbol(b)) => a == b,
+            (Value::Range(a), Value::Range(b)) => a == b,
+            (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
+            (Value::Map(a), Value::Map(b)) => Rc::ptr_eq(a, b),
+            (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+
+    /// `.equals()` and `-in`: like `==`, but lists and maps compare their contents.
+    pub fn equals(&self, other: &Value) -> bool {
+        match (self, other) {
+            (Value::List(a), Value::List(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let (a, b) = (a.borrow(), b.borrow());
+                a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
+            }
+            (Value::Map(a), Value::Map(b)) => {
+                if Rc::ptr_eq(a, b) {
+                    return true;
+                }
+                let (a, b) = (a.borrow(), b.borrow());
+                a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| v.equals(w)))
+            }
+            _ => self.same(other),
+        }
+    }
+
+    /// How the value looks inside a list or a map: strings get quotes and
+    /// symbols keep their `:`.
+    fn write_nested(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Str(s) => write!(f, "'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
+            Value::Symbol(s) => write!(f, ":{s}"),
+            other => write!(f, "{other}"),
+        }
+    }
+}
+
+pub fn format_number(f: f64) -> String {
+    if f.is_nan() {
+        return "NaN".into();
+    }
+    if f.is_infinite() {
+        return if f > 0.0 { "Infinity".into() } else { "-Infinity".into() };
+    }
+    if f == 0.0 {
+        return "0".into();
+    }
+    let abs = f.abs();
+    if !(1e-6..1e16).contains(&abs) {
+        return format!("{f:e}");
+    }
+    match whole(f) {
+        Some(n) => n.to_string(),
+        None => f.to_string(),
+    }
+}
+
+/// How `outln`, `toString()` and `f"{...}"` show a value.
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Null => write!(f, "null"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Int(n) => write!(f, "{n}"),
+            Value::Float(n) => write!(f, "{}", format_number(*n)),
+            Value::Str(s) => write!(f, "{s}"),
+            Value::Symbol(s) => write!(f, "{s}"),
+            Value::List(items) => {
+                write!(f, "[")?;
+                for (i, item) in items.borrow().iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    item.write_nested(f)?;
+                }
+                write!(f, "]")
+            }
+            Value::Map(entries) => {
+                let entries = entries.borrow();
+                if entries.is_empty() {
+                    return write!(f, "{{}}");
+                }
+                write!(f, "{{")?;
+                for (i, (key, value)) in entries.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
+                    write!(f, " ")?;
+                    key.to_value().write_nested(f)?;
+                    write!(f, " => ")?;
+                    value.write_nested(f)?;
+                }
+                write!(f, " }}")
+            }
+            Value::Range(r) => {
+                let op = if r.inclusive { "..=" } else { ".." };
+                write!(f, "{}{op}{}", r.start, r.end)?;
+                if r.step != 1 {
+                    write!(f, " step {}", r.step)?;
+                }
+                Ok(())
+            }
+            Value::Function(func) => write!(f, "<function {}>", func.name()),
+        }
+    }
+}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write_nested(f)
+    }
+}

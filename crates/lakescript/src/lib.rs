@@ -8,11 +8,18 @@
 
 pub mod ast;
 pub mod diagnostic;
+mod engine;
+mod interpreter;
 pub mod lexer;
+mod methods;
 pub mod parser;
+mod scope;
 pub mod token;
+pub mod value;
 
 pub use diagnostic::Diagnostic;
+pub use engine::{CapturedOutput, Engine};
+pub use value::{NativeContext, Value};
 
 /// Reads a whole script into its syntax tree.
 pub fn parse(source: &str) -> Result<Vec<ast::Stmt>, Diagnostic> {

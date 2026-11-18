@@ -1,10 +1,25 @@
 use std::process::ExitCode;
 
-use lakescript::{lexer, parser};
+use lakescript::{Engine, lexer, parser};
+
+/// The interpreter walks the syntax tree with Rust's own stack, so scripts
+/// run on a thread with a big one. Only the pages that are used take memory.
+const STACK_SIZE: usize = 512 * 1024 * 1024;
 
 fn main() -> ExitCode {
+    let runner = std::thread::Builder::new().stack_size(STACK_SIZE).spawn(run);
+    match runner.map(|handle| handle.join()) {
+        Ok(Ok(code)) => code,
+        _ => {
+            eprintln!("lks: the interpreter crashed. This is a bug in lks, not in your script");
+            ExitCode::from(70)
+        }
+    }
+}
+
+fn run() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // Debugging aids while the interpreter doesn't exist yet
+    // Debugging aids
     let show_tokens = args.iter().any(|a| a == "--tokens");
     let show_ast = args.iter().any(|a| a == "--ast");
     let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
@@ -20,32 +35,42 @@ fn main() -> ExitCode {
         }
     };
 
-    let tokens = match lexer::tokenize(&source) {
-        Ok(tokens) => tokens,
-        Err(diagnostic) => {
-            eprintln!("{}", diagnostic.render(path));
-            return ExitCode::FAILURE;
-        }
-    };
-
-    if show_tokens {
-        for token in &tokens {
-            println!("{}:{}\t{:?}", token.span.line, token.span.column, token.kind);
-        }
+    if show_tokens || show_ast {
+        return debug_print(path, &source, show_tokens, show_ast);
     }
 
-    let program = match parser::parse(tokens) {
-        Ok(program) => program,
+    let mut engine = Engine::new();
+    engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
+    match engine.run(&source) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(diagnostic) => {
             eprintln!("{}", diagnostic.render(path));
-            return ExitCode::FAILURE;
-        }
-    };
-
-    if show_ast {
-        for stmt in &program {
-            println!("{stmt}");
+            ExitCode::FAILURE
         }
     }
-    ExitCode::SUCCESS
+}
+
+fn debug_print(path: &str, source: &str, show_tokens: bool, show_ast: bool) -> ExitCode {
+    let result = lexer::tokenize(source).and_then(|tokens| {
+        if show_tokens {
+            for token in &tokens {
+                println!("{}:{}\t{:?}", token.span.line, token.span.column, token.kind);
+            }
+        }
+        parser::parse(tokens)
+    });
+    match result {
+        Ok(program) => {
+            if show_ast {
+                for stmt in &program {
+                    println!("{stmt}");
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(diagnostic) => {
+            eprintln!("{}", diagnostic.render(path));
+            ExitCode::FAILURE
+        }
+    }
 }

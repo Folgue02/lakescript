@@ -1,0 +1,74 @@
+#!/usr/bin/lks
+// What phase 1 can run: no files or commands yet, only computing and printing.
+
+// FizzBuzz, with a one-line function and the ternary operator
+string fizzbuzz(number $n) =
+    $n % 15 == 0 ? 'FizzBuzz' : $n % 3 == 0 ? 'Fizz' : $n % 5 == 0 ? 'Buzz' : $n.toString();
+
+let $line = <string>[];
+for ($i in 1..=15)
+    $line << fizzbuzz($i);
+outln($line.join(' '));
+
+// Primes, with while, break and continue
+bool prime?(number $n) {
+    if ($n < 2) return false;
+    let $d = 2;
+    while ($d * $d <= $n) {
+        if ($n % $d == 0) return false;
+        $d++;
+    }
+    return true;
+}
+
+let $primes = [];
+for ($n in 1..100) {
+    if (!prime?($n)) continue;
+    $primes << $n;
+    if ($primes.length() == 10) break;
+}
+outln(f"First 10 primes: {$primes}");
+
+// Counting words with a map, which keeps the order they were added in
+const $words = %w[the cat and the dog and the bird];
+let $counts = <string, number>{};
+for ($word in $words)
+    $counts[$word] = ($counts[$word] ?? 0) + 1;
+
+for ($word => $count in $counts)
+    outln(f"{$word.upper()}: {$count}");
+
+// Functions as values, default and named arguments, varargs
+number apply((number) -> number $f, number $x) = $f($x);
+number square(number $n) = $n ** 2;
+outln(f"apply(square, 12) = {apply(square, 12)}");
+
+string tag(string $name, string $open = '<', string $close = '>') = f"{$open}{$name}{$close}";
+outln(tag('b') + tag('i', close: ']', open: '['));
+
+number total(...number $values) {
+    let $sum = 0;
+    for ($v in $values) $sum += $v;
+    return $sum;
+}
+const $prices = [4.5, 10, 0.25];
+outln(f"Total: {total(...$prices)}");
+
+// Functions use the variables declared before them, and can change them
+let $calls = 0;
+number fib(number $n) {
+    $calls++;
+    return $n < 2 ? $n : fib($n - 1) + fib($n - 2);
+}
+outln(f"fib(20) = {fib(20)} after {$calls} calls");
+
+// Numbers: integers become floats when they overflow, `/` always divides fully
+outln(f"{7 / 2}, {2 ** 62 * 4}, {-17 >>> 60}, {0.1 + 0.2}");
+
+// Strings by character, with slices and negative indexes
+const $name = 'Lakescript';
+outln(f"{$name[0..4]} / {$name[-6..]} / {$name.length()} letters");
+
+// Equality: lists compare by reference, `.equals()` by contents
+const $a = [1, 2];
+outln(f"{$a == [1, 2]} {$a.equals([1, 2])} {[1, 2] -in [[1, 2]]}");
