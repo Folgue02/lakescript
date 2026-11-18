@@ -1,0 +1,8 @@
+[package]
+name = "lakescript"
+description = "The Lakescript language: lexer, parser and interpreter, as a library that other programs can embed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

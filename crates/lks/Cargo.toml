@@ -1,0 +1,9 @@
+[package]
+name = "lks"
+description = "The Lakescript interpreter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lakescript.workspace = true

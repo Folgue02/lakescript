@@ -1,12 +1,11 @@
-[package]
-name = "lakescript"
+[workspace]
+resolver = "3"
+members = ["crates/lakescript", "crates/lks", "crates/ferry"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-description = "A scripting language meant to replace bash for scripts that outgrow it"
 license = "Apache-2.0"
 
-[[bin]]
-name = "lks"
-path = "src/main.rs"
-
-[dependencies]
+[workspace.dependencies]
+lakescript = { path = "crates/lakescript" }

@@ -1,10 +1,6 @@
-mod ast;
-mod diagnostic;
-mod lexer;
-mod parser;
-mod token;
-
 use std::process::ExitCode;
+
+use lakescript::{lexer, parser};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

@@ -3,7 +3,8 @@
 Lakescript is a scripting language, meant to replace bash for scripts that outgrow it.
 
 - **Standalone scripts**: a single file with a shebang (`#!/usr/bin/lks`) that can be run directly.
-- **Projects**: bigger programs split into files, with dependencies, like with cargo or npm.
+- **Projects**: bigger programs split into files, with dependencies, like with cargo or npm. The tool for this is `ferry`, and `lks` is the interpreter.
+- **Embeddable**: other programs can run Lakescript scripts, like Lua, for plugins or configuration.
 - **Fast startup**: scripts must start and run quickly. Raw performance isn't the goal, but people don't like slow scripts, so the time between running the command and the first line running matters most.
 
 ## Decisions that follow from this
@@ -15,6 +16,7 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
 - **Lazy loading**: imports and the standard library are only loaded when they're used.
 - **Regexes are compiled on first use**, not when the script starts, since a script might never reach the line that uses them.
 - **Single-pass compiling**: functions must be defined before they're called, so the script can be compiled from top to bottom in one go.
+- **The language is a library**: the `lakescript` crate holds the lexer, parser, interpreter and standard library, and `lks` and `ferry` are programs built on it. So that any program can embed it, the library keeps no global state, never prints or exits on its own (output goes through something the host can replace, and errors are returned), never panics because of what a script does, lets the host leave out modules like `process` or `fs`, and lets the host add its own functions written in Rust.
 
 ## Notes
 
