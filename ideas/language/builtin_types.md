@@ -189,7 +189,10 @@ Indexing with a range returns a new list with that part of the list *(see [Range
 $fruits[0..2]     // ['Oranges', 'Apples']
 $fruits[1..=2]    // ['Apples', 'Tomatoes']
 $fruits[-2..=-1]  // ['Apples', 'Tomatoes'], the last two
+$fruits[0..-1]    // ['Oranges', 'Apples'], all but the last one
 ```
+
+When a range is used as an index, its ends are positions: negative ends are turned into positions first, and the slice never counts down. In `$fruits[0..-1]`, `-1` is position 2, so it's the same as `$fruits[0..2]`. If the start ends up after the end, the slice is empty. Ranges used as values still count down *(see [Ranges](#ranges))*.
 
 Elements are added at the end with `<<` *(i.e. `$fruits << 'Pears';`)*, and replaced with an index *(i.e. `$fruits[0] = 'Lemons';`)*.
 
@@ -218,7 +221,7 @@ out($scores['Daniel']);
 - `$scores['James'] = 30;` adds the key, or replaces its value if it already exists.
 - The keys keep the order in which they were added, so looping over a map or printing it gives the same order on every run. *(The Rust `indexmap` crate does this at about the same speed as a `HashMap`.)*
 - Keys can be strings, numbers or symbols. Keys are compared like `==`, so `1` and `1.0` are the same key.
-- To loop over a map, see the for loops in [language.md](language.md).
+- To loop over a map, see [flow_control.md](flow_control.md).
 
 ## Others
 
@@ -244,7 +247,7 @@ $range = 1..$a;
 
 Type: `result<T, E>`
 
-It holds either a value of type `T` or an error of type `E`. It's what `try` returns *(i.e. `try readFile($path)` returns `result<string, Exception>`, see [language.md](language.md))*.
+It holds either a value of type `T` or an error of type `E`. It's what `try` returns *(i.e. `try readFile($path)` returns `result<string, Exception>`, see [syntax.md](syntax.md))*.
 
 | Method              | Returns          | Description |
 |---------------------|------------------|-------------|
@@ -276,7 +279,7 @@ const $number = %r"^\d+$";
 
 Flags go right after the closing `"` *(i.e. `%r"hello"i`)*.
 
-Regexes are used with the `-match` operator *(see [language.md](language.md))*, which only says if the string matches. To get the matched text and the groups, use the `.match()` method on the string. It returns `null` if there is no match, or a list with the whole match first and then each group:
+Regexes are used with the `-match` operator *(see [operators.md](operators.md))*, which only says if the string matches. To get the matched text and the groups, use the `.match()` method on the string. It returns `null` if there is no match, or a list with the whole match first and then each group:
 
 ```
 const $parts = '2026-11-18'.match(%r"(\d+)-(\d+)-(\d+)");

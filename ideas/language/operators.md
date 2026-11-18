@@ -186,7 +186,7 @@ Operands: a variable declared with `let`. `$x op= $y` is the same as `$x = $x op
 
 ### Test operators
 
-Like in bash and PowerShell *(see [language.md](language.md))*. Result: `bool`.
+Like in bash and PowerShell *(see [syntax.md](syntax.md))*. Result: `bool`.
 
 | Operator | Operands               | Example                      | Checks |
 |----------|------------------------|------------------------------|--------|
@@ -198,6 +198,11 @@ Like in bash and PowerShell *(see [language.md](language.md))*. Result: `bool`.
 | `-like`  | `string`, `string`     | `$file -like '*.txt'`        | The string matches a wildcard pattern |
 | `-match` | `string`, `regex` or `string` | `$name -match %r"^\d+$"` | The string matches a regex |
 | `-in`    | any value, collection  | `'Daniel' -in $names`        | The value is in the list, is a key of the map, or is inside the range. It compares contents, like `.equals()` *(i.e. `[1, 2] -in [[1, 2]]` is `true`)* |
+| `-notlike`  | `string`, `string`  | `$file -notlike '*.txt'`     | The opposite of `-like` |
+| `-notmatch` | `string`, `regex` or `string` | `$name -notmatch %r"^\d+$"` | The opposite of `-match` |
+| `-notin`    | any value, collection | `'James' -notin $names`    | The opposite of `-in` |
+
+- `!` binds tighter than `-like`, `-match` and `-in`, so `!$file -like '*.txt'` is an error. Use `$file -notlike '*.txt'`, or parentheses: `!($file -like '*.txt')`.
 
 - The path tests (`-f`, `-d`, `-x`, `-r`, `-w`) take everything up to the comparison operators as their path, so the path can be built in place: `-f $dir + '/config.txt'` checks the joined path.
 - They can be negated with `!`: `!-f $path` is `true` when the path isn't a file. `!-f $dir + '/config.txt'` negates the check of the joined path, the same as `!(-f ($dir + '/config.txt'))`.
@@ -216,7 +221,7 @@ From highest to lowest. The Java operators keep Java's order. Operators on the s
 | 5     | `+` `-`                                     | Left          |
 | 6     | `<<` `>>` `>>>`                             | Left          |
 | 7     | `..` `..=`                                  | None          |
-| 8     | `<` `>` `<=` `>=` `-like` `-match` `-in`, and the prefix `-f` `-d` `-x` `-r` `-w` | None |
+| 8     | `<` `>` `<=` `>=` `-like` `-match` `-in` `-notlike` `-notmatch` `-notin`, and the prefix `-f` `-d` `-x` `-r` `-w` | None |
 | 9     | `==` `!=`                                   | Left          |
 | 10    | `&`                                         | Left          |
 | 11    | `^`                                         | Left          |
