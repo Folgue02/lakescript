@@ -17,8 +17,29 @@ Operands: `number`. Result: `number`.
 | `%`      | Remainder      | `5 % 2`   | `1`    |
 | `+`      | Unary plus     | `+$x`     | `$x`   |
 | `-`      | Unary minus    | `-$x`     | `-$x`  |
+| `**`     | Power          | `2 ** 10` | `1024` |
+
+- The result of `%` has the sign of the left side, like in Java: `-5 % 3` is `-2` and `5 % -3` is `2`.
+- `**` groups from the right: `2 ** 3 ** 2` is `2 ** 9`, which is `512`.
+- `**` binds tighter than a `-` on its left, like in Python: `-2 ** 2` is `-(2 ** 2)`, which is `-4`. A `-` on its right works as expected: `2 ** -1` is `0.5`.
+- Two integers give an integer, unless the exponent is negative *(i.e. `2 ** -1` is a float)*.
 
 **NOTE**: Since there is only one `number` type, `/` can't truncate like Java's integer division (`5 / 2` would be `2` in Java). Truncating division should be a method instead *(i.e. `5.div(2)` → `2`)*.
+
+#### Division by zero
+
+`/` always gives a float, so it follows Java's rules for `double`. `%` and `.div()` always throw, so the result never depends on how the number is stored *(see Number in [builtin_types.md](builtin_types.md))*:
+
+| Expression    | Result |
+|---------------|--------|
+| `1 / 0`       | `Infinity` |
+| `-1 / 0`      | `-Infinity` |
+| `0 / 0`       | `NaN` |
+| `5 % 0`       | throws an `Exception` |
+| `5.5 % 0`     | throws an `Exception` |
+| `5.div(0)`    | throws an `Exception` |
+
+- `NaN` is never equal to anything, not even to itself: `NaN == NaN` is `false`. Use `$n.nan?()` to check for it.
 
 ### Increment and decrement operators
 
@@ -55,7 +76,7 @@ Like in Java, `==` checks if both sides are the same object, except for the type
 
 | Compared by contents                                      | Compared by reference (same object) |
 |-----------------------------------------------------------|-------------------------------------|
-| `number`, `bool`, `symbol`, `null`, `string`, `range`     | lists, maps, functions              |
+| `number`, `bool`, `symbol`, `null`, `string`, `range`     | lists, maps, functions, `regex`, `result`, `Exception` |
 
 ```
 'a' + 'b' == 'ab'           // true, strings compare their contents
@@ -65,6 +86,13 @@ Like in Java, `==` checks if both sides are the same object, except for the type
 ```
 
 `!=` is always the opposite of `==`.
+
+`==` never converts types, and there is no `===`:
+
+- If the checker knows both types and they can never be equal, it's an error before the script runs *(i.e. `1 == '1'`)*.
+- If one side is `any`, values of different types are never equal, so the result is `false`.
+- To compare values of different types, convert one of them first *(i.e. `$input.toNumber() == 1`)*.
+- Integers and floats are both `number`, so `1 == 1.0` is `true`.
 
 ### Bitwise operators
 
@@ -120,6 +148,7 @@ Operands: a variable declared with `let`. `$x op= $y` is the same as `$x = $x op
 | `*=`     | `$x *= 5`    | `$x = $x * 5`    |
 | `/=`     | `$x /= 5`    | `$x = $x / 5`    |
 | `%=`     | `$x %= 5`    | `$x = $x % 5`    |
+| `**=`    | `$x **= 2`   | `$x = $x ** 2`   |
 | `&=`     | `$x &= 5`    | `$x = $x & 5`    |
 | `\|=`    | `$x \|= 5`   | `$x = $x \| 5`   |
 | `^=`     | `$x ^= 5`    | `$x = $x ^ 5`    |
@@ -139,6 +168,9 @@ Operands: a variable declared with `let`. `$x op= $y` is the same as `$x = $x op
 |----------|----------------|---------------------|-----------|
 | `?.`     | Nullable call  | `$user?.name()`     | If `$user` is `null`, the whole expression is `null` and `name()` isn't called |
 | `??`     | Coalesce       | `$nickname ?? $name`| The left side, or the right side if the left side is `null`. The right side is only evaluated when needed |
+| `?[]`    | Nullable index | `$data?['user']?['name']` | If the left side is `null`, the whole expression is `null` and the index isn't used |
+
+**NOTE**: Like with `?(` in method names, `?[` written without a space is the nullable index. The ternary operator needs a space before a list: `$ok ? ['a'] : ['b']`, not `$ok ?['a'] : ['b']`.
 
 ### Push
 
@@ -165,9 +197,10 @@ Like in bash and PowerShell *(see [language.md](language.md))*. Result: `bool`.
 | `-w`     | path (`string`)        | `-w $path`                   | The path is writable |
 | `-like`  | `string`, `string`     | `$file -like '*.txt'`        | The string matches a wildcard pattern |
 | `-match` | `string`, `regex` or `string` | `$name -match %r"^\d+$"` | The string matches a regex |
-| `-in`    | any value, collection  | `'Daniel' -in $names`        | The value is in the list, is a key of the map, or is inside the range |
+| `-in`    | any value, collection  | `'Daniel' -in $names`        | The value is in the list, is a key of the map, or is inside the range. It compares contents, like `.equals()` *(i.e. `[1, 2] -in [[1, 2]]` is `true`)* |
 
 - The path tests (`-f`, `-d`, `-x`, `-r`, `-w`) take everything up to the comparison operators as their path, so the path can be built in place: `-f $dir + '/config.txt'` checks the joined path.
+- They can be negated with `!`: `!-f $path` is `true` when the path isn't a file. `!-f $dir + '/config.txt'` negates the check of the joined path, the same as `!(-f ($dir + '/config.txt'))`.
 - **Lexer rule**: a `-` directly followed by a letter is a test operator. Subtraction of a function call needs a space: `$a - foo()`, not `$a -foo()`.
 
 ## Precedence
@@ -176,22 +209,25 @@ From highest to lowest. The Java operators keep Java's order. Operators on the s
 
 | Level | Operators                                   | Associativity |
 |-------|---------------------------------------------|---------------|
-| 1     | `.` `?.` `()` `[]` `$x++` `$x--`            | Left          |
-| 2     | `++$x` `--$x` `+$x` `-$x` `~` `!`           | Right         |
-| 3     | `*` `/` `%`                                 | Left          |
-| 4     | `+` `-`                                     | Left          |
-| 5     | `<<` `>>` `>>>`                             | Left          |
-| 6     | `..` `..=`                                  | None          |
-| 7     | `<` `>` `<=` `>=` `-like` `-match` `-in`, and the prefix `-f` `-d` `-x` `-r` `-w` | None |
-| 8     | `==` `!=`                                   | Left          |
-| 9     | `&`                                         | Left          |
-| 10    | `^`                                         | Left          |
-| 11    | `\|`                                        | Left          |
-| 12    | `&&`                                        | Left          |
-| 13    | `\|\|`                                      | Left          |
-| 14    | `??`                                        | Right         |
-| 15    | `? :`                                       | Right         |
-| 16    | `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` `>>>=` | Right |
+| 1     | `.` `?.` `()` `[]` `?[]` `$x++` `$x--`      | Left          |
+| 2     | `**`                                        | Right         |
+| 3     | `++$x` `--$x` `+$x` `-$x` `~` `!`           | Right         |
+| 4     | `*` `/` `%`                                 | Left          |
+| 5     | `+` `-`                                     | Left          |
+| 6     | `<<` `>>` `>>>`                             | Left          |
+| 7     | `..` `..=`                                  | None          |
+| 8     | `<` `>` `<=` `>=` `-like` `-match` `-in`, and the prefix `-f` `-d` `-x` `-r` `-w` | None |
+| 9     | `==` `!=`                                   | Left          |
+| 10    | `&`                                         | Left          |
+| 11    | `^`                                         | Left          |
+| 12    | `\|`                                        | Left          |
+| 13    | `&&`                                        | Left          |
+| 14    | `\|\|`                                      | Left          |
+| 15    | `??`                                        | Right         |
+| 16    | `? :`                                       | Right         |
+| 17    | `=` `+=` `-=` `*=` `/=` `%=` `**=` `&=` `\|=` `^=` `<<=` `>>=` `>>>=` | Right |
+
+- The right side of `**` can start with a unary operator *(i.e. `2 ** -1`)*.
 
 - "None" means they can't be chained: `1..5..10` and `$a < $b < $c` are errors.
 - The test operators are at the same level as `<`, so `$file -like '*.txt' && -f $file` works without parentheses.

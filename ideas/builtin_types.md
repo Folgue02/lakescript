@@ -4,15 +4,97 @@
 
 All base types can have methods called on *(i.e. `1.even?()`, `'hello world'.replaceAll('o', 'a')`, `true.toNumber()`)*
 
+### Methods on every value
+
+#### `.as(type)`
+
+Tells the checker that a value has a type, and checks it while the script runs. Useful for `any` values, like data read from a JSON file:
+
+```
+const $name = $data['name'].as(string);    // throws an Exception if it's not a string
+$data['name'].as(string).upper();          // can be chained
+
+// With `try`, to have a fallback instead of an exception
+const $name = (try $data['name'].as(string)).orElse('unknown');
+```
+
+- If the value doesn't have that type, it throws an `Exception`.
+- Inside `.as( )` there is a type, not an expression. `as` is a reserved method name, so the parser reads `string` as a type and the `<` in `.as(list<string>)` as part of the type, not as less-than.
+- `.as()` doesn't convert values: `'5'.as(number)` throws, use `'5'.toNumber()` to convert.
+- Nullable types accept `null`: `.as(?string)` works with a string or with `null`.
+- Generic types check everything inside: `.as(list<string>)` checks every element of the list, and `.as(map<string, list<number>>)` checks every key, every list and every number inside them. This takes longer the bigger the value is.
+- Function types can't be used *(i.e. `.as((string) -> bool)` is an error)*: types are removed before running, so a function doesn't know its parameter types anymore.
+- If the checker already knows the type of the value, using `.as()` with a different type is an error before the script runs *(i.e. `$name.as(number)` when `$name` is a `string`)*.
+
+#### `.is(type)`
+
+Returns `true` if the value has that type. It takes the same types as `.as()`. Inside an `if` that uses it, the checker treats the value as that type:
+
+```
+if ($value.is(string))
+    outln($value.upper());   // $value is a string here
+```
+
 ### Strings
 
 - There is no `char` type, but there is `string`.
 - Single quotes are used for normal strings: `'Hello'`.
 - Double quotes can be used for normal strings too, `"Hello"`, but they're also the only ones that can have a prefix:
-    - String interpolation, similar to python's: `f"Hello {$name}"`
+    - String interpolation, similar to python's: `f"Hello {$name}"`. It accepts any expression *(i.e. `f"{$i + 1}. {$name.upper()}"`)*. A literal `{` or `}` is written twice: `f"{{not interpolated}}"`.
     - Raw strings, with no escaping, just like in Rust: `r#"Text here"#`
     - Regexes: `%r"^\d+$"` *(see [Regex](#regex))*
+- Escape sequences work in both single and double quotes (but not in raw strings):
+
+| Escape | Meaning         |
+|--------|-----------------|
+| `\n`   | New line        |
+| `\t`   | Tab             |
+| `\r`   | Carriage return |
+| `\\`   | Backslash       |
+| `\'`   | Single quote    |
+| `\"`   | Double quote    |
+| `\0`   | Null character  |
+| `\u{1F600}` | Unicode character by its code |
+
+- Multi-line strings use triple double quotes. They can have the `f` prefix too:
+
+```
+const $help = """
+Usage: backup <folder>
+Copies the folder to the backup disk.
+""";
+
+const $report = f"""
+Name: {$name}
+Age: {$age}
+""";
+```
+- The indentation that all the lines of a multi-line string share is removed, like in Java and Kotlin, so the string can be indented along with the code. The new line right after the opening `"""` is removed too:
+
+```
+void help() {
+    outln("""
+        Usage: backup <folder>
+          --dry-run   Only show what would be copied
+        """);
+}
+// Prints:
+// Usage: backup <folder>
+//   --dry-run   Only show what would be copied
+```
 - Strings are concatenated with `+` *(i.e. `'Hello ' + $name`)*. Both sides must be strings, so `'Age: ' + 5` is an error. Use interpolation instead: `f"Age: {$age}"`.
+- Strings are made of characters (Unicode code points, like Rust's `char`):
+    - `.length()` counts characters, not bytes: `'año'.length()` is `3`.
+    - They can be indexed and sliced like lists, with negative indexes and ranges. Each element is a one-character string: `'hello'[0]` is `'h'`, `'hello'[-3..]` is `'llo'`. An index outside the string throws an `Exception`.
+    - `for ($c in $text)` loops over the characters.
+    - `<`, `>`, `<=` and `>=` compare strings alphabetically, character by character *(i.e. `'apple' < 'banana'` is `true`)*.
+- Internally, strings are stored like in Python (PEP 393): every character of a string takes the same number of bytes, chosen by the widest character in it. This is never visible to the user:
+    - 1 byte per character if every character fits in Latin-1 *(i.e. `'hello'`, `'año'`)*.
+    - 2 bytes per character if one doesn't, but all fit in 2 bytes *(i.e. `'привет'`)*.
+    - 4 bytes per character otherwise *(i.e. a string with an emoji)*.
+    
+    Since every character has the same size, `.length()` and indexing are instant for any string. The cost is converting to UTF-8 when the string is written to a file or the terminal, so the UTF-8 version is kept after the first conversion.
+- Converting a string to another type throws an `Exception` if it isn't valid *(i.e. `'abc'.toNumber()`)*. Use `try` to get a fallback: `(try $input.toNumber()).orElse(0)`.
 
 ### Number
 
@@ -23,6 +105,19 @@ All base types can have methods called on *(i.e. `1.even?()`, `'hello world'.rep
     - Any operation with a float gives a float, and `/` always gives a float.
     - Integers and floats compare as numbers, so `1 == 1.0` is `true`.
     - Bitwise operators work on any whole value *(i.e. `4.0 & 1` works, `4.5 & 1` is an error)*.
+- Literals:
+
+| Literal              | Example        | Value      |
+|----------------------|----------------|------------|
+| Decimal              | `255`          | 255        |
+| Hexadecimal          | `0xFF`         | 255        |
+| Binary               | `0b1010`       | 10         |
+| Octal                | `0o17`         | 15         |
+| With separators      | `1_000_000`    | 1000000    |
+| Decimal point        | `2.5`          | 2.5        |
+| Scientific notation  | `1e6`, `2.5e-3`| 1000000, 0.0025 |
+
+`_` can go between any two digits, in any of these forms *(i.e. `0xFF_FF`)*. Literals with a decimal point or an exponent are stored as floats.
 
 ### Bool
 
@@ -34,8 +129,8 @@ All base types can have methods called on *(i.e. `1.even?()`, `'hello world'.rep
 - A typed variable can only hold `null` if its type starts with `?`:
 
 ```
-let ?string $nickname = null;   // OK
-let string $name = null;        // Error
+?string $nickname = null;       // OK
+string $name = null;            // Error
 let $anything = null;           // OK, `any` can hold null
 ```
 
@@ -68,6 +163,12 @@ Defined just like in PHP
 let $fruits = ['Oranges', 'Apples', 'Tomatoes'];
 ```
 
+The type of the elements can be written before the `[`, which is useful for empty lists:
+```
+let $names = <string>[];          // a list<string>
+let $ages = <number>[18, 24];
+```
+
 There should also be two special ways to create arrays:
 ```
 const $words = %w[Oranges Apples Tomatoes];
@@ -90,7 +191,9 @@ $fruits[1..=2]    // ['Apples', 'Tomatoes']
 $fruits[-2..=-1]  // ['Apples', 'Tomatoes'], the last two
 ```
 
-Elements are added at the end with `<<` *(i.e. `$fruits << 'Pears';`)*.
+Elements are added at the end with `<<` *(i.e. `$fruits << 'Pears';`)*, and replaced with an index *(i.e. `$fruits[0] = 'Lemons';`)*.
+
+Using an index outside the list throws an `Exception`, both to read and to replace *(i.e. `$fruits[10]` with 3 elements)*. Use `<<` to add elements.
 
 ### Map
 
@@ -104,14 +207,17 @@ let $scores = {
 };
 
 const $empty = {};
+const $emptyScores = <string, number>{};  // a map<string, number>
 
 out($scores['Daniel']);
 ```
 
 - `{` starts a map when it's where a value is expected *(i.e. after `=`, `(`, `,` or `return`)*. At the start of a statement, it starts a block.
+- The `<...>` before a list or a map can only be where a value is expected, so it's never confused with less-than: `<` can't start an expression.
 - A missing key returns `null` *(i.e. `$scores['James']` is `null`)*.
-- The order of the keys isn't kept, and it can change every time the script runs, like Rust's `HashMap`.
-- Keys can be strings, numbers or symbols.
+- `$scores['James'] = 30;` adds the key, or replaces its value if it already exists.
+- The keys keep the order in which they were added, so looping over a map or printing it gives the same order on every run. *(The Rust `indexmap` crate does this at about the same speed as a `HashMap`.)*
+- Keys can be strings, numbers or symbols. Keys are compared like `==`, so `1` and `1.0` are the same key.
 - To loop over a map, see the for loops in [language.md](language.md).
 
 ## Others
@@ -170,4 +276,13 @@ const $number = %r"^\d+$";
 
 Flags go right after the closing `"` *(i.e. `%r"hello"i`)*.
 
-Regexes are used with the `-match` operator *(see [language.md](language.md))*.
+Regexes are used with the `-match` operator *(see [language.md](language.md))*, which only says if the string matches. To get the matched text and the groups, use the `.match()` method on the string. It returns `null` if there is no match, or a list with the whole match first and then each group:
+
+```
+const $parts = '2026-11-18'.match(%r"(\d+)-(\d+)-(\d+)");
+// ['2026-11-18', '2026', '11', '18']
+
+const $year = '2026-11-18'.match(%r"^(\d+)")?[1];   // '2026'
+```
+
+- `.match()` returns a `?list<string>`. Like `-match`, it also accepts a string as the pattern.
