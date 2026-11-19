@@ -7,6 +7,7 @@ use std::rc::Rc;
 use indexmap::IndexMap;
 
 use crate::ast::FunctionDecl;
+use crate::token::Span;
 use crate::scope::Env;
 
 #[derive(Clone)]
@@ -22,6 +23,30 @@ pub enum Value {
     Map(Rc<RefCell<IndexMap<Key, Value>>>),
     Range(Range),
     Function(Rc<Function>),
+    Regex(Rc<RegexValue>),
+    Exception(Rc<ExceptionValue>),
+    /// What `try expr` returns.
+    Result(Rc<ResultValue>),
+}
+
+pub struct ExceptionValue {
+    /// `"ValueError"`, `"FileNotFound"`...
+    pub kind: Rc<str>,
+    pub message: String,
+    /// Where it was thrown.
+    pub span: Span,
+}
+
+pub enum ResultValue {
+    Ok(Value),
+    Error(Value),
+}
+
+/// A compiled `%r"..."` regex.
+pub struct RegexValue {
+    pub pattern: String,
+    pub flags: String,
+    pub compiled: regex::Regex,
 }
 
 /// A range of whole numbers. `end` is excluded unless `inclusive`. It counts
@@ -160,6 +185,9 @@ impl Value {
             Value::Map(_) => "map",
             Value::Range(_) => "range",
             Value::Function(_) => "function",
+            Value::Regex(_) => "regex",
+            Value::Exception(_) => "exception",
+            Value::Result(_) => "result",
         }
     }
 
@@ -194,6 +222,9 @@ impl Value {
             (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
             (Value::Map(a), Value::Map(b)) => Rc::ptr_eq(a, b),
             (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b),
+            (Value::Regex(a), Value::Regex(b)) => Rc::ptr_eq(a, b),
+            (Value::Exception(a), Value::Exception(b)) => Rc::ptr_eq(a, b),
+            (Value::Result(a), Value::Result(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -296,6 +327,16 @@ impl fmt::Display for Value {
                 Ok(())
             }
             Value::Function(func) => write!(f, "<function {}>", func.name()),
+            Value::Exception(e) => write!(f, "{}: {}", e.kind, e.message),
+            Value::Result(r) => match &**r {
+                ResultValue::Ok(v) => {
+                    write!(f, "ok(")?;
+                    v.write_nested(f)?;
+                    write!(f, ")")
+                }
+                ResultValue::Error(e) => write!(f, "error({e})"),
+            },
+            Value::Regex(r) => write!(f, "%r\"{}\"{}", r.pattern.replace('"', "\\\""), r.flags),
         }
     }
 }

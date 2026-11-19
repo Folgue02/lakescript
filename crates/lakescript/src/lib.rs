@@ -9,12 +9,15 @@
 pub mod ast;
 pub mod diagnostic;
 mod engine;
+mod exceptions;
 mod interpreter;
 pub mod lexer;
 mod methods;
 pub mod parser;
+mod patterns;
 mod scope;
 pub mod token;
+mod types;
 pub mod value;
 
 pub use diagnostic::Diagnostic;

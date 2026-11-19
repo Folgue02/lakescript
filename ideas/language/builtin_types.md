@@ -261,6 +261,7 @@ It holds either a value of type `T` or an error of type `E`. It's what `try` ret
 | `map($fn)`          | `result<U, E>`   | Calls `$fn` *(a `(T) -> U`)* on the value and returns a new result with what it returns. If it holds an error, the error is kept as it is, like Java's `Optional.map()` |
 | `orNull()`          | `?T`             | The value, or `null` if it holds an error |
 | `throw()`           | `T`              | The value, or throws the error |
+| `error()`           | `?E`             | The error, or `null` if it holds a value |
 
 ```
 const $config = (try readFile('config.txt')).orElse('');

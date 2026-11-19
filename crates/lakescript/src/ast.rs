@@ -2,6 +2,7 @@
 //! `lks --ast` use: `1 + 2 * 3` is `(+ 1 (* 2 3))`.
 
 use std::fmt;
+use std::rc::Rc;
 
 use crate::token::Span;
 
@@ -67,6 +68,51 @@ pub enum ExprKind {
     /// `.as(type)` and `.is(type)`
     TypeCheck { receiver: Box<Expr>, ty: TypeExpr, check: TypeCheckKind, nullable: bool },
     Index { target: Box<Expr>, index: Box<Expr>, nullable: bool },
+    /// `($a, $b) { ... }` or `($a) = $a * 2`
+    Lambda(Rc<FunctionDecl>),
+    /// `if (...) a else b` used as a value
+    If { cond: Box<Expr>, then: Box<Branch>, otherwise: Box<Branch> },
+    /// `switch` used as a value. It always has a `default` or covers both bools.
+    Switch(Box<Switch>),
+    /// `try expr`: a `result` instead of an exception.
+    Try(Box<Expr>),
+}
+
+/// The value of an `if` or `switch` branch: an expression, or a block that
+/// gives its value with `yield`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Branch {
+    Expr(Expr),
+    Block(Vec<Stmt>, Span),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Switch {
+    pub subject: Expr,
+    pub cases: Vec<Case>,
+    pub default: Option<CaseBody>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Case {
+    pub patterns: Vec<Pattern>,
+    pub body: CaseBody,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    /// Compared with `==`, or with `-in` when it's a range.
+    Value(Expr),
+    /// Matches like `.is()`.
+    Type(TypeExpr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CaseBody {
+    /// A value, in a `switch` used as an expression.
+    Value(Branch),
+    /// A statement or block, in a `switch` statement.
+    Stmt(Box<Stmt>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +195,8 @@ pub struct Stmt {
 pub enum StmtKind {
     /// `let $x = ...`, `const $x = ...`, `string $x = ...`, `const list<any> $x = ...`
     Let { constant: bool, name: String, ty: Option<TypeExpr>, value: Expr },
+    /// `let [$first, ...$rest] = ...`
+    LetList { constant: bool, names: Vec<String>, rest: Option<String>, value: Expr },
     Function(FunctionDecl),
     /// `type Name = ...;`
     TypeAlias { name: String, ty: TypeExpr },
@@ -158,8 +206,21 @@ pub enum StmtKind {
     Break,
     Continue,
     Return(Option<Expr>),
+    /// Gives the value of the block of an `if` or `switch` expression.
+    Yield(Expr),
+    Switch(Box<Switch>),
+    Try { body: Vec<Stmt>, catches: Vec<Catch>, finally: Option<Vec<Stmt>> },
+    Throw(Expr),
     Block(Vec<Stmt>),
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Catch {
+    /// `None` for `catch ($e)`, which catches everything.
+    pub ty: Option<TypeExpr>,
+    pub name: String,
+    pub body: Vec<Stmt>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -167,7 +228,8 @@ pub struct FunctionDecl {
     pub name: String,
     pub generics: Vec<String>,
     pub params: Vec<Param>,
-    pub ret: TypeExpr,
+    /// `None` for anonymous functions, whose return type is inferred.
+    pub ret: Option<TypeExpr>,
     pub body: FunctionBody,
 }
 
@@ -194,6 +256,8 @@ pub enum ForPattern {
     Indexed { index: String, value: String },
     /// `for ($k => $v in ...)`
     KeyValue { key: String, value: String },
+    /// `for ([$name, $age] in ...)`
+    List { names: Vec<String>, rest: Option<String> },
 }
 
 // ---- Printing ----
@@ -360,6 +424,10 @@ impl fmt::Display for Expr {
                 let op = if *nullable { "?[]" } else { "[]" };
                 write!(f, "({op} {target} {index})")
             }
+            Lambda(decl) => write!(f, "(lambda ({}) {})", join(&decl.params, " "), body(&decl.body)),
+            If { cond, then, otherwise } => write!(f, "(if {cond} {then} {otherwise})"),
+            Switch(switch) => write!(f, "{switch}"),
+            Try(inner) => write!(f, "(try {inner})"),
         }
     }
 }
@@ -371,6 +439,60 @@ impl fmt::Display for Param {
         let default = self.default.as_ref().map(|d| format!(" = {d}")).unwrap_or_default();
         write!(f, "({dots}{ty}${}{default})", self.name)
     }
+}
+
+impl fmt::Display for Branch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Branch::Expr(e) => write!(f, "{e}"),
+            Branch::Block(stmts, _) => write!(f, "{}", block(stmts)),
+        }
+    }
+}
+
+impl fmt::Display for CaseBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CaseBody::Value(b) => write!(f, "{b}"),
+            CaseBody::Stmt(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl fmt::Display for Switch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(switch {}", self.subject)?;
+        for case in &self.cases {
+            let patterns: Vec<String> = case
+                .patterns
+                .iter()
+                .map(|p| match p {
+                    Pattern::Value(e) => e.to_string(),
+                    Pattern::Type(t) => format!("<{t}>"),
+                })
+                .collect();
+            write!(f, " (case {} -> {})", patterns.join(", "), case.body)?;
+        }
+        if let Some(default) = &self.default {
+            write!(f, " (default -> {default})")?;
+        }
+        write!(f, ")")
+    }
+}
+
+fn body(body: &FunctionBody) -> String {
+    match body {
+        FunctionBody::Expr(e) => format!("= {e}"),
+        FunctionBody::Block(stmts) => block(stmts),
+    }
+}
+
+fn list_pattern(names: &[String], rest: &Option<String>) -> String {
+    let mut parts: Vec<String> = names.iter().map(|n| format!("${n}")).collect();
+    if let Some(rest) = rest {
+        parts.push(format!("...${rest}"));
+    }
+    format!("[{}]", parts.join(", "))
 }
 
 fn block(stmts: &[Stmt]) -> String {
@@ -392,12 +514,27 @@ impl fmt::Display for Stmt {
             Function(decl) => {
                 let generics = if decl.generics.is_empty() { String::new() } else { format!("<{}>", decl.generics.join(", ")) };
                 let params = join(&decl.params, " ");
-                let body = match &decl.body {
-                    FunctionBody::Expr(e) => format!("= {e}"),
-                    FunctionBody::Block(stmts) => block(stmts),
-                };
-                write!(f, "(fn {} {}{generics} ({params}) {body})", decl.ret, decl.name)
+                let ret = decl.ret.as_ref().map(|r| r.to_string()).unwrap_or_default();
+                write!(f, "(fn {ret} {}{generics} ({params}) {})", decl.name, body(&decl.body))
             }
+            LetList { constant, names, rest, value } => {
+                let kw = if *constant { "const" } else { "let" };
+                write!(f, "({kw} {} {value})", list_pattern(names, rest))
+            }
+            Yield(e) => write!(f, "(yield {e})"),
+            Throw(e) => write!(f, "(throw {e})"),
+            Try { body, catches, finally } => {
+                write!(f, "(try {}", block(body))?;
+                for c in catches {
+                    let ty = c.ty.as_ref().map(|t| format!("{t} ")).unwrap_or_default();
+                    write!(f, " (catch {ty}${} {})", c.name, block(&c.body))?;
+                }
+                if let Some(fin) = finally {
+                    write!(f, " (finally {})", block(fin))?;
+                }
+                write!(f, ")")
+            }
+            Switch(switch) => write!(f, "{switch}"),
             TypeAlias { name, ty } => write!(f, "(type {name} {ty})"),
             If { cond, then, otherwise } => match otherwise {
                 Some(o) => write!(f, "(if {cond} {then} {o})"),
@@ -409,6 +546,7 @@ impl fmt::Display for Stmt {
                     ForPattern::Value(v) => format!("${v}"),
                     ForPattern::Indexed { index, value } => format!("${index}, ${value}"),
                     ForPattern::KeyValue { key, value } => format!("${key} => ${value}"),
+                    ForPattern::List { names, rest } => list_pattern(names, rest),
                 };
                 write!(f, "(for ({pattern}) {iterable} {body})")
             }

@@ -2,13 +2,14 @@
 //! embeds it.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::Write;
 use std::rc::Rc;
 
 use crate::diagnostic::Diagnostic;
 use crate::interpreter::Interpreter;
 use crate::scope::{self, Env};
-use crate::value::{Function, NativeContext, NativeFunction, Value};
+use crate::value::{Function, NativeContext, NativeFunction, RegexValue, Value};
 
 /// Runs scripts. Every engine is independent: they share nothing.
 ///
@@ -25,6 +26,7 @@ pub struct Engine {
     globals: Env,
     output: Box<dyn Write>,
     stack_budget: usize,
+    regexes: HashMap<String, Rc<RegexValue>>,
 }
 
 impl Default for Engine {
@@ -43,7 +45,7 @@ impl Engine {
     pub fn with_output(output: impl Write + 'static) -> Self {
         let builtins = scope::root_scope();
         let globals = scope::new_scope(&builtins);
-        let mut engine = Engine { builtins, globals, output: Box::new(output), stack_budget: 1024 * 1024 };
+        let mut engine = Engine { builtins, globals, output: Box::new(output), stack_budget: 1024 * 1024, regexes: HashMap::new() };
         engine.register_builtins();
         engine
     }
@@ -74,7 +76,7 @@ impl Engine {
     /// next `run` can use them.
     pub fn run(&mut self, source: &str) -> Result<(), Diagnostic> {
         let program = crate::parse(source)?;
-        let mut interpreter = Interpreter::new(&mut *self.output, self.stack_budget);
+        let mut interpreter = Interpreter::new(&mut *self.output, self.stack_budget, &mut self.regexes);
         let result = interpreter.run(&program, &self.globals);
         let _ = self.output.flush();
         result
@@ -83,6 +85,13 @@ impl Engine {
     fn register_builtins(&mut self) {
         self.register("outln", |ctx, args| print(ctx, args, "outln", true));
         self.register("out", |ctx, args| print(ctx, args, "out", false));
+        for (name, _) in crate::exceptions::TREE {
+            self.register(name, move |_, args| match args.as_slice() {
+                [] => Ok(Value::Exception(crate::exceptions::new(name, "", Default::default()))),
+                [Value::Str(message)] => Ok(Value::Exception(crate::exceptions::new(name, &**message, Default::default()))),
+                _ => Err(format!("`{name}` takes one message string")),
+            });
+        }
     }
 }
 

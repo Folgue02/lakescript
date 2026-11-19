@@ -342,6 +342,5 @@ fn host_functions() {
 
 #[test]
 fn unsupported_features_say_so() {
-    assert!(error("const $r = %r\"a\";").contains("isn't supported yet") || error("const $r = %r\"a\";").contains("aren't supported yet"));
-    assert!(error("outln(-f 'x');").contains("aren't supported yet"));
+    assert!(error("const $c = %x\"ls\";").contains("aren't supported yet"));
 }

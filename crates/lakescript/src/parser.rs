@@ -6,6 +6,8 @@
 //! lists and maps. Types are parsed and kept in the tree for the checker, but
 //! nothing uses them yet.
 
+use std::rc::Rc;
+
 use crate::ast::*;
 use crate::diagnostic::Diagnostic;
 use crate::token::{Keyword, Span, StringPart as TokenPart, Token, TokenKind};
@@ -163,11 +165,17 @@ impl Parser {
     fn statement(&mut self) -> Result<Stmt> {
         let start = self.peek().span;
         let kind = match &self.peek().kind {
+            TokenKind::Keyword(k @ (Keyword::Let | Keyword::Const)) if self.peek_at(1) == &TokenKind::LBracket => {
+                let constant = *k == Keyword::Const;
+                self.advance();
+                let (names, rest) = self.list_pattern()?;
+                self.expect(&TokenKind::Eq, "after the list of variables")?;
+                let value = self.expression()?;
+                self.expect(&TokenKind::Semicolon, "after the declaration")?;
+                StmtKind::LetList { constant, names, rest, value }
+            }
             TokenKind::Keyword(Keyword::Let) => {
                 self.advance();
-                if self.check(&TokenKind::LBracket) {
-                    return self.error_here("destructuring isn't supported yet");
-                }
                 let name = self.expect_variable("after `let`")?;
                 self.declaration_value(false, name, None)?
             }
@@ -211,7 +219,24 @@ impl Parser {
                 self.expect(&TokenKind::Semicolon, "after `continue`")?;
                 StmtKind::Continue
             }
-            TokenKind::Keyword(k @ (Keyword::Switch | Keyword::Use | Keyword::Pub | Keyword::Yield | Keyword::Try | Keyword::Catch)) => {
+            TokenKind::Keyword(Keyword::Switch) => StmtKind::Switch(Box::new(self.switch(false)?)),
+            TokenKind::Keyword(Keyword::Yield) => {
+                self.advance();
+                let value = self.expression()?;
+                self.expect(&TokenKind::Semicolon, "after `yield`")?;
+                StmtKind::Yield(value)
+            }
+            TokenKind::Keyword(Keyword::Try) if self.peek_at(1) == &TokenKind::LBrace => self.try_statement()?,
+            TokenKind::Keyword(Keyword::Throw) => {
+                self.advance();
+                let value = self.expression()?;
+                self.expect(&TokenKind::Semicolon, "after `throw`")?;
+                StmtKind::Throw(value)
+            }
+            TokenKind::Keyword(k @ (Keyword::Catch | Keyword::Finally)) => {
+                return self.error_here(format!("`{}` must come after a `try` block", k.as_str()));
+            }
+            TokenKind::Keyword(k @ (Keyword::Use | Keyword::Pub)) => {
                 return self.error_here(format!("`{}` isn't supported yet", k.as_str()));
             }
             TokenKind::Keyword(k @ (Keyword::Else | Keyword::In | Keyword::Case | Keyword::Default)) => {
@@ -276,6 +301,22 @@ impl Parser {
             self.expect_closing_angle("after the type parameters")?;
         }
 
+        let params = self.params()?;
+
+        let body = if self.eat(&TokenKind::Eq) {
+            let expr = self.expression()?;
+            self.expect(&TokenKind::Semicolon, "after the function")?;
+            FunctionBody::Expr(expr)
+        } else if self.check(&TokenKind::LBrace) {
+            FunctionBody::Block(self.block()?)
+        } else {
+            return self.error_here(format!("expected `{{` or `=` for the body of `{name}`, found {}", self.peek().kind));
+        };
+        Ok(FunctionDecl { name, generics, params, ret: Some(ret), body })
+    }
+
+    /// `(...)` with the parameters of a function.
+    fn params(&mut self) -> Result<Vec<Param>> {
         self.expect(&TokenKind::LParen, "before the parameters")?;
         let mut params: Vec<Param> = Vec::new();
         while !self.check(&TokenKind::RParen) {
@@ -288,17 +329,30 @@ impl Parser {
             }
         }
         self.expect(&TokenKind::RParen, "after the parameters")?;
+        Ok(params)
+    }
 
-        let body = if self.eat(&TokenKind::Eq) {
-            let expr = self.expression()?;
-            self.expect(&TokenKind::Semicolon, "after the function")?;
-            FunctionBody::Expr(expr)
-        } else if self.check(&TokenKind::LBrace) {
-            FunctionBody::Block(self.block()?)
-        } else {
-            return self.error_here(format!("expected `{{` or `=` for the body of `{name}`, found {}", self.peek().kind));
-        };
-        Ok(FunctionDecl { name, generics, params, ret, body })
+    /// `[$a, $b, ...$rest]`
+    fn list_pattern(&mut self) -> Result<(Vec<String>, Option<String>)> {
+        self.expect(&TokenKind::LBracket, "to start the list of variables")?;
+        let mut names = Vec::new();
+        let mut rest = None;
+        while !self.check(&TokenKind::RBracket) {
+            if self.eat(&TokenKind::Ellipsis) {
+                rest = Some(self.expect_variable("after `...`")?);
+                self.eat(&TokenKind::Comma);
+                if !self.check(&TokenKind::RBracket) {
+                    return self.error_here("`...$rest` can only be the last one");
+                }
+                break;
+            }
+            names.push(self.expect_variable("in the list of variables")?);
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::RBracket, "to close the list of variables")?;
+        Ok((names, rest))
     }
 
     fn param(&mut self) -> Result<Param> {
@@ -329,6 +383,25 @@ impl Parser {
         Ok(stmts)
     }
 
+    fn try_statement(&mut self) -> Result<StmtKind> {
+        let start = self.peek().span;
+        self.advance();
+        let body = self.block()?;
+        let mut catches = Vec::new();
+        while self.eat(&TokenKind::Keyword(Keyword::Catch)) {
+            self.expect(&TokenKind::LParen, "after `catch`")?;
+            let ty = if matches!(self.peek().kind, TokenKind::Variable(_)) { None } else { Some(self.parse_type()?) };
+            let name = self.expect_variable("for the exception")?;
+            self.expect(&TokenKind::RParen, "after the exception")?;
+            catches.push(Catch { ty, name, body: self.block()? });
+        }
+        let finally = if self.eat(&TokenKind::Keyword(Keyword::Finally)) { Some(self.block()?) } else { None };
+        if catches.is_empty() && finally.is_none() {
+            return Err(Diagnostic::new("a `try` block needs a `catch` or a `finally`", self.span_from(start)));
+        }
+        Ok(StmtKind::Try { body, catches, finally })
+    }
+
     fn if_statement(&mut self) -> Result<StmtKind> {
         self.advance();
         self.expect(&TokenKind::LParen, "after `if`")?;
@@ -343,7 +416,12 @@ impl Parser {
         self.advance();
         self.expect(&TokenKind::LParen, "after `for`")?;
         if self.check(&TokenKind::LBracket) {
-            return self.error_here("destructuring isn't supported yet");
+            let (names, rest) = self.list_pattern()?;
+            self.expect(&TokenKind::Keyword(Keyword::In), "in the `for`")?;
+            let iterable = self.expression()?;
+            self.expect(&TokenKind::RParen, "after the `for`")?;
+            let body = Box::new(self.statement()?);
+            return Ok(StmtKind::For { pattern: ForPattern::List { names, rest }, iterable, body });
         }
         let first = self.expect_variable("in the `for`")?;
         let pattern = if self.eat(&TokenKind::Comma) {
@@ -687,7 +765,14 @@ impl Parser {
 
     /// After `.` or `?.`: a method call, `.as(type)` or `.is(type)`.
     fn method(&mut self, receiver: Expr, nullable: bool) -> Result<ExprKind> {
-        let name = self.expect_ident("after `.`")?;
+        // Reserved words can be method names *(i.e. `$result.throw()`)*
+        let name = match self.peek().kind.clone() {
+            TokenKind::Keyword(k) => {
+                self.advance();
+                k.as_str().to_string()
+            }
+            _ => self.expect_ident("after `.`")?,
+        };
         if !self.check(&TokenKind::LParen) {
             return self.error_here(format!("methods are always called with parentheses: `.{name}()`"));
         }
@@ -792,6 +877,16 @@ impl Parser {
                 }
                 ExprKind::Function(name)
             }
+            TokenKind::LParen if self.lambda_ahead() => {
+                let params = self.params()?;
+                let body = if self.eat(&TokenKind::Eq) {
+                    FunctionBody::Expr(self.expression()?)
+                } else {
+                    FunctionBody::Block(self.block()?)
+                };
+                let decl = FunctionDecl { name: "anonymous".into(), generics: Vec::new(), params, ret: None, body };
+                ExprKind::Lambda(Rc::new(decl))
+            }
             TokenKind::LParen => {
                 self.advance();
                 let inner = self.expression()?;
@@ -807,12 +902,135 @@ impl Parser {
                 ExprKind::Map { types: None, entries: self.map_entries()? }
             }
             TokenKind::Lt => self.typed_collection()?,
-            TokenKind::Keyword(k @ (Keyword::If | Keyword::Switch | Keyword::Try)) => {
-                return self.error_here(format!("`{}` as an expression isn't supported yet", k.as_str()));
+            TokenKind::Keyword(Keyword::If) => self.if_expression()?,
+            TokenKind::Keyword(Keyword::Switch) => ExprKind::Switch(Box::new(self.switch(true)?)),
+            TokenKind::Keyword(Keyword::Try) => {
+                self.advance();
+                // `try` applies to the whole expression after it
+                ExprKind::Try(Box::new(self.expression()?))
             }
             other => return self.error_here(format!("expected an expression, found {other}")),
         };
         Ok(Expr { kind, span: self.span_from(start) })
+    }
+
+    /// `(...)` followed by `{` or `=` is an anonymous function.
+    fn lambda_ahead(&self) -> bool {
+        let mut depth = 0usize;
+        for (i, token) in self.tokens.iter().enumerate().skip(self.pos) {
+            match token.kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::QuestionBracket => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth -= 1;
+                    if depth == 0 {
+                        let next = self.tokens.get(i + 1).map(|t| &t.kind);
+                        return matches!(next, Some(TokenKind::LBrace | TokenKind::Eq));
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// `if (cond) a else b` used as a value. The `else` is required.
+    fn if_expression(&mut self) -> Result<ExprKind> {
+        self.advance();
+        self.expect(&TokenKind::LParen, "after `if`")?;
+        let cond = self.expression()?;
+        self.expect(&TokenKind::RParen, "after the condition")?;
+        let then = self.branch()?;
+        if !self.eat(&TokenKind::Keyword(Keyword::Else)) {
+            return self.error_here("an `if` used as a value needs an `else`, so it always has a value");
+        }
+        let otherwise = self.branch()?;
+        Ok(ExprKind::If { cond: Box::new(cond), then: Box::new(then), otherwise: Box::new(otherwise) })
+    }
+
+    fn branch(&mut self) -> Result<Branch> {
+        if self.check(&TokenKind::LBrace) {
+            let start = self.peek().span;
+            let stmts = self.block()?;
+            return Ok(Branch::Block(stmts, self.span_from(start)));
+        }
+        Ok(Branch::Expr(self.expression()?))
+    }
+
+    /// `switch (...) { case ... -> ... default -> ... }`. As a value, every
+    /// body gives a value, and it needs a `default`.
+    fn switch(&mut self, as_value: bool) -> Result<Switch> {
+        let start = self.peek().span;
+        self.advance();
+        self.expect(&TokenKind::LParen, "after `switch`")?;
+        let subject = self.expression()?;
+        self.expect(&TokenKind::RParen, "after the value of the `switch`")?;
+        self.expect(&TokenKind::LBrace, "to start the cases")?;
+        let mut cases = Vec::new();
+        let mut default = None;
+        loop {
+            match self.peek().kind {
+                TokenKind::RBrace => {
+                    self.advance();
+                    break;
+                }
+                TokenKind::Keyword(Keyword::Case) => {
+                    self.advance();
+                    let mut patterns = vec![self.pattern()?];
+                    while self.eat(&TokenKind::Comma) {
+                        patterns.push(self.pattern()?);
+                    }
+                    self.expect(&TokenKind::Arrow, "after the case")?;
+                    let body = self.case_body(as_value)?;
+                    cases.push(Case { patterns, body });
+                }
+                TokenKind::Keyword(Keyword::Default) => {
+                    if default.is_some() {
+                        return self.error_here("a `switch` can only have one `default`");
+                    }
+                    self.advance();
+                    self.expect(&TokenKind::Arrow, "after `default`")?;
+                    default = Some(self.case_body(as_value)?);
+                }
+                _ => return self.error_here(format!("expected `case`, `default` or `}}`, found {}", self.peek().kind)),
+            }
+        }
+        if as_value && default.is_none() && !covers_both_bools(&cases) {
+            return Err(Diagnostic::new(
+                "a `switch` used as a value must match every value: add a `default`",
+                self.span_from(start),
+            ));
+        }
+        Ok(Switch { subject, cases, default })
+    }
+
+    /// A case value, or a type *(i.e. `case string ->`)*. A name without `$`
+    /// followed by `,` or `->` is a type.
+    fn pattern(&mut self) -> Result<Pattern> {
+        if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Question) {
+            let checkpoint = self.checkpoint();
+            if let Ok(ty) = self.parse_type() {
+                if matches!(self.peek().kind, TokenKind::Comma | TokenKind::Arrow) {
+                    if matches!(ty.kind, TypeKind::Function { .. }) {
+                        return Err(Diagnostic::new("function types can't be used in a `case`", ty.span));
+                    }
+                    return Ok(Pattern::Type(ty));
+                }
+            }
+            self.restore(checkpoint);
+        }
+        Ok(Pattern::Value(self.expression()?))
+    }
+
+    fn case_body(&mut self, as_value: bool) -> Result<CaseBody> {
+        if as_value {
+            let branch = self.branch()?;
+            if matches!(branch, Branch::Expr(_)) {
+                self.expect(&TokenKind::Semicolon, "after the value of the case")?;
+            }
+            return Ok(CaseBody::Value(branch));
+        }
+        Ok(CaseBody::Stmt(Box::new(self.statement()?)))
     }
 
     /// The elements after `[`, up to and including `]`.
@@ -886,6 +1104,13 @@ fn string_parts(parts: Vec<TokenPart>) -> Result<Vec<StringPart>> {
         .collect()
 }
 
+fn covers_both_bools(cases: &[Case]) -> bool {
+    let has = |b: bool| {
+        cases.iter().any(|c| c.patterns.iter().any(|p| matches!(p, Pattern::Value(Expr { kind: ExprKind::Bool(v), .. }) if *v == b)))
+    };
+    has(true) && has(false)
+}
+
 fn is_assignable(expr: &Expr) -> bool {
     matches!(expr.kind, ExprKind::Variable(_) | ExprKind::Index { nullable: false, .. })
 }
@@ -926,7 +1151,7 @@ fn can_start_expression(kind: &TokenKind) -> bool {
         Int(_) | Float(_) | Str(_) | FStr(_) | Regex { .. } | Command(_) | WordList(_) | SymbolList(_) | Symbol(_)
         | Variable(_) | Ident(_) | LParen | LBracket | LBrace | Lt | Minus | Plus | Bang | Tilde | PlusPlus
         | MinusMinus => true,
-        Keyword(k) => matches!(k, self::Keyword::True | self::Keyword::False | self::Keyword::Null),
+        Keyword(k) => matches!(k, self::Keyword::True | self::Keyword::False | self::Keyword::Null | self::Keyword::If | self::Keyword::Switch | self::Keyword::Try),
         TestOp(name) => path_test_op(name).is_some(),
         _ => false,
     }
