@@ -1,0 +1,60 @@
+#!/usr/bin/lks
+// Lists and maps.
+
+const $files = %w[notes.txt app.log photo.jpg todo.txt error.log];
+
+// Transforming and searching
+outln($files.filter(($f) = $f -like '*.txt'));
+outln($files.map(($f) = $f.afterLast('.')).unique());
+outln($files.find(($f) = $f.startsWith('e')));
+outln($files.any(($f) = $f.endsWith('.jpg')));
+
+// Grouping
+outln($files.groupBy(($f) = $f.afterLast('.')));
+outln($files.countBy(($f) = $f.afterLast('.')));
+let [$texts, $others] = $files.partition(($f) = $f -like '*.txt');
+outln(f"{$texts.length()} texts, {$others.length()} others");
+
+// Sorting: verbs change the list, past participles return a copy
+let $numbers = [5, 3, 9, 1];
+const $sorted = $numbers.sorted();
+outln(f"{$numbers} stays, {$sorted} is sorted");
+$numbers.sort().reverse();
+outln($numbers);
+outln($files.sortedBy(($f) = $f.length()));
+
+// Combining
+outln([1, 2, 3, 4].sum());
+outln([1, 2, 3, 4].fold(1, ($acc, $n) = $acc * $n));
+outln([3, 8, 2].max());
+outln($files.maxBy(($f) = $f.length()));
+outln([[1, 2], [3]].flatten());
+outln([1, 2, 3, 4, 5].chunk(2));
+
+// Changing a list
+let $queue = ['b'];
+$queue << 'c';
+$queue.prepend('a');
+outln($queue);
+outln(f"took {$queue.removeFirst()}, left {$queue}");
+
+// Maps keep the order keys were added in
+let $stock = {'apples' => 3, 'pears' => 0};
+$stock['plums'] = 7;
+outln($stock);
+outln($stock['bananas'] ?? 'none');
+
+// Counting and grouping into a map
+let $counts = <string, number>{};
+for ($word in %w[a b a c a])
+    $counts.update($word, 0, ($n) = $n + 1);
+outln($counts);
+
+let $byLength = <number, list<string>>{};
+for ($word in %w[hi hello hey howdy])
+    $byLength.getOrSet($word.length(), []) << $word;
+outln($byLength);
+
+outln($stock.filter(($k, $v) = $v > 0).keys());
+outln($stock.sortedBy(($k, $v) = -$v));
+outln({'port' => 80}.merged({'port' => 8080, 'host' => 'localhost'}));

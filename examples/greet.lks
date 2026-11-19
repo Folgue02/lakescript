@@ -1,0 +1,24 @@
+#!/usr/bin/lks
+// Arguments, stderr and exit codes.
+//
+//   lks examples/greet.lks Ana Bo
+//   lks examples/greet.lks          (prints the usage and exits with code 2)
+
+use std/process;
+use std/env;
+
+const $names = process::args();
+
+if ($names.empty?()) {
+    errln('usage: greet.lks <name>...');
+    exit(2);
+}
+
+const $greeting = env::get('GREETING') ?? 'Hello';
+for ($name in $names)
+    outln(f"{$greeting}, {$name.capitalize()}!");
+
+if ($names.any(($n) = $n.blank?())) {
+    errln('one of the names is empty');
+    exit(1);
+}

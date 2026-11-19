@@ -1,0 +1,34 @@
+#!/usr/bin/lks
+// Regexes, wildcards and path tests.
+
+// -like uses wildcards: *, ? and [abc]
+for ($file in %w[notes.txt data1.csv data22.csv image.png])
+    if ($file -like 'data?.csv' || $file -like '*.txt')
+        outln(f"{$file} matches");
+
+// -match uses regexes, written %r"..." with flags after it
+const $versions = ['v1.2.3', 'version 2', 'V10.0.1'];
+for ($v in $versions)
+    outln(f"{$v}: {$v -match %r"^v\d+\.\d+\.\d+$"i}");
+
+// .match() gives the whole match and the groups
+const $parts = 'release-2026-11-19'.match(%r"(\d{4})-(\d{2})-(\d{2})");
+outln($parts);
+const [$whole, $year, $month, $day] = $parts;
+outln(f"Year {$year}, month {$month}, day {$day}");
+
+// Every match, and replacing with groups
+outln('a1 b22 c333'.matchAll(%r"([a-z])(\d+)").map(($m) = $m[2].length()));
+outln('Smith, John'.replace(%r"(\w+), (\w+)", '$2 $1'));
+outln('too    many   spaces'.replace(%r"\s+", ' '));
+outln('a;b, c'.split(%r"[;,]\s*"));
+
+// A string can be used as a pattern too
+const $userPattern = '^[a-z]+$';
+outln('hello' -match $userPattern);
+
+// Path tests: -f, -d, -x, -r and -w
+outln(-d '/');
+outln(-f '/surely/not/here.txt');
+if (!-f '/surely/not/here.txt')
+    outln('No such file');

@@ -1,0 +1,23 @@
+#!/usr/bin/lks
+// Modules: `use` finds files next to the script, and `pub` decides what they share.
+//
+//   lks examples/modules/main.lks
+
+use std/path;                          // the standard library
+use math;                              // math.lks, next to this script
+use math::{clamp, $golden as $phi};    // some names, without the prefix
+use text/format as fmt;                // text/format.lks, with another name
+
+outln(math::average([2, 4, 9]));
+outln(clamp(150, 0, 100));
+outln($phi.round(3));
+outln(fmt::title('the module system'));
+outln(fmt::table({'name' => 'lakescript', 'kind' => 'scripting language'}));
+outln(path::name(fmt::$source));
+
+// Only `pub` names can be used from outside
+try {
+    outln(math::helper());
+} catch ($e) {
+    outln($e.message());
+}

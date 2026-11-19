@@ -1,0 +1,28 @@
+#!/usr/bin/lks
+// Counts the words of what's piped in, and lists the most common ones.
+//
+//   cat ideas/README.md | lks examples/wordcount.lks
+//   lks examples/wordcount.lks 3        (shows 3 words; uses a sample text if nothing is piped)
+
+use std/io;
+use std/process;
+
+const $args = process::args();
+const $top = if ($args.empty?()) 5 else $args[0].toNumber();
+
+const $text = if (io::piped?()) io::readAll() else 'the cat and the dog and the bird and a cat';
+
+const $words = $text.lower()
+    .split(%r"[^a-z']+")
+    .reject(($w) = $w.empty?());
+
+outln(f"{$words.length()} words, {$words.unique().length()} different");
+
+const $counts = $words.countBy(($w) = $w).sortedBy(($word, $n) = -$n);
+
+let $shown = 0;
+for ($word => $n in $counts) {
+    if ($shown == $top) break;
+    outln(f"{$n.toString().padStart(5)}  {$word}");
+    $shown++;
+}

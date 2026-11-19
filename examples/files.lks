@@ -1,0 +1,57 @@
+#!/usr/bin/lks
+// Files, folders and paths, in a temporary folder that's removed at the end.
+
+use std/fs;
+use std/path;
+use std/process;
+
+const $root = fs::tempDir();
+process::chdir($root);
+outln(f"Working in {path::name($root)}");
+
+// Writing and reading
+fs::makeDir('project/src/util');
+fs::write('project/README.md', "# Project\n");
+fs::writeLines('project/src/main.lks', ["outln('hi');"]);
+fs::write('project/src/util/text.lks', "pub string shout(string $s) = $s.upper();\n");
+fs::append('project/README.md', "Some notes.\n");
+outln(fs::readLines('project/README.md'));
+
+// Listing
+outln(fs::list('project'));
+outln(fs::walk('project'));
+outln(fs::glob('project/**/*.lks'));
+
+// Information
+for ($file in fs::walk('project'))
+    outln(f"{$file.padEnd(28)} {fs::size($file).formatBytes()}");
+outln(-d 'project/src' && fs::dir?('project/src'));
+
+// Paths are strings
+const $main = 'project/src/main.lks';
+outln(path::name($main));
+outln(path::stem($main));
+outln(path::extension($main));
+outln(path::parent($main));
+outln(path::withExtension($main, 'bak'));
+outln(path::join('project', 'src', '..', 'README.md'));
+outln(path::normalize(path::join('project', 'src', '..', 'README.md')));
+outln(path::relative(path::absolute($main), $root));
+
+// Copying, moving and removing
+fs::copy('project', 'copy');
+fs::move('copy/README.md', 'copy/NOTES.md');
+outln(fs::list('copy'));
+fs::remove('copy/NOTES.md');
+fs::removeAll('copy');
+outln(fs::exists?('copy'));
+
+// Errors have types
+try {
+    fs::read('missing.txt');
+} catch (FileNotFound $e) {
+    outln($e.message());
+}
+
+fs::removeAll($root);
+outln(f"Cleaned up: {!fs::exists?($root)}");

@@ -30,7 +30,8 @@ pub fn register(m: &mut Exports) {
             let kind = if target.exists() { "IOError" } else { "FileNotFound" };
             return Err(NativeError::new(kind, format!("can't change to '{path}': it isn't a folder")));
         }
-        ctx.state.cwd = target.canonicalize().unwrap_or(target);
+        // Normalized but not resolved, so paths built from the name the script used still match
+        ctx.state.cwd = PathBuf::from(super::path::normalize(&target.display().to_string()));
         Ok(Value::Null)
     });
     m.function("pid", |_, values| {

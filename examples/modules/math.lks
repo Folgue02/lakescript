@@ -1,0 +1,10 @@
+// Imported modules only have declarations: functions, `const` and `type`.
+
+pub const $golden = (1 + 5 ** 0.5) / 2;
+
+pub number average(list<number> $values) = $values.sum() / $values.length();
+
+pub number clamp(number $n, number $low, number $high) = $n.clamp($low, $high);
+
+// Not `pub`: only this file can use it
+number helper() = 42;

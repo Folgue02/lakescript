@@ -1,0 +1,68 @@
+#!/usr/bin/lks
+// if, switch, yield, loops and destructuring.
+
+// `if` and `switch` can be values
+const $count = 3;
+outln(f"{$count} {if ($count == 1) 'item' else 'items'}");
+
+string stage(number $age) = switch ($age) {
+    case 0..13 -> 'child';
+    case 13..18 -> 'teenager';
+    default -> 'adult';
+};
+outln([5, 15, 40].map(stage));
+
+// A block gives its value with `yield`
+const $bytes = 2_500_000;
+const $size = if ($bytes > 1_000_000) {
+    const $mb = $bytes / 1_000_000;
+    yield f"{$mb} MB";
+} else 'small';
+outln($size);
+
+// Cases can be several values, ranges or types
+void show(any $value) {
+    switch ($value) {
+        case :admin, :editor -> outln('a role');
+        case 1..10 -> outln('a small number');
+        case string -> outln(f"the string {$value.upper()}");
+        case list<number> -> outln(f"{$value.length()} numbers");
+        default -> outln('something else');
+    }
+}
+for ($v in [:admin, 7, 'hi', [1, 2, 3], true])
+    show($v);
+
+// Loops: ranges, lists with their index, maps, and strings
+for ($i in (10..=0).step(5))
+    out(f"{$i} ");
+outln();
+
+for ($i, $fruit in %w[apple banana])
+    outln(f"{$i}: {$fruit}");
+
+const $scores = {'Ana' => 9, 'Bo' => 7};
+for ($name => $score in $scores)
+    outln(f"{$name} scored {$score}");
+
+let $vowels = 0;
+for ($c in 'Lakescript')
+    if ($c -in %w[a e i o u]) $vowels++;
+outln(f"{$vowels} vowels");
+
+// Destructuring
+let [$first, ...$rest] = [1, 2, 3, 4];
+outln(f"{$first} then {$rest}");
+
+for ([$name, $age] in [['Ana', 30], ['Bo', 25]])
+    outln(f"{$name} is {$age}");
+
+// while, break and continue
+let $n = 0;
+while (true) {
+    $n++;
+    if ($n % 2 == 0) continue;
+    if ($n > 7) break;
+    out($n);
+}
+outln();

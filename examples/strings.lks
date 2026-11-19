@@ -1,0 +1,53 @@
+#!/usr/bin/lks
+// Strings: literals, interpolation and methods.
+
+const $name = 'Lakescript';
+
+// Single quotes, double quotes, f-strings, raw strings
+outln('It\'s plain');
+outln(f"{$name} has {$name.length()} letters, the first is {$name[0]}");
+outln(f"{{braces}} are written twice");
+outln(r#"C:\no\escapes "here""#);
+
+// Multi-line strings lose the indentation they share
+void help() {
+    out("""
+        Usage: tool <file>
+          --verbose   Say more
+        """);
+}
+help();
+
+// Slicing with ranges, negative indexes count from the end
+outln($name[0..4] + ' / ' + $name[-6..]);
+
+// Searching
+const $path = '/home/me/notes.backup.txt';
+outln($path.afterLast('/'));
+outln($path.beforeLast('.'));
+outln($path.indexOf('/me'));
+outln('key=value=more'.splitOnce('='));
+
+// Case
+const $label = 'user account name';
+outln([$label.camelCase(), $label.snakeCase(), $label.kebabCase(), $label.capitalizeWords()]);
+
+// Trimming, padding and changing
+outln('  hi  '.trim() + '|');
+outln('7'.padStart(3, '0'));
+outln('report'.center(12, '*'));
+outln('a very long sentence'.truncate(10));
+outln('web.log'.removeSuffix('.log'));
+outln('a-b-c'.replace('-', ' + '));
+
+// Splitting and joining
+const $csv = 'ana,bo,,cy';
+outln($csv.split(','));
+outln('one two   three'.words());
+outln("a\nb\n".lines());
+
+// Converting
+outln('42'.toNumber() + 1);
+outln((try 'abc'.toNumber()).orElse(0));
+outln(1234567.withSeparators());
+outln(3_500_000.formatBytes());

@@ -1,0 +1,50 @@
+#!/usr/bin/lks
+// Exceptions, try/catch/finally, and `try` that returns a result.
+
+number parsePort(string $text) {
+    const $port = $text.toNumber();       // throws a ValueError if it isn't a number
+    if (!$port.between(1, 65535))
+        throw ValueError(f"{$port} isn't a valid port");
+    return $port;
+}
+
+for ($input in ['8080', 'eighty', '99999']) {
+    try {
+        outln(f"Port {parsePort($input)}");
+    } catch (ValueError $e) {
+        outln(f"Bad port '{$input}': {$e.message()}");
+    } finally {
+        outln('  (checked)');
+    }
+}
+
+// A type catches the exceptions under it
+try {
+    throw FileNotFound('config.txt');
+} catch (IOError $e) {
+    outln(f"{$e.typeName()} is an IOError: {$e.is(IOError)}");
+}
+
+// Every runtime error has a type
+const $attempts = [
+    () = [1, 2][5],
+    () = 10 % 0,
+    () = 'a' + 1,
+    () = {'a' => 1}['a'].as(string),
+];
+for ($attempt in $attempts) {
+    try {
+        $attempt();
+    } catch ($e) {
+        outln($e.typeName());
+    }
+}
+
+// `try` as an expression gives a result instead of throwing
+const $ok = try parsePort('443');
+const $bad = try parsePort('nope');
+outln($ok);
+outln($bad.isError());
+outln($bad.orElse(80));
+outln($ok.map(($p) = $p + 1).orNull());
+outln((try parsePort('22')).orElse(80));

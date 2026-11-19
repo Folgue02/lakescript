@@ -1,0 +1,44 @@
+#!/usr/bin/lks
+// Running commands.
+
+use std/process;
+
+// %x"..." is a command; it runs when a method is called
+const $kernel = %x"uname -s".output();
+outln(f"Running on {$kernel}");
+
+// Values are always quoted, so they're one argument and never run as code
+const $tricky = 'a file; echo hacked';
+outln(%x"printf '<%s>' {$tricky}".output());
+
+// A list becomes several arguments
+const $words = ['one', 'two words', 'three'];
+outln(%x"printf '[%s]' {$words}".output());
+
+// Pipes and redirects work, it runs through the shell
+outln(%x"printf 'b\na\nc\n' | sort".lines());
+
+// Setting up a command before running it
+outln(%x"tr a-z A-Z".input('quiet please').output());
+outln(%x"echo $MOOD".env('MOOD', 'happy').output());
+outln(%x"pwd".cwd('/').output());
+
+// Exit codes
+outln(%x"exit 3".status());
+outln(%x"command -v sh".succeeds?());
+
+// A failing command throws a CommandFailed
+try {
+    %x"exit 5".run();
+} catch (CommandFailed $e) {
+    outln($e.message());
+}
+outln((try %x"git describe --tags".quiet().output()).orElse('no tags here'));
+
+// Without a shell, every argument is passed as it is
+outln(process::command('echo', '$HOME', '*').output());
+if (process::which('git') != null)
+    outln('git is installed');
+
+// run() sends the output straight to the terminal
+%x"echo 'Printed by the command itself'".run();

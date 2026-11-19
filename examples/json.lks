@@ -1,0 +1,43 @@
+#!/usr/bin/lks
+// Reading and writing JSON.
+
+use std/json;
+use std/fs;
+
+const $text = """
+    {
+      "name": "lakescript",
+      "version": "0.1.0",
+      "authors": ["folgue02"],
+      "settings": {"indent": 4, "strict": true, "theme": null}
+    }
+    """;
+
+// Without a schema, the result is `any`: use .as() to get typed values
+const $data = json::parse($text);
+const $name = $data['name'].as(string);
+const $authors = $data['authors'].as(list<string>);
+const $indent = $data['settings']['indent'].as(number);
+outln(f"{$name} by {$authors.join(', ')}, indent {$indent}");
+outln($data['settings']['theme'] ?? 'default theme');
+
+// Writing: compact or indented
+outln(json::stringify({'ok' => true, 'items' => [1, 2, 3]}));
+outln(json::stringify({'ok' => true, 'items' => [1, 2, 3]}, indent: 2));
+
+// Symbols become strings, and so do number keys
+outln(json::stringify({:status => :active, 404 => 'not found'}));
+
+// Files: json::write indents by default
+const $path = fs::tempFile('.json');
+json::write($path, {'port' => 8080, 'hosts' => ['a', 'b']});
+outln(fs::read($path).trim());
+outln(json::read($path)['hosts']);
+fs::remove($path);
+
+// Invalid JSON says where
+try {
+    json::parse('{"a": 1,}');
+} catch (ValueError $e) {
+    outln($e.message());
+}
