@@ -19,7 +19,7 @@ fn eval(expr: &str) -> String {
 fn error(source: &str) -> String {
     let mut engine = Engine::with_output(CapturedOutput::new());
     match engine.run(source) {
-        Ok(()) => panic!("expected an error:\n{source}"),
+        Ok(_) => panic!("expected an error:\n{source}"),
         Err(e) => e.render("test.lks"),
     }
 }
@@ -338,9 +338,4 @@ fn host_functions() {
     assert_eq!(output.text(), "42\n");
     let err = engine.run("double('x');").unwrap_err();
     assert_eq!(err.message, "double takes a whole number");
-}
-
-#[test]
-fn unsupported_features_say_so() {
-    assert!(error("const $c = %x\"ls\";").contains("aren't supported yet"));
 }

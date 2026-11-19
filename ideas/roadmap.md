@@ -15,6 +15,13 @@ The first versions are a **tree-walking interpreter**: the script is parsed into
 | **7. OOP** | Classes | Classes, enums, custom exceptions as classes, `command` and `subcommand` for command-line arguments |
 | **Later** | | The rest of the standard library, formatter, language server, concurrency |
 
+## Status
+
+- Phases 1, 2 and 3 are done, except `random()` and `shuffle()`, and commands written with `%x"..."` on Windows.
+- `examples/backup/backup.lks` is the phase 3 milestone: a real backup script with a module next to it, a JSON config, commands and files.
+
+## Notes
+
 - Exceptions come in phase 2 as a fixed tree of built-in types, without OOP. In phase 7 they become classes, without breaking the code written before.
 - OOP comes after the type checker, since classes change how types work (fields, methods, inheritance).
 - Phase 3 is the first milestone: Lakescript can replace a real bash script.

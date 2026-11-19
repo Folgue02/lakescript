@@ -11,7 +11,13 @@ use crate::diagnostic::Diagnostic;
 use crate::token::{Keyword, Span, StringPart, TEST_OPERATORS, Token, TokenKind};
 
 pub fn tokenize(source: &str) -> Result<Vec<Token>, Diagnostic> {
+    tokenize_file(source, 0)
+}
+
+/// Like `tokenize`, marking every span with the number of the file.
+pub fn tokenize_file(source: &str, file: u32) -> Result<Vec<Token>, Diagnostic> {
     let mut lexer = Lexer::new(source);
+    lexer.file = file;
     lexer.skip_shebang();
     let mut tokens = Vec::new();
     loop {
@@ -47,6 +53,7 @@ enum Escapes {
 }
 
 struct Lexer {
+    file: u32,
     chars: Vec<char>,
     pos: usize,
     line: u32,
@@ -55,7 +62,7 @@ struct Lexer {
 
 impl Lexer {
     fn new(source: &str) -> Self {
-        Lexer { chars: source.chars().collect(), pos: 0, line: 1, column: 1 }
+        Lexer { chars: source.chars().collect(), pos: 0, line: 1, column: 1, file: 0 }
     }
 
     // ---- Cursor ----
@@ -100,7 +107,7 @@ impl Lexer {
     }
 
     fn span_from(&self, mark: Mark) -> Span {
-        Span { start: mark.pos, end: self.pos, line: mark.line, column: mark.column }
+        Span { start: mark.pos, end: self.pos, line: mark.line, column: mark.column, file: self.file }
     }
 
     fn error<T>(&self, message: impl Into<String>, mark: Mark) -> Result<T, Diagnostic> {

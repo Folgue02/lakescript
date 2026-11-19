@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::ExitCode;
 
 use lakescript::{Engine, lexer, parser};
@@ -18,33 +19,49 @@ fn main() -> ExitCode {
 }
 
 fn run() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    // Debugging aids
-    let show_tokens = args.iter().any(|a| a == "--tokens");
-    let show_ast = args.iter().any(|a| a == "--ast");
-    let Some(path) = args.iter().find(|a| !a.starts_with("--")) else {
-        eprintln!("usage: lks [--tokens] [--ast] <script.lks>");
-        return ExitCode::from(2);
-    };
-
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(err) => {
-            eprintln!("error: can't read {path}: {err}");
-            return ExitCode::FAILURE;
+    // Options of `lks` go before the script; everything after it is for the script
+    let mut args = std::env::args().skip(1);
+    let mut show_tokens = false;
+    let mut show_ast = false;
+    let path = loop {
+        match args.next() {
+            Some(a) if a == "--tokens" => show_tokens = true,
+            Some(a) if a == "--ast" => show_ast = true,
+            Some(a) if a.starts_with("--") => {
+                eprintln!("lks: unknown option {a}");
+                return ExitCode::from(2);
+            }
+            Some(path) => break path,
+            None => {
+                eprintln!("usage: lks [--tokens] [--ast] <script.lks> [arguments...]");
+                return ExitCode::from(2);
+            }
         }
     };
 
     if show_tokens || show_ast {
-        return debug_print(path, &source, show_tokens, show_ast);
+        let source = match std::fs::read_to_string(&path) {
+            Ok(source) => source,
+            Err(err) => {
+                eprintln!("error: can't read {path}: {err}");
+                return ExitCode::FAILURE;
+            }
+        };
+        return debug_print(&path, &source, show_tokens, show_ast);
     }
 
     let mut engine = Engine::new();
     engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
-    match engine.run(&source) {
-        Ok(()) => ExitCode::SUCCESS,
+    engine.set_args(args.collect());
+    if let Some(extra) = std::env::var_os("LKS_PATH") {
+        for folder in std::env::split_paths(&extra) {
+            engine.add_module_root(folder);
+        }
+    }
+    match engine.run_file(Path::new(&path)) {
+        Ok(outcome) => ExitCode::from(outcome.code().clamp(0, 255) as u8),
         Err(diagnostic) => {
-            eprintln!("{}", diagnostic.render(path));
+            eprintln!("{}", diagnostic.render(&path));
             ExitCode::FAILURE
         }
     }

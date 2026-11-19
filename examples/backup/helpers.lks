@@ -1,0 +1,6 @@
+// Used by backup.lks with `use helpers;`, found because it's next to it.
+
+pub const $defaultKeep = 5;
+
+/// `plural(1, 'file')` is '1 file', `plural(3, 'file')` is '3 files'
+pub string plural(number $n, string $word) = f"{$n} {$word}{$n == 1 ? '' : 's'}";

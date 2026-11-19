@@ -9,7 +9,7 @@ The script's own process, and running programs. `use std/process;`, then `proces
 | `args()` | `list<string>` | The command-line arguments, without the script's own path *(see [cli.md](../language/cli.md))* |
 | `scriptPath()` | `?string` | The absolute path of the script being run, or `null` when there is no file *(i.e. code given by a program that embeds Lakescript)* |
 | `cwd()` | `string` | The current folder |
-| `chdir(string $path)` | `void` | Changes the current folder. Throws a `FileNotFound` if it doesn't exist |
+| `chdir(string $path)` | `void` | Changes the current folder of the script and of the commands it runs. Throws a `FileNotFound` if it doesn't exist. The folder of a program that embeds Lakescript never changes |
 | `pid()` | `number` | The ID of the process |
 | `platform()` | `symbol` | `:linux`, `:macos` or `:windows` |
 | `sleep(number $seconds)` | `void` | Waits *(i.e. `process::sleep(0.5)`)* |

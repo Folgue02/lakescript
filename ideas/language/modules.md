@@ -125,6 +125,7 @@ string _read(string $path) = readFile($path);   // only usable in this file
 ## Rules
 
 - `::` is a single token, so it's never confused with a symbol *(`:name`)*.
+- The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*.
 - Circular imports are an error: if `a` uses `b`, `b` can't use `a`, directly or through other modules. This keeps the rule that everything is defined before it's used, so modules can still be compiled in one pass.
 
 ## Still to be decided

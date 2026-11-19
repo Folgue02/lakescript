@@ -17,6 +17,12 @@ type Result<T> = std::result::Result<T, Diagnostic>;
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>> {
     let mut parser = Parser::new(tokens);
     let mut stmts = Vec::new();
+    // `use` lines go at the top, before any other statement
+    while parser.check(&TokenKind::Keyword(Keyword::Use)) {
+        let start = parser.peek().span;
+        let decl = parser.use_decl()?;
+        stmts.push(Stmt { kind: StmtKind::Use(decl), span: parser.span_from(start) });
+    }
     while !parser.check(&TokenKind::Eof) {
         stmts.push(parser.statement()?);
     }
@@ -131,7 +137,7 @@ impl Parser {
     }
 
     fn span_from(&self, start: Span) -> Span {
-        Span { start: start.start, end: self.last_span.end.max(start.end), line: start.line, column: start.column }
+        Span { start: start.start, end: self.last_span.end.max(start.end), line: start.line, column: start.column, file: start.file }
     }
 
     fn error_here<T>(&self, message: impl Into<String>) -> Result<T> {
@@ -236,8 +242,20 @@ impl Parser {
             TokenKind::Keyword(k @ (Keyword::Catch | Keyword::Finally)) => {
                 return self.error_here(format!("`{}` must come after a `try` block", k.as_str()));
             }
-            TokenKind::Keyword(k @ (Keyword::Use | Keyword::Pub)) => {
-                return self.error_here(format!("`{}` isn't supported yet", k.as_str()));
+            TokenKind::Keyword(Keyword::Use) => {
+                return self.error_here("`use` lines go at the top of the file, before any other statement");
+            }
+            TokenKind::Keyword(Keyword::Pub) => {
+                self.advance();
+                let inner = self.statement()?;
+                let allowed = matches!(
+                    inner.kind,
+                    StmtKind::Function(_) | StmtKind::Let { constant: true, .. } | StmtKind::TypeAlias { .. }
+                );
+                if !allowed {
+                    return Err(Diagnostic::new("`pub` goes before functions, constants declared with `const` and type aliases", inner.span));
+                }
+                StmtKind::Pub(Box::new(inner))
             }
             TokenKind::Keyword(k @ (Keyword::Else | Keyword::In | Keyword::Case | Keyword::Default)) => {
                 return self.error_here(format!("unexpected `{}`", k.as_str()));
@@ -381,6 +399,68 @@ impl Parser {
         }
         self.advance();
         Ok(stmts)
+    }
+
+    /// `use a/b/c;`, `use a/b/c as x;`, `use a/b/c::name;`, `use a/b/c::{x, $y as $z};`
+    fn use_decl(&mut self) -> Result<UseDecl> {
+        self.advance();
+        let mut path = vec![self.path_part("after `use`")?];
+        while self.eat(&TokenKind::Slash) {
+            path.push(self.path_part("in the path of the module")?);
+        }
+        let items = if self.eat(&TokenKind::ColonColon) {
+            let mut items = Vec::new();
+            if self.eat(&TokenKind::LBrace) {
+                while !self.check(&TokenKind::RBrace) {
+                    items.push(self.use_item()?);
+                    if !self.eat(&TokenKind::Comma) {
+                        break;
+                    }
+                }
+                self.expect(&TokenKind::RBrace, "after the imported names")?;
+            } else {
+                items.push(self.use_item()?);
+            }
+            UseItems::Items(items)
+        } else {
+            let alias = if self.eat_as() { Some(self.expect_ident("after `as`")?) } else { None };
+            UseItems::Module { alias }
+        };
+        self.expect(&TokenKind::Semicolon, "after `use`")?;
+        Ok(UseDecl { path, items })
+    }
+
+    /// A folder or file name in a `use` path. Reserved words are allowed,
+    /// since they're names of files *(i.e. `use text/case;`)*.
+    fn path_part(&mut self, context: &str) -> Result<String> {
+        if let TokenKind::Keyword(k) = self.peek().kind {
+            self.advance();
+            return Ok(k.as_str().to_string());
+        }
+        self.expect_ident(context)
+    }
+
+    fn use_item(&mut self) -> Result<UseItem> {
+        let (name, variable) = match self.peek().kind.clone() {
+            TokenKind::Variable(name) => (name, true),
+            TokenKind::Ident(name) => (name, false),
+            other => return self.error_here(format!("expected a function or a `$constant` to import, found {other}")),
+        };
+        self.advance();
+        let alias = if self.eat_as() {
+            Some(if variable { self.expect_variable("after `as`")? } else { self.expect_ident("after `as`")? })
+        } else {
+            None
+        };
+        Ok(UseItem { name, variable, alias })
+    }
+
+    fn eat_as(&mut self) -> bool {
+        if matches!(&self.peek().kind, TokenKind::Ident(n) if n == "as") {
+            self.advance();
+            return true;
+        }
+        false
     }
 
     fn try_statement(&mut self) -> Result<StmtKind> {
@@ -872,10 +952,21 @@ impl Parser {
             }
             TokenKind::Ident(name) => {
                 self.advance();
-                if self.check(&TokenKind::ColonColon) {
-                    return self.error_here("modules aren't supported yet");
+                if self.eat(&TokenKind::ColonColon) {
+                    match self.peek().kind.clone() {
+                        TokenKind::Variable(member) => {
+                            self.advance();
+                            ExprKind::ModuleConstant { module: name, name: member }
+                        }
+                        TokenKind::Ident(member) => {
+                            self.advance();
+                            ExprKind::ModuleFunction { module: name, name: member }
+                        }
+                        other => return self.error_here(format!("expected a function or a `$constant` after `{name}::`, found {other}")),
+                    }
+                } else {
+                    ExprKind::Function(name)
                 }
-                ExprKind::Function(name)
             }
             TokenKind::LParen if self.lambda_ahead() => {
                 let params = self.params()?;

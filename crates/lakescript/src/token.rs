@@ -8,6 +8,9 @@ pub struct Span {
     pub end: usize,
     pub line: u32,
     pub column: u32,
+    /// Which file it's in: `0` is the script being run, the others are
+    /// modules, numbered by the engine as it loads them.
+    pub file: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]

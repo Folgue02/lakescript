@@ -18,7 +18,7 @@ Functions that can always be used, without `use` *(see the module path in [modul
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `exit(number $code = 0)` | `void` | Stops the script with an exit code |
+| `exit(number $code = 0)` | `void` | Stops the script with an exit code, from `0` to `255` |
 
 - `finally` blocks still run on the way out, like when an exception goes through them.
 - The exit codes of `lks`:

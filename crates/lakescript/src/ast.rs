@@ -76,6 +76,10 @@ pub enum ExprKind {
     Switch(Box<Switch>),
     /// `try expr`: a `result` instead of an exception.
     Try(Box<Expr>),
+    /// `paths::load`: a function of an imported module.
+    ModuleFunction { module: String, name: String },
+    /// `paths::$defaultPath`: a constant of an imported module.
+    ModuleConstant { module: String, name: String },
 }
 
 /// The value of an `if` or `switch` branch: an expression, or a block that
@@ -211,8 +215,35 @@ pub enum StmtKind {
     Switch(Box<Switch>),
     Try { body: Vec<Stmt>, catches: Vec<Catch>, finally: Option<Vec<Stmt>> },
     Throw(Expr),
+    /// `use a/b/c;`, `use a/b/c::name;`, `use a/b/c::{x, $y};`
+    Use(UseDecl),
+    /// `pub` before a function, a `const` or a type alias.
+    Pub(Box<Stmt>),
     Block(Vec<Stmt>),
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseDecl {
+    /// `["std", "fs"]` for `use std/fs;`
+    pub path: Vec<String>,
+    pub items: UseItems,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UseItems {
+    /// The whole module, reached with `name::`. The name is the alias, or the last part of the path.
+    Module { alias: Option<String> },
+    /// Some of its functions and constants, used without a prefix.
+    Items(Vec<UseItem>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseItem {
+    pub name: String,
+    /// `true` for a constant (`$name`), `false` for a function.
+    pub variable: bool,
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -428,6 +459,8 @@ impl fmt::Display for Expr {
             If { cond, then, otherwise } => write!(f, "(if {cond} {then} {otherwise})"),
             Switch(switch) => write!(f, "{switch}"),
             Try(inner) => write!(f, "(try {inner})"),
+            ModuleFunction { module, name } => write!(f, "{module}::{name}"),
+            ModuleConstant { module, name } => write!(f, "{module}::${name}"),
         }
     }
 }
@@ -523,6 +556,29 @@ impl fmt::Display for Stmt {
             }
             Yield(e) => write!(f, "(yield {e})"),
             Throw(e) => write!(f, "(throw {e})"),
+            Pub(inner) => write!(f, "(pub {inner})"),
+            Use(decl) => {
+                write!(f, "(use {}", decl.path.join("/"))?;
+                match &decl.items {
+                    UseItems::Module { alias: Some(a) } => write!(f, " as {a}")?,
+                    UseItems::Module { alias: None } => {}
+                    UseItems::Items(items) => {
+                        let items: Vec<String> = items
+                            .iter()
+                            .map(|i| {
+                                let name = if i.variable { format!("${}", i.name) } else { i.name.clone() };
+                                match &i.alias {
+                                    Some(a) if i.variable => format!("{name} as ${a}"),
+                                    Some(a) => format!("{name} as {a}"),
+                                    None => name,
+                                }
+                            })
+                            .collect();
+                        write!(f, " ::{{{}}}", items.join(", "))?;
+                    }
+                }
+                write!(f, ")")
+            }
             Try { body, catches, finally } => {
                 write!(f, "(try {}", block(body))?;
                 for c in catches {

@@ -166,6 +166,7 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
             _ => None,
         },
         Value::Result(r) => result_method(interp, r, &args)?,
+        Value::Command(c) => command_method(interp, &receiver, c, &args)?,
         _ => None,
     };
     match result {
@@ -1435,6 +1436,88 @@ fn map_method(interp: &mut Interpreter, receiver: &Value, map: &Rc<RefCell<Index
                 call_fn(interp, &f, vec![k.to_value(), v], span)?;
             }
             Value::Null
+        }
+        _ => return Ok(None),
+    }))
+}
+
+// ---- command ----
+
+fn command_method(
+    interp: &mut Interpreter,
+    receiver: &Value,
+    command: &Rc<RefCell<crate::command::CommandValue>>,
+    a: &Args,
+) -> Exec<Option<Value>> {
+    use crate::command::{Mode, execute};
+    let span = a.span;
+    let run = |interp: &mut Interpreter, mode: Mode| -> Exec<Value> {
+        let mut ctx = interp.context();
+        execute(&command.borrow(), mode, &mut ctx).map_err(|e| flow_error_as(&e.kind, e.message, span))
+    };
+    Ok(Some(match a.method.as_str() {
+        "run" => {
+            a.count(0, 0)?;
+            run(interp, Mode::Run)?
+        }
+        "output" => {
+            a.count(0, 0)?;
+            run(interp, Mode::Output)?
+        }
+        "lines" => {
+            a.count(0, 0)?;
+            match run(interp, Mode::Output)? {
+                Value::Str(s) => Value::list(s.lines().map(string).collect()),
+                other => other,
+            }
+        }
+        "status" => {
+            a.count(0, 0)?;
+            run(interp, Mode::Status)?
+        }
+        "succeeds?" => {
+            a.count(0, 0)?;
+            run(interp, Mode::Succeeds)?
+        }
+        "cwd" => {
+            a.count(1, 1)?;
+            command.borrow_mut().cwd = Some(a.str(0)?.to_string());
+            receiver.clone()
+        }
+        "env" => {
+            a.count(2, 2)?;
+            let (name, value) = (a.str(0)?.to_string(), a.str(1)?.to_string());
+            command.borrow_mut().env.push((name, value));
+            receiver.clone()
+        }
+        "envs" => {
+            a.count(1, 1)?;
+            for (k, v) in a.map(0)? {
+                let Value::Str(v) = v else {
+                    return a.fail_as(TYPE_ERROR, "`.envs()` needs a map of strings to strings");
+                };
+                command.borrow_mut().env.push((k.to_value().to_string(), v.to_string()));
+            }
+            receiver.clone()
+        }
+        "input" => {
+            a.count(1, 1)?;
+            command.borrow_mut().input = Some(a.str(0)?.to_string());
+            receiver.clone()
+        }
+        "quiet" => {
+            a.count(0, 0)?;
+            command.borrow_mut().quiet = true;
+            receiver.clone()
+        }
+        "timeout" => {
+            a.count(1, 1)?;
+            let seconds = a.num(0)?;
+            if !(seconds > 0.0) {
+                return a.fail_as(VALUE_ERROR, "the timeout must be more than 0 seconds");
+            }
+            command.borrow_mut().timeout = Some(seconds);
+            receiver.clone()
         }
         _ => return Ok(None),
     }))

@@ -37,7 +37,7 @@ Every function throws when the disk says no: `FileNotFound` if the path doesn't 
 |----------|---------|-------------|
 | `list(string $path = '.')` | `list<string>` | The names of what's inside the folder, sorted, without `.` and `..` *(i.e. `['a.txt', 'docs']`)* |
 | `walk(string $path = '.')` | `list<string>` | The paths of every file inside the folder and its subfolders, sorted, starting with `$path` *(i.e. `['src/main.lks', 'src/util/text.lks']`)* |
-| `glob(string $pattern)` | `list<string>` | The paths that match a pattern, sorted. `*` and `?` work like in `-like` without crossing a `/`, and `**` matches any number of folders *(i.e. `fs::glob('src/**/*.lks')`)* |
+| `glob(string $pattern)` | `list<string>` | The paths that match a pattern, sorted. `*` and `?` work like in `-like` without crossing a `/`, and `**` matches any number of folders *(i.e. `fs::glob('src/**/*.lks')`)*. Like in the shell, names starting with `.` only match when the pattern starts with `.` |
 | `makeDir(string $path)` | `void` | Creates the folder and the folders above it that are missing. Does nothing if it already exists |
 | `tempDir()` | `string` | Creates a new empty folder in the system's temporary folder and returns its path |
 | `tempFile(string $extension = '')` | `string` | Creates a new empty file in the system's temporary folder and returns its path *(i.e. `fs::tempFile('.json')`)* |

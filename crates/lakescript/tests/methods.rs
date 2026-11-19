@@ -19,7 +19,7 @@ fn eval(expr: &str) -> String {
 fn error(source: &str) -> String {
     let mut engine = Engine::with_output(CapturedOutput::new());
     match engine.run(source) {
-        Ok(()) => panic!("expected an error:\n{source}"),
+        Ok(_) => panic!("expected an error:\n{source}"),
         Err(e) => e.message,
     }
 }

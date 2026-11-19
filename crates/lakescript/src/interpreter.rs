@@ -1,8 +1,6 @@
 //! Runs the syntax tree directly (phase 1 of `ideas/roadmap.md`).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
-use std::io::Write;
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -15,7 +13,11 @@ use crate::token::Span;
 use crate::types;
 use crate::exceptions;
 use crate::patterns;
-use crate::value::{ExceptionValue, Function, Key, NativeContext, Range, RegexValue, ResultValue, UserFunction, Value};
+use crate::command::{CommandKind, CommandValue, shell_quote};
+use crate::engine::Outcome;
+use crate::host::Host;
+use crate::modules::{Module, ModuleSlot, ModuleSource};
+use crate::value::{ExceptionValue, Function, Key, NativeContext, NativeError, Range, RegexValue, ResultValue, UserFunction, Value};
 
 /// Why the normal flow stopped.
 pub enum Flow {
@@ -26,6 +28,8 @@ pub enum Flow {
     Yield(Value, Span),
     /// An exception was thrown.
     Throw(Rc<ExceptionValue>),
+    /// `exit()` was called with this code.
+    Exit(i32),
 }
 
 const YIELD_OUTSIDE: &str = "`yield` can only be used in the block of an `if` or `switch` used as a value";
@@ -72,15 +76,13 @@ pub fn uncaught(exception: &ExceptionValue) -> Diagnostic {
 }
 
 pub struct Interpreter<'a> {
-    pub output: &'a mut dyn Write,
+    /// Output, input, modules, the script's folder and environment...
+    pub host: &'a mut Host,
     /// Where the stack was when the script started, and how much of it the
     /// script may use. Each call checks it, so a recursion that never ends
     /// stops with an error instead of crashing the host program.
     stack_base: usize,
     stack_budget: usize,
-    /// Compiled regexes, by flags and pattern, so a regex in a loop is only
-    /// compiled once. Kept by the engine between runs.
-    regexes: &'a mut HashMap<String, Rc<RegexValue>>,
 }
 
 fn stack_position() -> usize {
@@ -89,20 +91,35 @@ fn stack_position() -> usize {
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(output: &'a mut dyn Write, stack_budget: usize, regexes: &'a mut HashMap<String, Rc<RegexValue>>) -> Self {
-        Interpreter { output, stack_base: stack_position(), stack_budget, regexes }
+    pub fn new(host: &'a mut Host, stack_budget: usize) -> Self {
+        Interpreter { host, stack_base: stack_position(), stack_budget }
+    }
+
+    /// What native functions and commands can use.
+    pub fn context(&mut self) -> NativeContext<'_> {
+        let host = &mut *self.host;
+        NativeContext {
+            output: &mut *host.output,
+            error: &mut *host.error,
+            input: &mut *host.input,
+            input_piped: host.input_piped,
+            inherit_stdio: host.inherit_stdio,
+            exit_allowed: host.exit_allowed,
+            state: &mut host.state,
+            exit: None,
+        }
     }
 
     /// Compiles a regex the first time it's used.
     pub fn regex(&mut self, pattern: &str, flags: &str) -> Result<Rc<RegexValue>, String> {
         let key = format!("{flags}/{pattern}");
-        if let Some(regex) = self.regexes.get(&key) {
+        if let Some(regex) = self.host.regexes.get(&key) {
             return Ok(regex.clone());
         }
         let source = if flags.is_empty() { pattern.to_string() } else { format!("(?{flags}){pattern}") };
         let compiled = regex::Regex::new(&source).map_err(|e| format!("invalid regex: {}", regex_error(&e)))?;
         let value = Rc::new(RegexValue { pattern: pattern.to_string(), flags: flags.to_string(), compiled });
-        self.regexes.insert(key, value.clone());
+        self.host.regexes.insert(key, value.clone());
         Ok(value)
     }
 
@@ -116,10 +133,11 @@ impl<'a> Interpreter<'a> {
     }
 
     /// Runs the statements of a whole script.
-    pub fn run(&mut self, program: &[Stmt], env: &Env) -> Result<(), Diagnostic> {
+    pub fn run(&mut self, program: &[Stmt], env: &Env) -> Result<Outcome, Diagnostic> {
         for stmt in program {
             match self.exec(stmt, env) {
                 Ok(()) => {}
+                Err(Flow::Exit(code)) => return Ok(Outcome::Exit(code)),
                 Err(Flow::Throw(exception)) => return Err(uncaught(&exception)),
                 Err(Flow::Break(span)) => return Err(Diagnostic::new("`break` outside a loop", span)),
                 Err(Flow::Continue(span)) => return Err(Diagnostic::new("`continue` outside a loop", span)),
@@ -127,7 +145,7 @@ impl<'a> Interpreter<'a> {
                 Err(Flow::Yield(_, span)) => return Err(Diagnostic::new(YIELD_OUTSIDE, span)),
             }
         }
-        Ok(())
+        Ok(Outcome::Finished)
     }
 
     // ---- Statements ----
@@ -151,6 +169,8 @@ impl<'a> Interpreter<'a> {
             StmtKind::Switch(switch) => {
                 self.switch(switch, env, false)?;
             }
+            StmtKind::Use(decl) => self.exec_use(decl, env, stmt.span)?,
+            StmtKind::Pub(inner) => self.exec(inner, env)?,
             StmtKind::Throw(value) => {
                 let value = self.eval(value, env)?;
                 let Value::Exception(exception) = value else {
@@ -429,7 +449,34 @@ impl<'a> Interpreter<'a> {
 
     // ---- Expressions ----
 
+    /// Evaluates an expression. The common cases are handled here and the
+    /// rest in `eval_rest`, so this function's stack frame stays small: it's
+    /// on the stack once for every nested expression and call.
     pub fn eval(&mut self, expr: &Expr, env: &Env) -> Exec<Value> {
+        match &expr.kind {
+            ExprKind::Int(n) => Ok(Value::Int(*n)),
+            ExprKind::Variable(name) => match scope::lookup(env, name) {
+                Some(value) => Ok(value),
+                None => undeclared(name, expr.span),
+            },
+            ExprKind::Binary { op, left, right } => self.eval_binary(*op, left, right, env, expr.span),
+            ExprKind::Call { callee, args } => self.eval_call(callee, args, env, expr.span),
+            _ => self.eval_rest(expr, env),
+        }
+    }
+
+    #[inline(never)]
+    fn eval_call(&mut self, callee: &Expr, args: &[Arg], env: &Env, span: Span) -> Exec<Value> {
+        let callee_value = self.eval(callee, env)?;
+        let Value::Function(function) = callee_value else {
+            return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", callee_value.type_name()), callee.span);
+        };
+        let (positional, named) = self.eval_args(args, env)?;
+        self.call(&function, positional, named, span)
+    }
+
+    #[inline(never)]
+    fn eval_rest(&mut self, expr: &Expr, env: &Env) -> Exec<Value> {
         let span = expr.span;
         Ok(match &expr.kind {
             ExprKind::Int(n) => Value::Int(*n),
@@ -451,7 +498,39 @@ impl<'a> Interpreter<'a> {
             ExprKind::Regex { pattern, flags } => {
                 Value::Regex(self.regex(pattern, flags).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span))?)
             }
-            ExprKind::Command(_) => return error("commands aren't supported yet", span),
+            ExprKind::Command(parts) => {
+                let mut script = String::new();
+                for part in parts {
+                    match part {
+                        StringPart::Text(t) => script.push_str(t),
+                        StringPart::Expr(e) => {
+                            let value = self.eval(e, env)?;
+                            script.push_str(&command_argument(&value).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, e.span))?);
+                        }
+                    }
+                }
+                Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Shell(script)))))
+            }
+            ExprKind::ModuleFunction { module, name } => {
+                let m = self.module_named(module, env, span)?;
+                if !m.public.contains(name) {
+                    return error(format!("`{}` has no `pub` function named `{name}`", m.path), span);
+                }
+                match scope::lookup_function(&m.env, name) {
+                    Some(f) => Value::Function(f),
+                    None => return error(format!("`{}` has no function named `{name}`", m.path), span),
+                }
+            }
+            ExprKind::ModuleConstant { module, name } => {
+                let m = self.module_named(module, env, span)?;
+                if !m.public.contains(&format!("${name}")) {
+                    return error(format!("`{}` has no `pub` constant named `${name}`", m.path), span);
+                }
+                match scope::lookup(&m.env, name) {
+                    Some(v) => v,
+                    None => return error(format!("`{}` has no constant named `${name}`", m.path), span),
+                }
+            }
             ExprKind::List { items, .. } => {
                 let mut values = Vec::with_capacity(items.len());
                 for item in items {
@@ -482,7 +561,7 @@ impl<'a> Interpreter<'a> {
             }
             ExprKind::Binary { op, left, right } => self.eval_binary(*op, left, right, env, span)?,
             ExprKind::PathTest { op, path } => match self.eval(path, env)? {
-                Value::Str(p) => Value::Bool(patterns::path_test(*op, &p)),
+                Value::Str(p) => Value::Bool(patterns::path_test(*op, &self.host.state.resolve(&p).display().to_string())),
                 other => return error(format!("`{}` needs a path string, not a {}", op.symbol(), other.type_name()), path.span),
             },
             ExprKind::Range { start, end, inclusive } => {
@@ -510,14 +589,7 @@ impl<'a> Interpreter<'a> {
                 self.store(target, new.clone(), env)?;
                 if *prefix { new } else { old }
             }
-            ExprKind::Call { callee, args } => {
-                let callee_value = self.eval(callee, env)?;
-                let Value::Function(function) = callee_value else {
-                    return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", callee_value.type_name()), callee.span);
-                };
-                let (positional, named) = self.eval_args(args, env)?;
-                self.call(&function, positional, named, span)?
-            }
+            ExprKind::Call { callee, args } => self.eval_call(callee, args, env, span)?,
             ExprKind::MethodCall { receiver, method, args, nullable } => {
                 let receiver = self.eval(receiver, env)?;
                 if *nullable && matches!(receiver, Value::Null) {
@@ -569,6 +641,7 @@ impl<'a> Interpreter<'a> {
         })
     }
 
+    #[inline(never)]
     fn eval_binary(&mut self, op: BinaryOp, left: &Expr, right: &Expr, env: &Env, span: Span) -> Exec<Value> {
         // The ones that don't always evaluate their right side
         match op {
@@ -736,54 +809,18 @@ impl<'a> Interpreter<'a> {
     pub fn call(
         &mut self,
         function: &Rc<Function>,
-        mut positional: Vec<Value>,
-        mut named: Vec<(String, Value, Span)>,
+        positional: Vec<Value>,
+        named: Vec<(String, Value, Span)>,
         span: Span,
     ) -> Exec<Value> {
         match &**function {
-            Function::Native(native) => {
-                if !named.is_empty() {
-                    return error(format!("`{}` doesn't take named arguments", native.name), span);
-                }
-                let mut context = NativeContext { output: &mut *self.output };
-                (native.func)(&mut context, positional).map_err(|m| flow_error(m, span))
-            }
+            Function::Native(native) => self.call_native(native, positional, named, span),
             Function::User(user) => {
                 if stack_position().abs_diff(self.stack_base) > self.stack_budget {
                     return error("too many nested calls. Is there a recursion that never ends?", span);
                 }
-                let decl = &user.decl;
-                let call_env = scope::new_scope(&user.env);
-                positional.reverse(); // so the next one is popped from the end
-                for param in &decl.params {
-                    let value = if param.variadic {
-                        positional.reverse();
-                        Value::list(std::mem::take(&mut positional))
-                    } else if let Some(v) = positional.pop() {
-                        if named.iter().any(|(n, ..)| n == &param.name) {
-                            return error_as(exceptions::TYPE_ERROR, format!("`{}` was given twice", param.name), span);
-                        }
-                        v
-                    } else if let Some(i) = named.iter().position(|(n, ..)| n == &param.name) {
-                        named.remove(i).1
-                    } else if let Some(default) = &param.default {
-                        // Evaluated on every call, in the function's own scope
-                        self.eval(default, &call_env)?
-                    } else {
-                        return error_as(exceptions::TYPE_ERROR, format!("`{}` needs a value for `${}`", decl.name, param.name), span);
-                    };
-                    if !scope::declare(&call_env, &param.name, value, false) {
-                        return error(format!("the parameter `${}` of `{}` has the name of a variable that already exists", param.name, decl.name), span);
-                    }
-                }
-                if !positional.is_empty() {
-                    return error_as(exceptions::TYPE_ERROR, format!("`{}` takes {} arguments, but got more", decl.name, decl.params.len()), span);
-                }
-                if let Some((name, _, arg_span)) = named.first() {
-                    return error_as(exceptions::TYPE_ERROR, format!("`{}` has no parameter named `{name}`", decl.name), *arg_span);
-                }
-
-                let result = match &decl.body {
+                let call_env = self.bind_params(user, positional, named, span)?;
+                match &user.decl.body {
                     FunctionBody::Expr(expr) => self.eval(expr, &call_env),
                     FunctionBody::Block(stmts) => match self.exec_block(stmts, &call_env) {
                         Ok(()) => Ok(Value::Null),
@@ -793,13 +830,208 @@ impl<'a> Interpreter<'a> {
                         Err(Flow::Yield(_, s)) => error(YIELD_OUTSIDE, s),
                         Err(e) => Err(e),
                     },
-                };
-                result
+                }
             }
         }
     }
-}
 
+    #[inline(never)]
+    fn call_native(
+        &mut self,
+        native: &crate::value::NativeFunction,
+        positional: Vec<Value>,
+        named: Vec<(String, Value, Span)>,
+        span: Span,
+    ) -> Exec<Value> {
+        let mut args = positional;
+        for (name, value, arg_span) in named {
+            let Some(i) = native.params.iter().position(|p| *p == name) else {
+                return if native.params.is_empty() {
+                    error_as(exceptions::TYPE_ERROR, format!("`{}` doesn't take named arguments", native.name), span)
+                } else {
+                    error_as(exceptions::TYPE_ERROR, format!("`{}` has no parameter named `{name}`", native.name), arg_span)
+                };
+            };
+            if i < args.len() && !matches!(args[i], Value::Null) {
+                return error_as(exceptions::TYPE_ERROR, format!("`{name}` was given twice"), arg_span);
+            }
+            while args.len() <= i {
+                args.push(Value::Null);
+            }
+            args[i] = value;
+        }
+        let mut context = self.context();
+        let result = (native.func)(&mut context, args);
+        let exit = context.exit;
+        match (result, exit) {
+            (_, Some(code)) => Err(Flow::Exit(code)),
+            (Ok(value), None) => Ok(value),
+            (Err(e), None) => Err(native_error(e, span)),
+        }
+    }
+
+    // ---- Modules ----
+
+    fn exec_use(&mut self, decl: &UseDecl, env: &Env, span: Span) -> Exec<()> {
+        let source = self.host.loader.resolve(&decl.path).map_err(|m| flow_error(m, span))?;
+        match &decl.items {
+            UseItems::Module { alias } => {
+                let name = alias.clone().unwrap_or_else(|| decl.path.last().cloned().unwrap_or_default());
+                if !scope::declare_module(env, &name, ModuleSlot::Pending(source)) {
+                    return error(format!("a module named `{name}` is already imported"), span);
+                }
+            }
+            UseItems::Items(items) => {
+                // Importing names needs their values now
+                let module = self.load(source, span)?;
+                for item in items {
+                    let key = if item.variable { format!("${}", item.name) } else { item.name.clone() };
+                    let local = item.alias.clone().unwrap_or_else(|| item.name.clone());
+                    if !module.public.contains(&key) {
+                        let what = if item.variable { "constant" } else { "function" };
+                        return error(format!("`{}` has no `pub` {what} named `{key}`", module.path), span);
+                    }
+                    let declared = if item.variable {
+                        let value = scope::lookup(&module.env, &item.name).unwrap_or(Value::Null);
+                        scope::declare(env, &local, value, true)
+                    } else {
+                        match scope::lookup_function(&module.env, &item.name) {
+                            Some(f) => scope::declare_function(env, &local, f),
+                            None => false,
+                        }
+                    };
+                    if !declared {
+                        let shown = if item.variable { format!("${local}") } else { local };
+                        return error(format!("`{shown}` already exists"), span);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The module imported as `name`, loading it the first time it's used.
+    fn module_named(&mut self, name: &str, env: &Env, span: Span) -> Exec<Rc<Module>> {
+        let Some(slot) = scope::lookup_module(env, name) else {
+            return error(format!("there's no module named `{name}`. Import it with `use`"), span);
+        };
+        let pending = match &*slot.borrow() {
+            ModuleSlot::Loaded(m) => return Ok(m.clone()),
+            ModuleSlot::Pending(source) => source.clone(),
+        };
+        let module = self.load(pending, span)?;
+        *slot.borrow_mut() = ModuleSlot::Loaded(module.clone());
+        Ok(module)
+    }
+
+    /// Loads a module once: later loads give the same one.
+    fn load(&mut self, source: ModuleSource, span: Span) -> Exec<Rc<Module>> {
+        let path = match source {
+            ModuleSource::Std(name) => {
+                if let Some(m) = self.host.loader.std_cache.get(&name) {
+                    return Ok(m.clone());
+                }
+                let module = crate::stdlib::build(&name).ok_or_else(|| flow_error(format!("there's no module `{name}`"), span))?;
+                self.host.loader.std_cache.insert(name, module.clone());
+                return Ok(module);
+            }
+            ModuleSource::File(path) => path,
+        };
+        if let Some(m) = self.host.loader.cache.get(&path) {
+            return Ok(m.clone());
+        }
+        if self.host.loader.loading.contains(&path) {
+            let chain: Vec<String> = self.host.loader.loading.iter().chain(std::iter::once(&path)).map(|p| p.display().to_string()).collect();
+            return error(format!("circular import: {}", chain.join(" uses ")), span);
+        }
+        let shown = path.display().to_string();
+        let source = std::fs::read_to_string(&path).map_err(|e| flow_error_as("IOError", format!("can't read the module '{shown}': {e}"), span))?;
+        let file = self.host.loader.files.len() as u32;
+        self.host.loader.files.push(shown.clone());
+        let program = crate::parse_file(&source, file).map_err(|d| flow_error(d.message, d.span))?;
+
+        let env = scope::new_scope(&self.host.builtins);
+        let mut public = std::collections::HashSet::new();
+        self.host.loader.loading.push(path.clone());
+        let result = (|| -> Exec<()> {
+            for stmt in &program {
+                let inner = match &stmt.kind {
+                    StmtKind::Pub(inner) => {
+                        match &inner.kind {
+                            StmtKind::Function(decl) => public.insert(decl.name.clone()),
+                            StmtKind::Let { name, .. } => public.insert(format!("${name}")),
+                            _ => false,
+                        };
+                        &**inner
+                    }
+                    _ => stmt,
+                };
+                let declaration = matches!(
+                    inner.kind,
+                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { constant: true, .. }
+                );
+                if !declaration {
+                    return error(
+                        "an imported module can only have declarations at its top level: functions, `const` and `type`",
+                        stmt.span,
+                    );
+                }
+                self.exec(stmt, &env)?;
+            }
+            Ok(())
+        })();
+        self.host.loader.loading.pop();
+        result?;
+        let module = Rc::new(Module { path: shown, env, public });
+        self.host.loader.cache.insert(path, module.clone());
+        Ok(module)
+    }
+
+    /// The scope of a call, with every parameter declared.
+    #[inline(never)]
+    fn bind_params(
+        &mut self,
+        user: &UserFunction,
+        mut positional: Vec<Value>,
+        mut named: Vec<(String, Value, Span)>,
+        span: Span,
+    ) -> Exec<Env> {
+        let decl = &user.decl;
+        let call_env = scope::new_scope(&user.env);
+        positional.reverse(); // so the next one is popped from the end
+        for param in &decl.params {
+            let value = if param.variadic {
+                positional.reverse();
+                Value::list(std::mem::take(&mut positional))
+            } else if let Some(v) = positional.pop() {
+                if named.iter().any(|(n, ..)| n == &param.name) {
+                    return error_as(exceptions::TYPE_ERROR, format!("`{}` was given twice", param.name), span);
+                }
+                v
+            } else if let Some(i) = named.iter().position(|(n, ..)| n == &param.name) {
+                named.remove(i).1
+            } else if let Some(default) = &param.default {
+                // Evaluated on every call, in the function's own scope
+                self.eval(default, &call_env)?
+            } else {
+                return error_as(exceptions::TYPE_ERROR, format!("`{}` needs a value for `${}`", decl.name, param.name), span);
+            };
+            if !scope::declare(&call_env, &param.name, value, false) {
+                return error(
+                    format!("the parameter `${}` of `{}` has the name of a variable that already exists", param.name, decl.name),
+                    span,
+                );
+            }
+        }
+        if !positional.is_empty() {
+            return error_as(exceptions::TYPE_ERROR, format!("`{}` takes {} arguments, but got more", decl.name, decl.params.len()), span);
+        }
+        if let Some((name, _, arg_span)) = named.first() {
+            return error_as(exceptions::TYPE_ERROR, format!("`{}` has no parameter named `{name}`", decl.name), *arg_span);
+        }
+        Ok(call_env)
+    }
+}
 
 /// A value in an error message: `5`, `'abc'`, a list...
 fn describe(value: &Value) -> String {
@@ -808,6 +1040,30 @@ fn describe(value: &Value) -> String {
         Value::Str(_) => format!("the string `{value:?}`"),
         other => format!("a {}", other.type_name()),
     }
+}
+
+fn native_error(e: NativeError, span: Span) -> Flow {
+    flow_error_as(&e.kind, e.message, span)
+}
+
+/// A value in `%x"..."`, quoted so it's always a single argument. A list
+/// becomes several arguments.
+fn command_argument(value: &Value) -> Result<String, String> {
+    match value {
+        Value::Str(s) => Ok(shell_quote(s)),
+        Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Symbol(_) => Ok(shell_quote(&value.to_string())),
+        Value::List(items) => {
+            let parts: Result<Vec<String>, String> = items.borrow().iter().map(command_argument).collect();
+            Ok(parts?.join(" "))
+        }
+        other => Err(format!("a {} can't be used in a command", other.type_name())),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn undeclared(name: &str, span: Span) -> Exec<Value> {
+    error(format!("`${name}` isn't declared"), span)
 }
 
 /// The first line of a regex error, which says what's wrong.

@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::modules::ModuleSlot;
 use crate::value::{Function, Value};
 
 pub type Env = Rc<RefCell<Scope>>;
@@ -17,6 +18,8 @@ pub type Env = Rc<RefCell<Scope>>;
 pub struct Scope {
     vars: HashMap<String, Binding>,
     functions: HashMap<String, Rc<Function>>,
+    /// Modules imported with `use`, by the name they're reached with.
+    modules: HashMap<String, Rc<RefCell<ModuleSlot>>>,
     parent: Option<Env>,
 }
 
@@ -98,6 +101,27 @@ pub fn lookup_function(env: &Env, name: &str) -> Option<Rc<Function>> {
         let scope = scope.borrow();
         if let Some(function) = scope.functions.get(name) {
             return Some(function.clone());
+        }
+        current = scope.parent.clone();
+    }
+    None
+}
+
+/// Declares a module imported with `use`. Returns `false` if the name is taken.
+pub fn declare_module(env: &Env, name: &str, slot: ModuleSlot) -> bool {
+    if lookup_module(env, name).is_some() {
+        return false;
+    }
+    env.borrow_mut().modules.insert(name.to_string(), Rc::new(RefCell::new(slot)));
+    true
+}
+
+pub fn lookup_module(env: &Env, name: &str) -> Option<Rc<RefCell<ModuleSlot>>> {
+    let mut current = Some(env.clone());
+    while let Some(scope) = current {
+        let scope = scope.borrow();
+        if let Some(slot) = scope.modules.get(name) {
+            return Some(slot.clone());
         }
         current = scope.parent.clone();
     }

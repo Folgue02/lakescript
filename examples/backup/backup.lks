@@ -1,0 +1,66 @@
+#!/usr/bin/lks
+// Backs up a folder into a dated .tar.gz, and keeps only the newest ones.
+//
+//   lks examples/backup/backup.lks <folder> [<backups folder>]
+//
+// Settings can go in a backup.json next to the backups:
+//   { "keep": 3, "exclude": ["*.tmp", "node_modules"] }
+
+use std/fs;
+use std/path;
+use std/process;
+use std/json;
+use helpers::{plural, $defaultKeep};
+
+const $args = process::args();
+if ($args.empty?() || $args.length() > 2) {
+    errln('usage: backup.lks <folder> [<backups folder>]');
+    exit(2);
+}
+
+const $source = path::absolute($args[0]);
+const $target = path::absolute($args.get(1, path::join(path::home(), 'backups')));
+
+if (!-d $source) {
+    errln(f"backup: '{$source}' isn't a folder");
+    exit(1);
+}
+fs::makeDir($target);
+
+// Settings, with defaults when the file is missing
+const $configPath = path::join($target, 'backup.json');
+const $config = if (-f $configPath) json::read($configPath) else {};
+const $keep = ($config['keep'] ?? $defaultKeep).as(number);
+const $exclude = ($config['exclude'] ?? []).as(list<string>);
+
+// What's going to be copied
+const $files = fs::walk($source)
+    .map(($f) = path::relative($f, $source))
+    .reject(($f) = $exclude.any(($pattern) = $f -like $pattern || $f.startsWith($pattern + '/')));
+
+const $size = $files.map(($f) = fs::size(path::join($source, $f))).sum();
+outln(f"Backing up {plural($files.length(), 'file')} ({$size.formatBytes()}) from {$source}");
+
+// The archive: tar gets the list of files on its stdin, so no name can break the command
+const $name = f"{path::name($source)}-{%x"date +%Y%m%d-%H%M%S".output()}.tar.gz";
+const $archive = path::join($target, $name);
+%x"tar -czf {$archive} -T -"
+    .cwd($source)
+    .input($files.join("\n"))
+    .run();
+
+outln(f"Created {$name} ({fs::size($archive).formatBytes()})");
+
+// Keep only the newest ones
+const $prefix = path::name($source) + '-';
+const $old = fs::list($target)
+    .filter(($f) = $f.startsWith($prefix) && $f.endsWith('.tar.gz'))
+    .sorted()
+    .reversed()
+    .skip($keep);
+
+for ($f in $old) {
+    fs::remove(path::join($target, $f));
+    outln(f"Removed {$f}");
+}
+outln(f"Keeping {plural(fs::list($target).countWhere(($f) = $f.startsWith($prefix)), 'backup')}");

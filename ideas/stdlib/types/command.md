@@ -4,6 +4,8 @@ A shell command created with `%x"..."` *(see Command in [builtin_types.md](../..
 
 ## Running
 
+A program that can't be started *(i.e. it isn't installed)* throws a `CommandFailed` too.
+
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `run()` | `void` | Runs it, with its output going straight to the terminal *(i.e. `%x"cargo build".run()`)*. Throws a `CommandFailed` if the exit code isn't 0 |

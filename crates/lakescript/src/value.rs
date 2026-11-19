@@ -27,6 +27,8 @@ pub enum Value {
     Exception(Rc<ExceptionValue>),
     /// What `try expr` returns.
     Result(Rc<ResultValue>),
+    /// A command from `%x"..."` or `process::command()`. Its setup methods change it.
+    Command(Rc<RefCell<crate::command::CommandValue>>),
 }
 
 pub struct ExceptionValue {
@@ -146,13 +148,55 @@ pub struct UserFunction {
 
 /// What a native function can use besides its arguments.
 pub struct NativeContext<'a> {
+    /// Where the script's stdout goes.
     pub output: &'a mut dyn std::io::Write,
+    /// Where the script's stderr goes.
+    pub error: &'a mut dyn std::io::Write,
+    pub(crate) input: &'a mut dyn std::io::BufRead,
+    pub(crate) input_piped: bool,
+    pub(crate) inherit_stdio: bool,
+    pub(crate) exit_allowed: bool,
+    pub(crate) state: &'a mut crate::host::ScriptState,
+    /// Set by `exit()`: the script stops with this code once the function returns.
+    pub(crate) exit: Option<i32>,
 }
 
-pub type NativeFn = dyn Fn(&mut NativeContext, Vec<Value>) -> Result<Value, String>;
+/// An error from a native function: it's thrown as an exception of `kind`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NativeError {
+    /// One of the built-in exceptions *(i.e. `"ValueError"`)*.
+    pub kind: String,
+    pub message: String,
+}
+
+impl NativeError {
+    pub fn new(kind: &str, message: impl Into<String>) -> Self {
+        NativeError { kind: kind.to_string(), message: message.into() }
+    }
+}
+
+/// A plain message is thrown as a generic `Exception`.
+impl From<String> for NativeError {
+    fn from(message: String) -> Self {
+        NativeError::new("Exception", message)
+    }
+}
+
+impl From<&str> for NativeError {
+    fn from(message: &str) -> Self {
+        NativeError::new("Exception", message)
+    }
+}
+
+pub type NativeResult = Result<Value, NativeError>;
+
+pub type NativeFn = dyn Fn(&mut NativeContext, Vec<Value>) -> NativeResult;
 
 pub struct NativeFunction {
     pub name: String,
+    /// The names of the parameters, so they can be given by name *(i.e.
+    /// `json::stringify($v, indent: 2)`)*. Empty if they can't.
+    pub params: Vec<String>,
     pub func: Box<NativeFn>,
 }
 
@@ -188,6 +232,7 @@ impl Value {
             Value::Regex(_) => "regex",
             Value::Exception(_) => "exception",
             Value::Result(_) => "result",
+            Value::Command(_) => "command",
         }
     }
 
@@ -225,6 +270,7 @@ impl Value {
             (Value::Regex(a), Value::Regex(b)) => Rc::ptr_eq(a, b),
             (Value::Exception(a), Value::Exception(b)) => Rc::ptr_eq(a, b),
             (Value::Result(a), Value::Result(b)) => Rc::ptr_eq(a, b),
+            (Value::Command(a), Value::Command(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -328,6 +374,7 @@ impl fmt::Display for Value {
             }
             Value::Function(func) => write!(f, "<function {}>", func.name()),
             Value::Exception(e) => write!(f, "{}: {}", e.kind, e.message),
+            Value::Command(c) => write!(f, "{}", c.borrow().display()),
             Value::Result(r) => match &**r {
                 ResultValue::Ok(v) => {
                     write!(f, "ok(")?;

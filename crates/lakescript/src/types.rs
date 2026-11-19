@@ -25,7 +25,7 @@ pub fn matches(value: &Value, ty: &TypeExpr) -> Result<bool, String> {
                 "range" => no_args(matches!(value, Value::Range(_))),
                 "regex" => no_args(matches!(value, Value::Regex(_))),
                 "result" => Ok(matches!(value, Value::Result(_))),
-                "command" => no_args(false),
+                "command" => no_args(matches!(value, Value::Command(_))),
                 name if crate::exceptions::is_exception_type(name) => {
                     no_args(matches!(value, Value::Exception(e) if crate::exceptions::is_a(&e.kind, name)))
                 }
