@@ -61,6 +61,7 @@ fn language_examples() {
         ("examples/collections.lks", "{ 'a' => 3, 'b' => 1, 'c' => 1 }"),
         ("examples/patterns.lks", "Year 2026, month 11, day 19"),
         ("examples/errors.lks", "Bad port '99999': 99999 isn't a valid port"),
+        ("examples/types.lks", "the string 'hi'"),
     ] {
         let out = run_ok(&[script]);
         assert!(out.contains(expected), "{script} didn't print {expected:?}:\n{out}");
@@ -115,4 +116,24 @@ fn backup() {
     let output = lks(&["examples/backup/backup.lks"], None);
     assert_eq!(output.status.code(), Some(2));
     std::fs::remove_dir_all(&base).unwrap();
+}
+
+#[test]
+fn type_errors_stop_the_script_before_it_starts() {
+    let dir = std::env::temp_dir().join(format!("lks-example-types-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("broken.lks");
+    std::fs::write(&script, "outln('started');\nlet $total = 0;\n$total = 'none';\n").unwrap();
+    let path = script.display().to_string();
+    let output = lks(&[&path], None);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "", "nothing ran");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(stderr.contains("error: `$total` is a number, so it can't hold a string"), "{stderr}");
+    assert!(stderr.contains("3 | $total = 'none';"), "{stderr}");
+    assert!(stderr.contains("  |          ^^^^^^"), "{stderr}");
+    // Without the check it starts, and fails only when the line runs
+    let output = lks(&["--no-type-check", &path], None);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "started\n");
+    std::fs::remove_dir_all(&dir).unwrap();
 }

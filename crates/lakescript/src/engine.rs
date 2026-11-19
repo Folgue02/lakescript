@@ -48,6 +48,15 @@ pub struct Engine {
     globals: Env,
     host: Host,
     stack_budget: usize,
+    /// Whether scripts are type checked before they run.
+    check_types: bool,
+    /// The signatures of the built-in methods and the standard library, read the first time they're needed.
+    prelude: Option<Rc<crate::checker::prelude::Prelude>>,
+    check_state: crate::checker::State,
+    check_cache: HashMap<PathBuf, Result<crate::checker::prelude::ModuleSig, Diagnostic>>,
+    /// Functions registered by the program embedding Lakescript. The checker knows nothing about their types.
+    host_functions: Vec<String>,
+    builtins_ready: bool,
 }
 
 impl Default for Engine {
@@ -88,9 +97,27 @@ impl Engine {
             builtins,
             rng: crate::host::seed(),
         };
-        let mut engine = Engine { globals, host, stack_budget: 1024 * 1024 };
+        let mut engine = Engine {
+            globals,
+            host,
+            stack_budget: 1024 * 1024,
+            check_types: true,
+            prelude: None,
+            check_state: Default::default(),
+            check_cache: HashMap::new(),
+            host_functions: Vec::new(),
+            builtins_ready: false,
+        };
         engine.register_builtins();
+        engine.builtins_ready = true;
         engine
+    }
+
+    /// Whether scripts are type checked before they run. It's on by default.
+    /// Since types never change what the code does, a script that passed the
+    /// check behaves the same without it.
+    pub fn set_type_check(&mut self, check: bool) {
+        self.check_types = check;
     }
 
     /// Where `err` and `errln` write.
@@ -139,6 +166,9 @@ impl Engine {
     /// exception in the script: a plain message is an `Exception`, and a
     /// `NativeError` can choose the kind *(i.e. `ValueError`)*.
     pub fn register(&mut self, name: &str, func: impl Fn(&mut NativeContext, Vec<Value>) -> NativeResult + 'static) {
+        if self.builtins_ready {
+            self.host_functions.push(name.to_string());
+        }
         let function = Function::Native(NativeFunction { name: name.to_string(), params: Vec::new(), func: Box::new(func) });
         // Replacing a built-in on purpose is allowed, so the host can override `outln`
         self.host.builtins.borrow_mut().remove_function(name);
@@ -149,6 +179,9 @@ impl Engine {
     /// kept, so the next `run` can use them.
     pub fn run(&mut self, source: &str) -> Result<Outcome, Diagnostic> {
         let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
+        if self.check_types {
+            self.check(&program).map_err(|d| self.locate(d))?;
+        }
         let mut interpreter = Interpreter::new(&mut self.host, self.stack_budget);
         let result = interpreter.run(&program, &self.globals);
         let _ = self.host.output.flush();
@@ -171,10 +204,18 @@ impl Engine {
         self.run(&source)
     }
 
+    fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {
+        let prelude = self.prelude.get_or_insert_with(|| Rc::new(crate::checker::prelude::Prelude::load())).clone();
+        let modules = crate::checker::Modules { loader: &self.host.loader, cache: &mut self.check_cache, checking: Vec::new() };
+        let mut checker = crate::checker::Checker::new(&prelude, modules, &mut self.check_state, &self.host_functions);
+        checker.stack_budget = self.stack_budget;
+        checker.check_program(program)
+    }
+
     /// Fills in the file of an error that happened in a module.
     fn locate(&self, mut diagnostic: Diagnostic) -> Diagnostic {
         let file = diagnostic.span.file as usize;
-        if file > 0 {
+        if file > 0 && diagnostic.file.is_none() {
             diagnostic.file = self.host.loader.files.get(file).cloned();
         }
         diagnostic

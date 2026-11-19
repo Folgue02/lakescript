@@ -36,6 +36,51 @@ pub fn parse_with_budget(tokens: Vec<Token>, stack_budget: usize) -> Result<Vec<
     Ok(stmts)
 }
 
+/// A signature of the checker's list of built-in methods and functions
+/// *(see `checker/prelude.txt`)*: a function without a body, or a constant.
+pub enum Signature {
+    Function(FunctionDecl),
+    Constant { ty: TypeExpr, name: String },
+}
+
+/// Reads signatures like `string read(string $path);` and `const string $separator;`.
+pub fn parse_signatures(tokens: Vec<Token>) -> Result<Vec<Signature>> {
+    let mut parser = Parser::new(tokens);
+    let mut out = Vec::new();
+    while !parser.check(&TokenKind::Eof) {
+        if parser.eat(&TokenKind::Keyword(Keyword::Const)) {
+            let ty = parser.parse_type()?;
+            let name = parser.expect_variable("for the constant")?;
+            parser.expect(&TokenKind::Semicolon, "after the constant")?;
+            out.push(Signature::Constant { ty, name });
+            continue;
+        }
+        let ret = parser.parse_type()?;
+        let name = match parser.peek().kind.clone() {
+            TokenKind::Keyword(k) => {
+                parser.advance();
+                k.as_str().to_string()
+            }
+            _ => parser.expect_ident("for the function")?,
+        };
+        let mut generics = Vec::new();
+        if parser.eat(&TokenKind::Lt) {
+            loop {
+                generics.push(parser.expect_ident("for the type parameter")?);
+                if !parser.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            parser.expect_closing_angle("after the type parameters")?;
+        }
+        let params = parser.params()?;
+        parser.expect(&TokenKind::Semicolon, "after the signature")?;
+        let body = FunctionBody::Expr(Expr { kind: ExprKind::Null, span: Span::default() });
+        out.push(Signature::Function(FunctionDecl { name, generics, params, ret: Some(ret), body }));
+    }
+    Ok(out)
+}
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,

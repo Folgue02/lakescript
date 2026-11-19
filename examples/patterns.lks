@@ -11,11 +11,14 @@ const $versions = ['v1.2.3', 'version 2', 'V10.0.1'];
 for ($v in $versions)
     outln(f"{$v}: {$v -match %r"^v\d+\.\d+\.\d+$"i}");
 
-// .match() gives the whole match and the groups
+// .match() gives the whole match and the groups, or null when it doesn't match
 const $parts = 'release-2026-11-19'.match(%r"(\d{4})-(\d{2})-(\d{2})");
 outln($parts);
-const [$whole, $year, $month, $day] = $parts;
-outln(f"Year {$year}, month {$month}, day {$day}");
+if ($parts != null) {
+    // Inside here the checker knows $parts isn't null
+    const [$whole, $year, $month, $day] = $parts;
+    outln(f"Year {$year}, month {$month}, day {$day}");
+}
 
 // Every match, and replacing with groups
 outln('a1 b22 c333'.matchAll(%r"([a-z])(\d+)").map(($m) = $m[2].length()));

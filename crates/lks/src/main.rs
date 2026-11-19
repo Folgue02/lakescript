@@ -41,7 +41,6 @@ fn main() -> ExitCode {
 
 #[derive(Default)]
 struct Options {
-    /// Types aren't checked yet: the checker comes in phase 4 *(see ideas/roadmap.md)*.
     no_type_check: bool,
     show_tokens: bool,
     show_ast: bool,
@@ -113,8 +112,7 @@ fn run() -> ExitCode {
     let mut engine = Engine::new();
     engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
     engine.set_args(args);
-    // Nothing to skip yet: the type checker comes in phase 4
-    let _ = options.no_type_check;
+    engine.set_type_check(!options.no_type_check);
     if let Some(extra) = std::env::var_os("LKS_PATH") {
         for folder in std::env::split_paths(&extra) {
             engine.add_module_root(folder);
@@ -123,9 +121,18 @@ fn run() -> ExitCode {
     match engine.run_file(Path::new(&script)) {
         Ok(outcome) => ExitCode::from(outcome.code().clamp(0, 255) as u8),
         Err(diagnostic) => {
-            eprintln!("{}", diagnostic.render(&script));
+            eprintln!("{}", show(&diagnostic, &script));
             ExitCode::FAILURE
         }
+    }
+}
+
+/// An error with the line of code it points to, read from the file it's in.
+fn show(diagnostic: &lakescript::Diagnostic, script: &str) -> String {
+    let file = diagnostic.file.as_deref().unwrap_or(script);
+    match std::fs::read_to_string(file) {
+        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source(script, &source),
+        _ => diagnostic.render(script),
     }
 }
 
@@ -148,7 +155,7 @@ fn debug_print(path: &str, source: &str, show_tokens: bool, show_ast: bool) -> E
             ExitCode::SUCCESS
         }
         Err(diagnostic) => {
-            eprintln!("{}", diagnostic.render(path));
+            eprintln!("{}", show(&diagnostic, path));
             ExitCode::FAILURE
         }
     }

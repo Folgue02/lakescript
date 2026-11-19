@@ -38,7 +38,9 @@ impl Drop for TempDir {
 
 fn engine() -> (Engine, CapturedOutput) {
     let output = CapturedOutput::new();
-    (Engine::with_output(output.clone()), output)
+    let mut engine = Engine::with_output(output.clone());
+    engine.set_type_check(false);
+    (engine, output)
 }
 
 fn run(source: &str) -> String {

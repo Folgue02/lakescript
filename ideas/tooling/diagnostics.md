@@ -10,4 +10,4 @@ error: $age is a number, can't assign a string
    |        ^^^^^ this is a string
 ```
 
-The first version can be simpler, like `script.lks:12:8: $age is a number, can't assign a string`, as long as it shows the file, line and column.
+`lks` shows errors this way: syntax errors, type errors and exceptions that aren't caught. A program that embeds Lakescript gets the message, the file, the line and the column, and can show them however it wants *(`Diagnostic::render` for one line, `Diagnostic::render_with_source` for this format)*.

@@ -17,7 +17,7 @@ The first versions are a **tree-walking interpreter**: the script is parsed into
 
 ## Status
 
-- Phases 1, 2 and 3 are done, except `random()` and `shuffle()`, and commands written with `%x"..."` on Windows.
+- Phases 1 to 4 are done, except commands written with `%x"..."` on Windows.
 - `examples/backup/backup.lks` is the phase 3 milestone: a real backup script with a module next to it, a JSON config, commands and files.
 
 ## Notes

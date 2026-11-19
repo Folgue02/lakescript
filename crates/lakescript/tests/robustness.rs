@@ -6,6 +6,7 @@ use lakescript::{CapturedOutput, Engine};
 fn run(source: &str) -> Result<String, String> {
     let output = CapturedOutput::new();
     let mut engine = Engine::with_output(output.clone());
+    engine.set_type_check(false);
     engine.run(source).map(|_| output.text()).map_err(|e| e.message)
 }
 

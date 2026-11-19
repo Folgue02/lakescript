@@ -7,6 +7,7 @@
 //! - never panics because of what a script does.
 
 pub mod ast;
+mod checker;
 mod command;
 pub mod diagnostic;
 mod engine;

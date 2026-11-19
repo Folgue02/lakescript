@@ -15,3 +15,14 @@ It writes `target/docs/stdlib.html`, or the path given as an argument. It only n
 - Tables whose first column is `Method`, `Function` or `Constant` become the members, with their signature, what they return and a description. Each `##` heading is a group. Everything else (text, examples, other tables) is shown as it is.
 
 Add a new type or module to `TYPES` or `MODULES` when its notes are written.
+
+## Signatures for the type checker
+
+`prelude.py` reads the same tables and writes `crates/lakescript/src/checker/prelude.txt`, the signatures the type checker knows for every built-in method and standard library function:
+
+```
+python3 tools/docs/prelude.py
+```
+
+Run it after changing a signature in `ideas/stdlib`, so the checker and the docs agree.
+

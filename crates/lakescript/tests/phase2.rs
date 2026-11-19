@@ -6,6 +6,7 @@ use lakescript::{CapturedOutput, Engine};
 fn run(source: &str) -> String {
     let output = CapturedOutput::new();
     let mut engine = Engine::with_output(output.clone());
+    engine.set_type_check(false);
     if let Err(e) = engine.run(source) {
         panic!("{}\n--- script:\n{source}\n--- printed:\n{}", e.render("test.lks"), output.text());
     }
@@ -14,6 +15,7 @@ fn run(source: &str) -> String {
 
 fn error(source: &str) -> String {
     let mut engine = Engine::with_output(CapturedOutput::new());
+    engine.set_type_check(false);
     match engine.run(source) {
         Ok(_) => panic!("expected an error:\n{source}"),
         Err(e) => e.render("test.lks"),

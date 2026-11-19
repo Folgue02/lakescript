@@ -15,9 +15,5 @@ outln(fmt::title('the module system'));
 outln(fmt::table({'name' => 'lakescript', 'kind' => 'scripting language'}));
 outln(path::name(fmt::$source));
 
-// Only `pub` names can be used from outside
-try {
-    outln(math::helper());
-} catch ($e) {
-    outln($e.message());
-}
+// Only `pub` names can be used from outside: `math::helper()` would be an
+// error before the script runs, because `helper` in math.lks isn't `pub`.

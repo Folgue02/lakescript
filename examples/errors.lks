@@ -25,12 +25,15 @@ try {
     outln(f"{$e.typeName()} is an IOError: {$e.is(IOError)}");
 }
 
-// Every runtime error has a type
+// Every runtime error has a type. Most type errors are found before the
+// script runs; with `any` values, they can only be found while it runs.
+any $text = 'a';
+any $data = {'a' => 1};
 const $attempts = [
     () = [1, 2][5],
     () = 10 % 0,
-    () = 'a' + 1,
-    () = {'a' => 1}['a'].as(string),
+    () = $text + 1,
+    () = $data['a'].as(string),
 ];
 for ($attempt in $attempts) {
     try {

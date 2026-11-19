@@ -10,6 +10,8 @@ cargo run -p lks -- examples/hello.lks
 
 Or build once with `cargo build -p lks` and use `target/debug/lks examples/hello.lks`.
 
+Every example is type checked before it runs, like any script. `lks --no-type-check` skips it.
+
 ## The language
 
 | Example | Shows |
@@ -22,6 +24,7 @@ Or build once with `cargo build -p lks` and use `target/debug/lks examples/hello
 | [collections.lks](collections.lks) | List and map methods: grouping, sorting, folding, counting |
 | [patterns.lks](patterns.lks) | `-like`, regexes with `-match` and `.match()`, path tests |
 | [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw`, `try` returning a `result` |
+| [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, type aliases |
 
 ## Scripts that use the system
 

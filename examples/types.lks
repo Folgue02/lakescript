@@ -1,0 +1,57 @@
+#!/usr/bin/lks
+// Types: checked before the script runs, and inferred so they rarely need writing.
+// Try changing a line to something wrong, like `$total = 'none';`: the script
+// won't start, and the error shows the line.
+
+// Inferred from the first value
+let $total = 0;
+const $names = ['Ana', 'Bo'];
+let $seen = [];                 // its type comes from how it's used next
+$seen << 'Cy';
+
+// Written only when the first value isn't enough
+?string $nickname = null;
+any $loose = 'anything';
+
+// Functions: the parameters and the return type are checked at every call
+number add(number $a, number $b = 1) = $a + $b;
+$total = add($total, 41);
+outln($total);
+
+// Generics: the type parameter is inferred at each call
+T last<T>(list<T> $items) = $items[-1];
+outln(last($names).upper());
+outln(last([1, 2, 3]) * 10);
+
+// Anonymous functions take their parameter types from where they go
+outln($names.map(($n) = $n.length()));
+
+// A map gives `null` for a missing key, so the value is nullable
+const $ages = {'Ana' => 30};
+outln($ages['Ana'] ?? 0);
+
+// Checking for `null` narrows the type
+$nickname = if ($names.length() > 1) 'Bee' else null;
+if ($nickname != null)
+    outln($nickname.upper());     // here $nickname is a string, not ?string
+
+// .is() narrows too, and .as() turns an `any` into a type
+if ($loose.is(string))
+    outln($loose.length());
+const $count = '5'.toNumber();
+outln($count + 1);
+
+// So does `case` with a type
+string describe(any $value) = switch ($value) {
+    case number -> f"the number {$value * 2 / 2}";
+    case string -> f"the string '{$value.lower()}'";
+    default -> 'something else';
+};
+outln(describe(7));
+outln(describe('HI'));
+
+// Type aliases give long types a name
+type Check = (string) -> bool;
+const $long = ($s) = $s.length() > 2;
+Check $test = $long;
+outln($names.filter($test));
