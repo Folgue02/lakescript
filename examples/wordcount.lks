@@ -13,7 +13,7 @@ const $top = if ($args.empty?()) 5 else $args[0].toNumber();
 const $text = if (io::piped?()) io::readAll() else 'the cat and the dog and the bird and a cat';
 
 const $words = $text.lower()
-    .split(%r"[^a-z']+")
+    .splitMatches(%r"[^a-z']+")
     .reject(($w) = $w.empty?());
 
 outln(f"{$words.length()} words, {$words.unique().length()} different");

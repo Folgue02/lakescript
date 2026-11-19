@@ -19,6 +19,7 @@ mod modules;
 pub mod parser;
 mod patterns;
 mod scope;
+mod stack;
 mod stdlib;
 pub mod token;
 mod types;
@@ -36,4 +37,9 @@ pub fn parse(source: &str) -> Result<Vec<ast::Stmt>, Diagnostic> {
 /// Like `parse`, for the file with that number *(see `Span::file`)*.
 pub fn parse_file(source: &str, file: u32) -> Result<Vec<ast::Stmt>, Diagnostic> {
     parser::parse(lexer::tokenize_file(source, file)?)
+}
+
+/// Like `parse_file`, with the stack budget of the engine.
+pub(crate) fn parse_budgeted(source: &str, file: u32, stack_budget: usize) -> Result<Vec<ast::Stmt>, Diagnostic> {
+    parser::parse_with_budget(lexer::tokenize_file(source, file)?, stack_budget)
 }

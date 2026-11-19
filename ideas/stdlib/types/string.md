@@ -74,10 +74,14 @@ All the `indexOf` methods return `null` when the text isn't found.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `replace(string \| regex $find, string $with)` | `string` | Replaces every `$find` *(i.e. `'a-b-c'.replace('-', '+')` is `'a+b+c'`)*. With a regex, `$1`, `$2`... in `$with` are the groups |
-| `replaceFirst(string \| regex $find, string $with)` | `string` | Replaces only the first `$find` |
-| `replaceLast(string \| regex $find, string $with)` | `string` | Replaces only the last `$find` |
-| `remove(string \| regex $find)` | `string` | Removes every `$find` *(i.e. `'1,000,000'.remove(',')` is `'1000000'`)* |
+| `replace(string $find, string $with)` | `string` | Replaces every `$find` *(i.e. `'a-b-c'.replace('-', '+')` is `'a+b+c'`)* |
+| `replaceFirst(string $find, string $with)` | `string` | Replaces only the first `$find` |
+| `replaceLast(string $find, string $with)` | `string` | Replaces only the last `$find` |
+| `remove(string $find)` | `string` | Removes every `$find` *(i.e. `'1,000,000'.remove(',')` is `'1000000'`)* |
+| `replaceMatches(regex $pattern, string $with)` | `string` | Replaces every match of `$pattern`. `$1`, `$2`... in `$with` are its groups *(i.e. `'Smith, John'.replaceMatches(%r"(\w+), (\w+)", '$2 $1')` is `'John Smith'`)* |
+| `replaceFirstMatch(regex $pattern, string $with)` | `string` | Replaces only the first match |
+| `replaceLastMatch(regex $pattern, string $with)` | `string` | Replaces only the last match |
+| `removeMatches(regex $pattern)` | `string` | Removes every match *(i.e. `'a1b22'.removeMatches(%r"\d")` is `'ab'`)* |
 | `insert(number $index, string $text)` | `string` | Inserts `$text` at `$index` *(i.e. `'helo'.insert(3, 'l')` is `'hello'`)*. Throws an `IndexError` if `$index` is past the end |
 | `repeat(number $times)` | `string` | *(i.e. `'-'.repeat(20)`)* |
 | `reverse()` | `string` | The characters in reverse order *(i.e. `'abc'.reverse()` is `'cba'`)* |
@@ -90,7 +94,8 @@ All the `indexOf` methods return `null` when the text isn't found.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `split(string \| regex $separator, ?number $limit = null)` | `list<string>` | Splits at every `$separator`. With `$limit`, makes at most that many parts *(i.e. `'a,b,c'.split(',')` is `['a', 'b', 'c']`, `'a,b,c'.split(',', 2)` is `['a', 'b,c']`)* |
+| `split(string $separator, ?number $limit = null)` | `list<string>` | Splits at every `$separator`. With `$limit`, makes at most that many parts *(i.e. `'a,b,c'.split(',')` is `['a', 'b', 'c']`, `'a,b,c'.split(',', 2)` is `['a', 'b,c']`)* |
+| `splitMatches(regex $pattern, ?number $limit = null)` | `list<string>` | Splits at every match of `$pattern` *(i.e. `'a, b;c'.splitMatches(%r"[,;]\s*")` is `['a', 'b', 'c']`)* |
 | `splitOnce(string $separator)` | `?list<string>` | The part before and the part after the first `$separator`, or `null` if it's not there *(i.e. `'key=a=b'.splitOnce('=')` is `['key', 'a=b']`)* |
 | `lines()` | `list<string>` | Splits at new lines, `\n` or `\r\n`, without them. A last empty line is ignored *(i.e. `"a\nb\n".lines()` is `['a', 'b']`)* |
 | `words()` | `list<string>` | Splits at any whitespace, ignoring empty parts *(i.e. `' a  b\tc '.words()` is `['a', 'b', 'c']`)* |

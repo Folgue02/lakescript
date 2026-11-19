@@ -26,6 +26,33 @@ pub struct Host {
     pub state: ScriptState,
     pub loader: Loader,
     pub builtins: Env,
+    /// The state of the random number generator, for `random()` and `shuffle()`.
+    pub rng: u64,
+}
+
+impl Host {
+    /// A random number, from xorshift64*. Good enough for scripts, not for secrets.
+    pub fn random(&mut self) -> u64 {
+        let mut x = self.rng;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.rng = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    /// A random number from `0` to `n - 1`.
+    pub fn random_below(&mut self, n: usize) -> usize {
+        (self.random() % n as u64) as usize
+    }
+}
+
+/// A seed that's different on every run.
+pub fn seed() -> u64 {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(0);
+    let local = 0u8;
+    let address = &local as *const u8 as u64;
+    (nanos ^ (std::process::id() as u64).rotate_left(32) ^ address) | 1
 }
 
 /// The part of the outside world a script can change. Changes stay in here:

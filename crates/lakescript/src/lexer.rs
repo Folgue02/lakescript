@@ -54,6 +54,8 @@ enum Escapes {
 
 struct Lexer {
     file: u32,
+    /// How many interpolated strings we're inside right now.
+    interpolation_depth: usize,
     chars: Vec<char>,
     pos: usize,
     line: u32,
@@ -62,7 +64,7 @@ struct Lexer {
 
 impl Lexer {
     fn new(source: &str) -> Self {
-        Lexer { chars: source.chars().collect(), pos: 0, line: 1, column: 1, file: 0 }
+        Lexer { chars: source.chars().collect(), pos: 0, line: 1, column: 1, file: 0, interpolation_depth: 0 }
     }
 
     // ---- Cursor ----
@@ -678,6 +680,16 @@ impl Lexer {
     /// The tokens between `{` and its matching `}`. The `{` is already read.
     fn lex_interpolation(&mut self) -> Result<Vec<Token>, Diagnostic> {
         let open = Mark { pos: self.pos - 1, line: self.line, column: self.column - 1 };
+        if self.interpolation_depth >= crate::stack::MAX_INTERPOLATION_DEPTH {
+            return self.error("interpolated strings are nested too deeply", open);
+        }
+        self.interpolation_depth += 1;
+        let result = self.lex_interpolation_inner(open);
+        self.interpolation_depth -= 1;
+        result
+    }
+
+    fn lex_interpolation_inner(&mut self, open: Mark) -> Result<Vec<Token>, Diagnostic> {
         let mut tokens = Vec::new();
         let mut depth = 0;
         loop {

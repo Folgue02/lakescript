@@ -327,4 +327,5 @@ const $parts = '2026-11-18'.match(%r"(\d+)-(\d+)-(\d+)");
 const $year = '2026-11-18'.match(%r"^(\d+)")?[1];   // '2026'
 ```
 
-- `.match()` returns a `?list<string>`. Like `-match`, it also accepts a string as the pattern.
+- `.match()` returns a `?list<string>`. Unlike `-match`, it only takes a regex: to use a string as a pattern, make it a regex first.
+- The other string methods that work with regexes end in `Matches` or `Match`: `replaceMatches`, `replaceFirstMatch`, `replaceLastMatch`, `removeMatches` and `splitMatches` *(see [string.md](../stdlib/types/string.md))*. There are no union types, so each method takes either a string or a regex, never both.

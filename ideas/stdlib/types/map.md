@@ -18,7 +18,7 @@
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `get(K $key, V $default)` | `V` | The value of `$key`, or `$default` if it's not there *(i.e. `$config.get('port', 8080)`)* |
+| `getOrDefault(K $key, V $default)` | `V` | The value of `$key`, or `$default` if it's not there *(i.e. `$config.getOrDefault('port', 8080)`)*. `$map[$key]` gives a `?V`, which is `null` when the key isn't there |
 | `getOrSet(K $key, V $default)` | `V` | The value of `$key`. If it's not there, it's set to `$default` first *(i.e. `$groups.getOrSet($ext, []) << $file;`)* |
 | `first()` | `?K` | The first key, or `null` if the map is empty |
 | `last()` | `?K` | The last key, or `null` if the map is empty |

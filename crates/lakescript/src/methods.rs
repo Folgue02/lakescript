@@ -348,21 +348,38 @@ fn captures_list(caps: &regex::Captures) -> Value {
 }
 
 fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
-    // The methods that also take a regex
-    let regex_arg = match a.get(0) {
-        Some(Value::Regex(r)) => Some(r.clone()),
-        _ => None,
-    };
     let method = a.method.as_str();
-    if let Some(re) = &regex_arg {
+    // The methods that take a regex
+    let regex_method = matches!(
+        method,
+        "replaceMatches" | "replaceFirstMatch" | "replaceLastMatch" | "removeMatches" | "splitMatches" | "match" | "matchAll"
+    );
+    if regex_method {
+        let re = match a.get(0) {
+            Some(Value::Regex(r)) => r.clone(),
+            Some(Value::Str(_)) if method == "match" || method == "matchAll" => {
+                return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a regex, not a string *(i.e. `%r\"...\"`)*"));
+            }
+            Some(Value::Str(_)) => {
+                let plain = match method {
+                    "replaceMatches" => "replace",
+                    "replaceFirstMatch" => "replaceFirst",
+                    "replaceLastMatch" => "replaceLast",
+                    "removeMatches" => "remove",
+                    _ => "split",
+                };
+                return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a regex. For a string, use `.{plain}()`"));
+            }
+            _ => return a.wrong(0, "a regex"),
+        };
         let re = &re.compiled;
         let result = match method {
-            "replace" | "replaceFirst" | "replaceLast" => {
+            "replaceMatches" | "replaceFirstMatch" | "replaceLastMatch" => {
                 a.count(2, 2)?;
                 let with = a.str(1)?;
                 match method {
-                    "replace" => string(re.replace_all(s, &*with)),
-                    "replaceFirst" => string(re.replacen(s, 1, &*with)),
+                    "replaceMatches" => string(re.replace_all(s, &*with)),
+                    "replaceFirstMatch" => string(re.replacen(s, 1, &*with)),
                     _ => match re.captures_iter(s).last() {
                         Some(caps) => {
                             let whole = caps.get(0).unwrap();
@@ -374,11 +391,11 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
                     },
                 }
             }
-            "remove" => {
+            "removeMatches" => {
                 a.count(1, 1)?;
                 string(re.replace_all(s, ""))
             }
-            "split" => {
+            "splitMatches" => {
                 a.count(1, 2)?;
                 let parts: Vec<Value> = match a.get(1) {
                     None | Some(Value::Null) => re.split(s).map(string).collect(),
@@ -390,24 +407,25 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
                 a.count(1, 1)?;
                 nullable(re.captures(s).map(|c| captures_list(&c)))
             }
-            "matchAll" => {
+            _ => {
                 a.count(1, 1)?;
                 Value::list(re.captures_iter(s).map(|c| captures_list(&c)).collect())
             }
-            _ => return a.wrong(0, "a string"),
         };
         return Ok(Some(result));
     }
-    if method == "match" || method == "matchAll" {
-        a.count(1, 1)?;
-        // A string as the pattern is compiled as a regex, like with `-match`
-        let re = interp.as_regex(&a.value(0)).map_err(|m| flow_error_as(VALUE_ERROR, m, a.span))?;
-        return Ok(Some(if method == "match" {
-            nullable(re.compiled.captures(s).map(|c| captures_list(&c)))
-        } else {
-            Value::list(re.compiled.captures_iter(s).map(|c| captures_list(&c)).collect())
-        }));
+    // The plain versions don't take a regex
+    if matches!(method, "replace" | "replaceFirst" | "replaceLast" | "remove" | "split") && matches!(a.get(0), Some(Value::Regex(_))) {
+        let regex_name = match method {
+            "replace" => "replaceMatches",
+            "replaceFirst" => "replaceFirstMatch",
+            "replaceLast" => "replaceLastMatch",
+            "remove" => "removeMatches",
+            _ => "splitMatches",
+        };
+        return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a string. For a regex, use `.{regex_name}()`"));
     }
+    let _ = interp;
     string_method_plain(s, a)
 }
 
@@ -876,7 +894,31 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
         // Getting
         "first" => nullable(list.borrow().first().cloned()),
         "last" => nullable(list.borrow().last().cloned()),
-        "get" => {
+        "random" => {
+            a.count(0, 0)?;
+            if len == 0 {
+                Value::Null
+            } else {
+                let i = interp.host.random_below(len);
+                list.borrow()[i].clone()
+            }
+        }
+        "shuffle" | "shuffled" => {
+            a.count(0, 0)?;
+            // Fisher-Yates
+            let mut values = items();
+            for i in (1..values.len()).rev() {
+                let j = interp.host.random_below(i + 1);
+                values.swap(i, j);
+            }
+            if method == "shuffle" {
+                *list.borrow_mut() = values;
+                receiver.clone()
+            } else {
+                Value::list(values)
+            }
+        }
+        "getOrDefault" => {
             a.count(2, 2)?;
             let i = a.whole(0)?;
             let pos = if i < 0 { len as i64 + i } else { i };
@@ -1252,7 +1294,7 @@ fn map_method(interp: &mut Interpreter, receiver: &Value, map: &Rc<RefCell<Index
         }
 
         // Getting
-        "get" => {
+        "getOrDefault" => {
             a.count(2, 2)?;
             let k = key(0)?;
             map.borrow().get(&k).cloned().unwrap_or_else(|| a.value(1))
@@ -1601,6 +1643,17 @@ fn range_method(interp: &mut Interpreter, range: Range, a: &Args) -> Exec<Option
             }
         }
         "toList" => Value::list(range.iter().map(Value::Int).collect()),
+        "random" => {
+            a.count(0, 0)?;
+            let count = range.iter().count();
+            if count == 0 {
+                Value::Null
+            } else {
+                let i = interp.host.random_below(count) as i64;
+                let n = if range.start <= range.end { range.start + i * range.step } else { range.start - i * range.step };
+                Value::Int(n)
+            }
+        }
         "sum" => {
             let mut acc = Value::Int(0);
             for n in range.iter() {

@@ -1,6 +1,6 @@
 # regex
 
-A regular expression, written `%r"..."` *(see Regex in [builtin_types.md](../../language/builtin_types.md))*. Matching is done with `-match` and with the string methods `match()`, `matchAll()`, `replace()` and `split()` *(see [string.md](string.md))*.
+A regular expression, written `%r"..."` *(see Regex in [builtin_types.md](../../language/builtin_types.md))*. Matching is done with `-match` and with the string methods `match()`, `matchAll()`, `replaceMatches()`, `replaceFirstMatch()`, `replaceLastMatch()`, `removeMatches()` and `splitMatches()` *(see [string.md](string.md))*.
 
 ## Information
 

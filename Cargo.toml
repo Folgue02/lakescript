@@ -9,3 +9,9 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 lakescript = { path = "crates/lakescript" }
+
+# The interpreter walks the syntax tree with Rust's stack. Unoptimized
+# builds use several times more stack per nested expression, so the
+# language crate is lightly optimized even in debug builds.
+[profile.dev.package.lakescript]
+opt-level = 1

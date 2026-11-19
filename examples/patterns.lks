@@ -19,9 +19,9 @@ outln(f"Year {$year}, month {$month}, day {$day}");
 
 // Every match, and replacing with groups
 outln('a1 b22 c333'.matchAll(%r"([a-z])(\d+)").map(($m) = $m[2].length()));
-outln('Smith, John'.replace(%r"(\w+), (\w+)", '$2 $1'));
-outln('too    many   spaces'.replace(%r"\s+", ' '));
-outln('a;b, c'.split(%r"[;,]\s*"));
+outln('Smith, John'.replaceMatches(%r"(\w+), (\w+)", '$2 $1'));
+outln('too    many   spaces'.replaceMatches(%r"\s+", ' '));
+outln('a;b, c'.splitMatches(%r"[;,]\s*"));
 
 // A string can be used as a pattern too
 const $userPattern = '^[a-z]+$';

@@ -66,13 +66,16 @@ fn string_methods_with_regexes() {
     assert_eq!(eval("'abc'.match(%r\"\\d\")"), "null");
     assert_eq!(eval("'2026-11-18'.match(%r\"^(\\d+)\")?[1]"), "2026");
     assert_eq!(eval("'a1 b2'.matchAll(%r\"\\w(\\d)\")"), "[['a1', '1'], ['b2', '2']]");
-    assert_eq!(eval("'a1b22c'.replace(%r\"\\d+\", '#')"), "a#b#c");
-    assert_eq!(eval("'John Smith'.replace(%r\"(\\w+) (\\w+)\", '$2, $1')"), "Smith, John");
-    assert_eq!(eval("'a1b2'.replaceFirst(%r\"\\d\", '_')"), "a_b2");
-    assert_eq!(eval("'a1b2'.replaceLast(%r\"\\d\", '_')"), "a1b_");
-    assert_eq!(eval("'a1b22c'.remove(%r\"\\d\")"), "abc");
-    assert_eq!(eval("'a, b;c'.split(%r\"[,;]\\s*\")"), "['a', 'b', 'c']");
+    assert_eq!(eval("'a1b22c'.replaceMatches(%r\"\\d+\", '#')"), "a#b#c");
+    assert_eq!(eval("'John Smith'.replaceMatches(%r\"(\\w+) (\\w+)\", '$2, $1')"), "Smith, John");
+    assert_eq!(eval("'a1b2'.replaceFirstMatch(%r\"\\d\", '_')"), "a_b2");
+    assert_eq!(eval("'a1b2'.replaceLastMatch(%r\"\\d\", '_')"), "a1b_");
+    assert_eq!(eval("'a1b22c'.removeMatches(%r\"\\d\")"), "abc");
+    assert_eq!(eval("'a, b;c'.splitMatches(%r\"[,;]\\s*\")"), "['a', 'b', 'c']");
     assert_eq!(eval("'1+1'.escapeRegex()"), "1\\+1");
+    assert!(error("'a1'.replace(%r\"\\d\", 'x');").contains("For a regex, use `.replaceMatches()`"));
+    assert!(error("'a1'.replaceMatches('1', 'x');").contains("For a string, use `.replace()`"));
+    assert!(error("'a1'.match('1');").contains("takes a regex, not a string"));
     assert_eq!(eval("'x.y' -match '1+1'.escapeRegex()"), "false");
 }
 

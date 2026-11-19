@@ -1,6 +1,11 @@
 # Type checking
 
 - Types are optional. They're checked once, before the script runs, and then removed, so there are no type checks while the script runs. Typed and untyped code run at the same speed.
+- `lks` checks the types every time before running a script. Until there's a cache *(phase 5)*, this makes startup a bit slower.
+- A type error stops the script before its first line runs, like a syntax error. There are no type warnings.
+- A check against `null` narrows the type: after `if ($x == null) return;`, or inside `if ($x != null) { ... }`, `$x` isn't nullable anymore, like in TypeScript and Kotlin. The same as `.is()` and `case string ->` already do.
+- The check can be turned off completely, for scripts that are shipped already checked. Since types never change what the code does, the script behaves the same.
+- There are no union types *(i.e. `string | number`)*. A value with one of several types is `any`, or the functions that need it are split in two *(i.e. one for a `string` and one for a `regex`)*.
 - When a type isn't written and can't be inferred, it's `any`: function parameters without a type, `let $x = null;`, and values that come from other `any` values. 
 - The type of an empty list or map is inferred from how it's used later. It's only `list<any>` or `map<any, any>` when nothing tells its type:
 

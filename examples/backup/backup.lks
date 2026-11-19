@@ -19,7 +19,7 @@ if ($args.empty?() || $args.length() > 2) {
 }
 
 const $source = path::absolute($args[0]);
-const $target = path::absolute($args.get(1, path::join(path::home(), 'backups')));
+const $target = path::absolute($args.getOrDefault(1, path::join(path::home(), 'backups')));
 
 if (!-d $source) {
     errln(f"backup: '{$source}' isn't a folder");

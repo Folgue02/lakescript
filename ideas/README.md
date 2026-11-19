@@ -34,4 +34,5 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
     - [modules.md](language/modules.md): `use`, `pub` and how modules match folders.
 - [stdlib/](stdlib): the standard library.
 - [tooling/](tooling): the interpreter and the tools around it.
+    - [lks.md](tooling/lks.md): the command line of the interpreter.
     - [diagnostics.md](tooling/diagnostics.md): how error messages look.

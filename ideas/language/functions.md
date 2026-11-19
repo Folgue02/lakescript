@@ -7,7 +7,7 @@
 - Should allow calling them while naming parameters. Named and positional arguments can be mixed, but positional ones go first *(i.e. `createFile('daniel', extension: 'jpg')`)*.
 - Must always have a return type. Functions that don't return anything use `void` *(i.e. `void log(string $message) { ... }`)*. This way a definition never looks like a call followed by a block.
 - Should allow generics. The type parameters go after the name *(i.e. `T first<T>(list<T> $items) = $items[0];`)*. They're inferred when calling, so they're never written in a call: `first($names)`.
-- Must be defined before they're called *(see [syntax.md](syntax.md))*.
+- Must be defined before they're called *(see [syntax.md](syntax.md))*. Because of this, two functions can't call each other: the first one can't see the second. A function can call itself.
 - Functions can use the variables and constants declared outside them, as long as they're declared before the function. `let` variables can be read and changed, `const` ones can only be read:
 
 ```

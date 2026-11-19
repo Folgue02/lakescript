@@ -86,6 +86,7 @@ impl Engine {
             state: ScriptState::new(),
             loader: Loader::new(),
             builtins,
+            rng: crate::host::seed(),
         };
         let mut engine = Engine { globals, host, stack_budget: 1024 * 1024 };
         engine.register_builtins();
@@ -147,7 +148,7 @@ impl Engine {
     /// Runs a script given as text. Variables and functions it declares are
     /// kept, so the next `run` can use them.
     pub fn run(&mut self, source: &str) -> Result<Outcome, Diagnostic> {
-        let program = crate::parse(source)?;
+        let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
         let mut interpreter = Interpreter::new(&mut self.host, self.stack_budget);
         let result = interpreter.run(&program, &self.globals);
         let _ = self.host.output.flush();

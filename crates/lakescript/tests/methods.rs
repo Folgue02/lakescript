@@ -158,7 +158,7 @@ fn list_basics() {
     assert_eq!(eval("[17, 20, 30].countWhere(($a) = $a >= 18)"), "2");
     assert_eq!(eval("[].first()"), "null");
     assert_eq!(eval("[1, 2].last()"), "2");
-    assert_eq!(eval("[1, 2].get(5, 0)"), "0");
+    assert_eq!(eval("[1, 2].getOrDefault(5, 0)"), "0");
 }
 
 #[test]
@@ -257,7 +257,7 @@ fn list_combining() {
 fn maps() {
     let script = "
         let $m = {'a' => 1, 'b' => 2};
-        outln($m.get('z', 0));
+        outln($m.getOrDefault('z', 0));
         outln($m.keyOf(2));
         outln($m.hasValue(1));
         let $groups = <string, list<string>>{};
@@ -298,6 +298,28 @@ fn ranges() {
     assert_eq!(eval("(1..=3).map(($n) = $n * $n)"), "[1, 4, 9]");
     assert_eq!(eval("(1..=10).filter(($n) = $n % 3 == 0)"), "[3, 6, 9]");
     assert_eq!(eval("(1..=100).sum()"), "5050");
+}
+
+#[test]
+fn randomness() {
+    let out = run("
+        const $l = [1, 2, 3, 4, 5];
+        outln($l.random() -in $l);
+        outln([].random());
+        const $s = $l.shuffled();
+        outln($s.sorted().equals($l));
+        outln($l);
+        let $m = [1, 2, 3];
+        outln($m.shuffle() == $m);
+        outln($m.sorted());
+        outln((1..=6).random().between(1, 6));
+        outln((10..0).step(5).random() -in [10, 5]);
+        outln((3..3).random());
+        let $seen = <number, bool>{};
+        for ($i in 0..200) $seen[(1..=3).random()] = true;
+        outln($seen.keys().sorted());
+    ");
+    assert_eq!(out, "true\nnull\ntrue\n[1, 2, 3, 4, 5]\ntrue\n[1, 2, 3]\ntrue\ntrue\nnull\n[1, 2, 3]\n");
 }
 
 #[test]

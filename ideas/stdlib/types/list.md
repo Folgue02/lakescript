@@ -20,7 +20,7 @@
 |--------|---------|-------------|
 | `first()` | `?T` | The first element, or `null` if the list is empty |
 | `last()` | `?T` | The last element, or `null` if the list is empty |
-| `get(number $index, T $default)` | `T` | The element at `$index`, or `$default` if it's outside the list. Negative indexes work like with `[]` |
+| `getOrDefault(number $index, T $default)` | `T` | The element at `$index`, or `$default` if it's outside the list. Negative indexes work like with `[]` |
 | `random()` | `?T` | A random element, or `null` if the list is empty |
 
 ## Adding and removing

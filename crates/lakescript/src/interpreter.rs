@@ -85,14 +85,22 @@ pub struct Interpreter<'a> {
     stack_budget: usize,
 }
 
-fn stack_position() -> usize {
-    let marker = 0u8;
-    std::hint::black_box(&marker) as *const u8 as usize
-}
+use crate::stack::position as stack_position;
 
 impl<'a> Interpreter<'a> {
     pub fn new(host: &'a mut Host, stack_budget: usize) -> Self {
         Interpreter { host, stack_base: stack_position(), stack_budget }
+    }
+
+    /// Stops code that's nested too deeply before it overflows the stack.
+    #[inline(always)]
+    fn check_stack(&self, span: Span) -> Exec<()> {
+        // A little more room than calls get, so an endless recursion is
+        // reported as one, by the check in `call`
+        if stack_position().abs_diff(self.stack_base) > self.stack_budget + self.stack_budget / 8 {
+            return error("the code is nested too deeply", span);
+        }
+        Ok(())
     }
 
     /// What native functions and commands can use.
@@ -151,6 +159,7 @@ impl<'a> Interpreter<'a> {
     // ---- Statements ----
 
     fn exec(&mut self, stmt: &Stmt, env: &Env) -> Exec<()> {
+        self.check_stack(stmt.span)?;
         match &stmt.kind {
             StmtKind::Let { constant, name, value, .. } => {
                 let value = self.eval(value, env)?;
@@ -477,6 +486,7 @@ impl<'a> Interpreter<'a> {
 
     #[inline(never)]
     fn eval_rest(&mut self, expr: &Expr, env: &Env) -> Exec<Value> {
+        self.check_stack(expr.span)?;
         let span = expr.span;
         Ok(match &expr.kind {
             ExprKind::Int(n) => Value::Int(*n),
@@ -643,6 +653,7 @@ impl<'a> Interpreter<'a> {
 
     #[inline(never)]
     fn eval_binary(&mut self, op: BinaryOp, left: &Expr, right: &Expr, env: &Env, span: Span) -> Exec<Value> {
+        self.check_stack(span)?;
         // The ones that don't always evaluate their right side
         match op {
             BinaryOp::And | BinaryOp::Or => {
@@ -948,7 +959,7 @@ impl<'a> Interpreter<'a> {
         let source = std::fs::read_to_string(&path).map_err(|e| flow_error_as("IOError", format!("can't read the module '{shown}': {e}"), span))?;
         let file = self.host.loader.files.len() as u32;
         self.host.loader.files.push(shown.clone());
-        let program = crate::parse_file(&source, file).map_err(|d| flow_error(d.message, d.span))?;
+        let program = crate::parse_budgeted(&source, file, self.stack_budget).map_err(|d| flow_error(d.message, d.span))?;
 
         let env = scope::new_scope(&self.host.builtins);
         let mut public = std::collections::HashSet::new();

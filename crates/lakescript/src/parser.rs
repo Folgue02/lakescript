@@ -15,7 +15,14 @@ use crate::token::{Keyword, Span, StringPart as TokenPart, Token, TokenKind};
 type Result<T> = std::result::Result<T, Diagnostic>;
 
 pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>> {
+    parse_with_budget(tokens, crate::stack::DEFAULT_BUDGET)
+}
+
+/// Like `parse`, allowing the parser to use `stack_budget` bytes of stack
+/// before deeply nested code becomes an error.
+pub fn parse_with_budget(tokens: Vec<Token>, stack_budget: usize) -> Result<Vec<Stmt>> {
     let mut parser = Parser::new(tokens);
+    parser.stack_budget = stack_budget;
     let mut stmts = Vec::new();
     // `use` lines go at the top, before any other statement
     while parser.check(&TokenKind::Keyword(Keyword::Use)) {
@@ -38,6 +45,9 @@ struct Parser {
     /// What the current token looks like when it's partly used.
     split_token: Token,
     last_span: Span,
+    /// Where the stack was when parsing started, and how much it may use *(see `guard`)*.
+    stack_base: usize,
+    stack_budget: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -49,7 +59,7 @@ struct Checkpoint {
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
         let eof = Token { kind: TokenKind::Eof, span: Span::default() };
-        Parser { tokens, pos: 0, split: 0, split_token: eof, last_span: Span::default() }
+        Parser { tokens, pos: 0, split: 0, split_token: eof, last_span: Span::default(), stack_base: crate::stack::position(), stack_budget: crate::stack::DEFAULT_BUDGET }
     }
 
     // ---- Cursor ----
@@ -140,6 +150,15 @@ impl Parser {
         Span { start: start.start, end: self.last_span.end.max(start.end), line: start.line, column: start.column, file: start.file }
     }
 
+    /// Stops deeply nested code with an error before it overflows the stack.
+    /// Every function that can be reached again from itself calls it.
+    fn guard(&self) -> Result<()> {
+        if crate::stack::position().abs_diff(self.stack_base) > self.stack_budget {
+            return self.error_here("this code is nested too deeply");
+        }
+        Ok(())
+    }
+
     fn error_here<T>(&self, message: impl Into<String>) -> Result<T> {
         Err(Diagnostic::new(message, self.peek().span))
     }
@@ -169,6 +188,7 @@ impl Parser {
     // ---- Statements ----
 
     fn statement(&mut self) -> Result<Stmt> {
+        self.guard()?;
         let start = self.peek().span;
         let kind = match &self.peek().kind {
             TokenKind::Keyword(k @ (Keyword::Let | Keyword::Const)) if self.peek_at(1) == &TokenKind::LBracket => {
@@ -521,6 +541,7 @@ impl Parser {
     // ---- Types ----
 
     fn parse_type(&mut self) -> Result<TypeExpr> {
+        self.guard()?;
         let start = self.peek().span;
         if self.eat(&TokenKind::Question) {
             let inner = self.type_atom()?;
@@ -588,10 +609,12 @@ impl Parser {
     // ---- Expressions ----
 
     fn expression(&mut self) -> Result<Expr> {
+        self.guard()?;
         self.assignment()
     }
 
     fn assignment(&mut self) -> Result<Expr> {
+        self.guard()?;
         let start = self.peek().span;
         let target = self.ternary()?;
         let op = match self.peek().kind {
@@ -622,8 +645,9 @@ impl Parser {
     }
 
     fn ternary(&mut self) -> Result<Expr> {
+        self.guard()?;
         let start = self.peek().span;
-        let cond = self.coalesce()?;
+        let cond = self.binary_expr(PREC_COALESCE)?;
         if !self.eat(&TokenKind::Question) {
             return Ok(cond);
         }
@@ -636,130 +660,55 @@ impl Parser {
         })
     }
 
-    fn coalesce(&mut self) -> Result<Expr> {
-        let start = self.peek().span;
-        let left = self.or()?;
-        if !self.eat(&TokenKind::QuestionQuestion) {
-            return Ok(left);
-        }
-        let right = self.coalesce()?;
-        Ok(self.binary(BinaryOp::Coalesce, left, right, start))
-    }
-
     fn binary(&self, op: BinaryOp, left: Expr, right: Expr, start: Span) -> Expr {
         Expr { kind: ExprKind::Binary { op, left: Box::new(left), right: Box::new(right) }, span: self.span_from(start) }
     }
 
-    /// One left-associative level: `next (op next)*`.
-    fn left_assoc(
-        &mut self,
-        next: fn(&mut Self) -> Result<Expr>,
-        op_of: fn(&TokenKind) -> Option<BinaryOp>,
-    ) -> Result<Expr> {
+    /// Every binary operator from `??` to `*`, as one loop with precedence
+    /// numbers (a Pratt parser) instead of one function per level, so nested
+    /// code uses little stack. `min` is the lowest precedence it may take.
+    fn binary_expr(&mut self, min: u8) -> Result<Expr> {
+        self.guard()?;
         let start = self.peek().span;
-        let mut left = next(self)?;
-        while let Some(op) = op_of(&self.peek().kind) {
+        let mut left = self.unary()?;
+        loop {
+            let Some((prec, infix)) = infix_op(&self.peek().kind) else { break };
+            if prec < min {
+                break;
+            }
             self.advance();
-            let right = next(self)?;
-            left = self.binary(op, left, right, start);
+            match infix {
+                // `a..b` and `a..=b`. The end can be left out where nothing could
+                // follow, like in `$text[-3..]`.
+                Infix::Range(inclusive) => {
+                    let end = if can_start_expression(&self.peek().kind) { Some(Box::new(self.binary_expr(PREC_RANGE + 1)?)) } else { None };
+                    if end.is_none() && inclusive {
+                        return self.error_here("`..=` needs an end *(i.e. `1..=5`)*");
+                    }
+                    left = Expr { kind: ExprKind::Range { start: Box::new(left), end, inclusive }, span: self.span_from(start) };
+                    if matches!(self.peek().kind, TokenKind::DotDot | TokenKind::DotDotEq) {
+                        return self.error_here("ranges can't be chained");
+                    }
+                }
+                Infix::Op(op) => {
+                    // `??` groups from the right, the rest from the left
+                    let next = if prec == PREC_COALESCE { prec } else { prec + 1 };
+                    let right = self.binary_expr(next)?;
+                    left = self.binary(op, left, right, start);
+                    if prec == PREC_RELATIONAL && infix_op(&self.peek().kind).is_some_and(|(p, _)| p == PREC_RELATIONAL) {
+                        return self.error_here(format!(
+                            "comparisons can't be chained: use `&&` *(i.e. `$a < $b && $b < $c`)*, found {}",
+                            self.peek().kind
+                        ));
+                    }
+                }
+            }
         }
         Ok(left)
     }
 
-    fn or(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::and, |k| (k == &TokenKind::OrOr).then_some(BinaryOp::Or))
-    }
-
-    fn and(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::bit_or, |k| (k == &TokenKind::AndAnd).then_some(BinaryOp::And))
-    }
-
-    fn bit_or(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::bit_xor, |k| (k == &TokenKind::Pipe).then_some(BinaryOp::BitOr))
-    }
-
-    fn bit_xor(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::bit_and, |k| (k == &TokenKind::Caret).then_some(BinaryOp::BitXor))
-    }
-
-    fn bit_and(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::equality, |k| (k == &TokenKind::Amp).then_some(BinaryOp::BitAnd))
-    }
-
-    fn equality(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::relational, |k| match k {
-            TokenKind::EqEq => Some(BinaryOp::Eq),
-            TokenKind::NotEq => Some(BinaryOp::NotEq),
-            _ => None,
-        })
-    }
-
-    /// `<`, `>`, `<=`, `>=` and the binary test operators. They can't be chained.
-    fn relational(&mut self) -> Result<Expr> {
-        let start = self.peek().span;
-        let left = self.range()?;
-        let Some(op) = relational_op(&self.peek().kind) else {
-            return Ok(left);
-        };
-        self.advance();
-        let right = self.range()?;
-        if relational_op(&self.peek().kind).is_some() {
-            return self.error_here(format!(
-                "comparisons can't be chained: use `&&` *(i.e. `$a < $b && $b < $c`)*, found {}",
-                self.peek().kind
-            ));
-        }
-        Ok(self.binary(op, left, right, start))
-    }
-
-    /// `a..b` and `a..=b`. The end can be left out where nothing could follow,
-    /// like in `$text[-3..]`.
-    fn range(&mut self) -> Result<Expr> {
-        let start = self.peek().span;
-        let left = self.shift()?;
-        let inclusive = match self.peek().kind {
-            TokenKind::DotDot => false,
-            TokenKind::DotDotEq => true,
-            _ => return Ok(left),
-        };
-        self.advance();
-        let end = if can_start_expression(&self.peek().kind) { Some(Box::new(self.shift()?)) } else { None };
-        if end.is_none() && inclusive {
-            return self.error_here("`..=` needs an end *(i.e. `1..=5`)*");
-        }
-        if matches!(self.peek().kind, TokenKind::DotDot | TokenKind::DotDotEq) {
-            return self.error_here("ranges can't be chained");
-        }
-        Ok(Expr { kind: ExprKind::Range { start: Box::new(left), end, inclusive }, span: self.span_from(start) })
-    }
-
-    fn shift(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::additive, |k| match k {
-            TokenKind::Shl => Some(BinaryOp::Shl),
-            TokenKind::Shr => Some(BinaryOp::Shr),
-            TokenKind::UShr => Some(BinaryOp::UShr),
-            _ => None,
-        })
-    }
-
-    fn additive(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::multiplicative, |k| match k {
-            TokenKind::Plus => Some(BinaryOp::Add),
-            TokenKind::Minus => Some(BinaryOp::Sub),
-            _ => None,
-        })
-    }
-
-    fn multiplicative(&mut self) -> Result<Expr> {
-        self.left_assoc(Self::unary, |k| match k {
-            TokenKind::Star => Some(BinaryOp::Mul),
-            TokenKind::Slash => Some(BinaryOp::Div),
-            TokenKind::Percent => Some(BinaryOp::Rem),
-            _ => None,
-        })
-    }
-
     fn unary(&mut self) -> Result<Expr> {
+        self.guard()?;
         let start = self.peek().span;
         let op = match &self.peek().kind {
             TokenKind::Minus => UnaryOp::Neg,
@@ -795,7 +744,7 @@ impl Parser {
         let start = self.peek().span;
         let TokenKind::TestOp(name) = self.advance().kind else { unreachable!() };
         let op = path_test_op(&name).unwrap();
-        let path = self.range()?;
+        let path = self.binary_expr(PREC_RANGE)?;
         Ok(Expr { kind: ExprKind::PathTest { op, path: Box::new(path) }, span: self.span_from(start) })
     }
 
@@ -1204,6 +1153,44 @@ fn covers_both_bools(cases: &[Case]) -> bool {
 
 fn is_assignable(expr: &Expr) -> bool {
     matches!(expr.kind, ExprKind::Variable(_) | ExprKind::Index { nullable: false, .. })
+}
+
+const PREC_COALESCE: u8 = 1;
+const PREC_RELATIONAL: u8 = 8;
+const PREC_RANGE: u8 = 9;
+
+enum Infix {
+    Op(BinaryOp),
+    /// `..` (`false`) or `..=` (`true`)
+    Range(bool),
+}
+
+/// The binary operators and their precedence, from `??` (1) to `*` (12).
+/// The order follows the table in `ideas/language/operators.md`.
+fn infix_op(kind: &TokenKind) -> Option<(u8, Infix)> {
+    use BinaryOp::*;
+    let (prec, op) = match kind {
+        TokenKind::QuestionQuestion => (PREC_COALESCE, Coalesce),
+        TokenKind::OrOr => (2, Or),
+        TokenKind::AndAnd => (3, And),
+        TokenKind::Pipe => (4, BitOr),
+        TokenKind::Caret => (5, BitXor),
+        TokenKind::Amp => (6, BitAnd),
+        TokenKind::EqEq => (7, Eq),
+        TokenKind::NotEq => (7, NotEq),
+        TokenKind::DotDot => return Some((PREC_RANGE, Infix::Range(false))),
+        TokenKind::DotDotEq => return Some((PREC_RANGE, Infix::Range(true))),
+        TokenKind::Shl => (10, Shl),
+        TokenKind::Shr => (10, Shr),
+        TokenKind::UShr => (10, UShr),
+        TokenKind::Plus => (11, Add),
+        TokenKind::Minus => (11, Sub),
+        TokenKind::Star => (12, Mul),
+        TokenKind::Slash => (12, Div),
+        TokenKind::Percent => (12, Rem),
+        other => return relational_op(other).map(|op| (PREC_RELATIONAL, Infix::Op(op))),
+    };
+    Some((prec, Infix::Op(op)))
 }
 
 fn relational_op(kind: &TokenKind) -> Option<BinaryOp> {
