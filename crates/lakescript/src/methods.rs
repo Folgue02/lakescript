@@ -999,7 +999,9 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
             for item in items() {
                 match item {
                     Value::List(l) => out.extend(l.borrow().iter().cloned()),
-                    other => out.push(other),
+                    other => {
+                        return error_as(TYPE_ERROR, format!("`.flatten()` needs a list of lists, but one element is a {}", other.type_name()), span);
+                    }
                 }
             }
             Value::list(out)
@@ -1048,11 +1050,6 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
                 return a.fail("the size of `.chunk()` must be at least 1");
             }
             Value::list(items().chunks(size).map(|c| Value::list(c.to_vec())).collect())
-        }
-        "zip" => {
-            a.count(1, 1)?;
-            let other = a.list(0)?;
-            Value::list(items().into_iter().zip(other).map(|(x, y)| Value::list(vec![x, y])).collect())
         }
         "concat" => {
             a.count(1, 1)?;

@@ -47,8 +47,8 @@ These change the list.
 |--------|---------|-------------|
 | `sort()` | `list<T>` | Sorts the list from smallest to biggest, using `<`. Returns the list |
 | `sorted()` | `list<T>` | A sorted copy |
-| `sortBy((T) -> any $key)` | `list<T>` | Sorts the list by what `$key` returns *(i.e. `$files.sortBy(($f) = $f.length())`)* |
-| `sortedBy((T) -> any $key)` | `list<T>` | A copy sorted by what `$key` returns |
+| `sortBy<K>((T) -> K $key)` | `list<T>` | Sorts the list by what `$key` returns *(i.e. `$files.sortBy(($f) = $f.length())`)* |
+| `sortedBy<K>((T) -> K $key)` | `list<T>` | A copy sorted by what `$key` returns |
 | `reverse()` | `list<T>` | Reverses the list. Returns the list |
 | `reversed()` | `list<T>` | A reversed copy |
 | `shuffle()` | `list<T>` | Puts the elements in random order. Returns the list |
@@ -64,16 +64,15 @@ These always return a new list.
 | `filter((T) -> bool $fn)` | `list<T>` | The elements `$fn` returns `true` for |
 | `reject((T) -> bool $fn)` | `list<T>` | The elements `$fn` returns `false` for |
 | `flatMap((T) -> list<U> $fn)` | `list<U>` | Like `map`, joining the lists `$fn` returns *(i.e. `$lines.flatMap(($l) = $l.words())`)* |
-| `flatten()` | `list<any>` | Joins the lists inside it, one level *(i.e. `[[1, 2], [3]].flatten()` is `[1, 2, 3]`)* |
+| `flatten()` | `list<U>` | For a `list<list<U>>`: joins the lists inside it *(i.e. `[[1, 2], [3]].flatten()` is `[1, 2, 3]`)*. Throws a `TypeError` if an element isn't a list |
 | `unique()` | `list<T>` | Without repeated values, keeping the first of each *(i.e. `[1, 2, 1].unique()` is `[1, 2]`)* |
-| `uniqueBy((T) -> any $key)` | `list<T>` | Without elements with a repeated `$key` |
+| `uniqueBy<K>((T) -> K $key)` | `list<T>` | Without elements with a repeated `$key` |
 | `compact()` | `list<T>` | Without the `null` values. A `list<?T>` becomes a `list<T>` |
 | `take(number $count)` | `list<T>` | The first `$count` elements, or all of them if there are fewer |
 | `skip(number $count)` | `list<T>` | Everything but the first `$count` elements |
 | `takeWhile((T) -> bool $fn)` | `list<T>` | The elements from the start, until `$fn` returns `false` |
 | `skipWhile((T) -> bool $fn)` | `list<T>` | The elements after the ones at the start that `$fn` returns `true` for |
 | `chunk(number $size)` | `list<list<T>>` | Splits it in lists of `$size` elements, the last one can be shorter *(i.e. `[1, 2, 3].chunk(2)` is `[[1, 2], [3]]`)* |
-| `zip(list<U> $other)` | `list<list<any>>` | Pairs of elements at the same position, as long as the shorter list *(i.e. `['a', 'b'].zip([1, 2])` is `[['a', 1], ['b', 2]]`)* |
 | `concat(list<T> $other)` | `list<T>` | This list followed by `$other` |
 | `copy()` | `list<T>` | A copy of the list. The elements themselves aren't copied |
 
@@ -109,8 +108,8 @@ These always return a new list.
 | `average()` | `?number` | The average, for a `list<number>`. `null` for an empty list |
 | `min()` | `?T` | The smallest element, using `<`, or `null` |
 | `max()` | `?T` | The biggest element, using `<`, or `null` |
-| `minBy((T) -> any $key)` | `?T` | The element with the smallest `$key`, or `null` |
-| `maxBy((T) -> any $key)` | `?T` | The element with the biggest `$key`, or `null` *(i.e. `$files.maxBy(($f) = $f.size())`)* |
+| `minBy<K>((T) -> K $key)` | `?T` | The element with the smallest `$key`, or `null` |
+| `maxBy<K>((T) -> K $key)` | `?T` | The element with the biggest `$key`, or `null` *(i.e. `$files.maxBy(($f) = $f.size())`)* |
 
 ## Looping
 

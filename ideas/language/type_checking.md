@@ -13,5 +13,6 @@ $ages['Daniel'] = 24;       // $ages is a map<string, number>
 ```
 - A list or map with values of different types is a `list<any>` or a `map<K, any>` *(i.e. `[1, 'a']` is a `list<any>`)*.
 - The checker doesn't check `any`: it can hold any value, including `null`, and it can be assigned to any typed variable.
+- `any` isn't meant for normal use. It's for values whose type really can't be known, like JSON read without a schema, and they should be turned into a specific type with `.as()` as soon as possible. Types should be as specific as possible: generics instead of `any`, and a proper type instead of a map used as an object *(see the philosophy in [stdlib/README.md](../stdlib/README.md))*.
 - Generic types use `<>`: `list<string>`, `map<string, number>`, `result<string, Exception>`. When generics are nested, the lexer splits `>>` into two `>` *(i.e. `list<map<string, any>>`)*.
 - Types never change what the code does: a script behaves the same whether its types were checked or not. Because of this, there's no overloading (choosing a function by the types of its arguments). `.as()` and `.is()` don't break this rule, because they check the value while the script runs, not its declared type *(see [builtin_types.md](builtin_types.md))*.

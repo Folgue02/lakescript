@@ -30,6 +30,7 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
     - [flow_control.md](language/flow_control.md): `if`, loops and `switch`.
     - [functions.md](language/functions.md): definitions, anonymous functions and function types.
     - [errors.md](language/errors.md): exceptions, `try`/`catch`/`finally`, `throw` and `try` as an expression.
+    - [cli.md](language/cli.md): the command-line arguments of a script, `command`, `subcommand` and flags.
     - [modules.md](language/modules.md): `use`, `pub` and how modules match folders.
 - [stdlib/](stdlib): the standard library.
 - [tooling/](tooling): the interpreter and the tools around it.

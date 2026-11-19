@@ -36,7 +36,7 @@ These change the map.
 | `merge(map<K, V> $other)` | `map<K, V>` | Adds the keys of `$other`, replacing the ones that already exist. Returns the map |
 | `clear()` | `void` | Removes everything |
 | `sortByKey()` | `map<K, V>` | Reorders the keys from smallest to biggest. Returns the map |
-| `sortBy((K, V) -> any $key)` | `map<K, V>` | Reorders the keys by what `$key` returns *(i.e. `$scores.sortBy(($name, $score) = -$score)`)* |
+| `sortBy<S>((K, V) -> S $key)` | `map<K, V>` | Reorders the keys by what `$key` returns *(i.e. `$scores.sortBy(($name, $score) = -$score)`)* |
 
 ## Transforming
 
@@ -52,7 +52,7 @@ These always return a new map.
 | `map((K, V) -> U $fn)` | `list<U>` | A list with what `$fn` returns for each key and value *(i.e. `$env.map(($k, $v) = f"{$k}={$v}")`)* |
 | `invert()` | `map<V, K>` | Values become keys and keys become values |
 | `sortedByKey()` | `map<K, V>` | A copy with the keys from smallest to biggest |
-| `sortedBy((K, V) -> any $key)` | `map<K, V>` | A copy ordered by what `$key` returns |
+| `sortedBy<S>((K, V) -> S $key)` | `map<K, V>` | A copy ordered by what `$key` returns |
 | `copy()` | `map<K, V>` | A copy of the map. The values themselves aren't copied |
 
 ## Searching

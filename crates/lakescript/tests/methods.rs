@@ -208,7 +208,7 @@ fn list_transforming() {
     assert_eq!(eval("[1, 2, 3, 4].filter(($n) = $n.even?())"), "[2, 4]");
     assert_eq!(eval("[1, 2, 3, 4].reject(($n) = $n.even?())"), "[1, 3]");
     assert_eq!(eval("['a b', 'c'].flatMap(($l) = $l.words())"), "['a', 'b', 'c']");
-    assert_eq!(eval("[[1, 2], [3], 4].flatten()"), "[1, 2, 3, 4]");
+    assert_eq!(eval("[[1, 2], [3], []].flatten()"), "[1, 2, 3]");
     assert_eq!(eval("[1, 2, 1, [1], [1]].unique()"), "[1, 2, [1]]");
     assert_eq!(eval("['a', 'B', 'b'].uniqueBy(($s) = $s.lower())"), "['a', 'B']");
     assert_eq!(eval("[1, null, 2].compact()"), "[1, 2]");
@@ -217,7 +217,6 @@ fn list_transforming() {
     assert_eq!(eval("[1, 2, 5, 1].takeWhile(($n) = $n < 3)"), "[1, 2]");
     assert_eq!(eval("[1, 2, 5, 1].skipWhile(($n) = $n < 3)"), "[5, 1]");
     assert_eq!(eval("[1, 2, 3].chunk(2)"), "[[1, 2], [3]]");
-    assert_eq!(eval("['a', 'b'].zip([1, 2, 3])"), "[['a', 1], ['b', 2]]");
     assert_eq!(eval("[1].concat([2])"), "[1, 2]");
 }
 
@@ -313,6 +312,7 @@ fn other_types() {
 fn wrong_arguments() {
     assert!(error("'a'.padStart('x');").contains("must be a whole number, not a string"));
     assert!(error("[1].map(5);").contains("must be a function"));
+    assert!(error("[[1], 2].flatten();").contains("needs a list of lists"));
     assert!(error("[1].filter(($x) = 1);").contains("must return a bool"));
     assert!(error("'a'.nope();").contains("has no method `.nope()`"));
 }
