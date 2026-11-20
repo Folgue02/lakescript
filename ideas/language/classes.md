@@ -17,6 +17,7 @@ pub class ChildClass extends BaseClass {
 
 - A module can declare any number of types. A standalone script often declares several.
 - In a project, the convention is a file per type, named like the type *(i.e. `ChildClass.lks` for `ChildClass`)*.
+- The name of an interface starts with `I` *(i.e. `IEquals`, `IShape`)*, so it's never confused with a class. Any other name is an error.
 - They're called interfaces, not traits: a class says which interfaces it implements when it's declared, and they can't be added to existing types *(i.e. `string`)* later.
 
 ## Names
@@ -43,7 +44,7 @@ class ChildClass extends BaseClass {
         void sayHello() = outln(f"Hello, I'm {@name}");
     }
 
-    implement Equals {
+    implement IEquals {
         bool equals?(Self $other) = $other.name == @name && $other.age == @age;
     }
 }
@@ -81,7 +82,7 @@ Point();                  // error: `x` has no value
 - `@super(...)` can go anywhere in `new`, like in Java 25. Before it, `new` can do any work and set its own class's fields, but can't read `@` or call its methods, since the superclass's fields aren't set yet. It has to run exactly once on every path through `new`. The checker finds both mistakes before the script runs.
 - `@super` is the object seen as its superclass: `@super(...)` calls its constructor, and `@super.sayHello()` calls the superclass's version of a method that's overridden. `super` can't be the name of a field.
 - Methods that replace the superclass's go in an `override { ... }` block, and the methods of an interface in an `implement Interface { ... }` block. So where a method is says where it comes from, and two interfaces with a method of the same name don't clash.
-    - A class implements an interface when it has its `implement` block, so `.is(Equals)` can be checked when the script runs.
+    - A class implements an interface when it has its `implement` block, so `.is(IEquals)` can be checked when the script runs.
 
 ## Generic classes
 
@@ -125,7 +126,7 @@ $names.push('Ana');
 - The methods of an interface, and of the blocks that implement it, are always public, so they don't take `pub`.
 - An interface has no fields and no constructor, and calling it is an error. It can have static methods.
 - A class with a superclass keeps its interfaces. A method of an interface goes in its `implement` block, never with the class's own methods.
-- An interface can extend other interfaces *(i.e. `interface Ordered extends Equals { ... }`)*. A class that implements it also implements the ones it extends, so `.is()` is true for all of them.
+- An interface can extend other interfaces *(i.e. `interface IOrdered extends IEquals { ... }`)*. A class that implements it also implements the ones it extends, so `.is()` is true for all of them.
 
 ## Enums
 
@@ -179,11 +180,11 @@ An object prints as its class and its fields, in the order of the constructor th
 
 ## Equality and operators
 
-- `==` on two objects calls `equals?` when their class implements `Equals`. Otherwise it's true only for the same object.
+- `==` on two objects calls `equals?` when their class implements `IEquals`. Otherwise it's true only for the same object.
 - `$a.same?($b)` is always true only for the same object.
 - The other operators work the same way: on objects, each one calls the method of an interface the class implements. Numbers, strings, lists and maps keep working as they do now, without calling anything.
-    - Each operator has its own interface, so a class only gets the ones that make sense for it *(i.e. a `Path` with `/` but no `+`)*: `Add` (`+`), `Sub` (`-`), `Mul` (`*`), `Div` (`/`), `Mod` (`%`), `Pow` (`**`), `Neg` (`-$x`), `Index` (`$x[...]`) and `Contains` (`in`).
-    - `Ordered` has a single `number compare(Self $other)`, which gives `<`, `<=`, `>` and `>=`, and is what `sort()` uses. `!=` comes from `Equals`.
+    - Each operator has its own interface, so a class only gets the ones that make sense for it *(i.e. a `Path` with `/` but no `+`)*: `IAdd` (`+`), `ISub` (`-`), `IMul` (`*`), `IDiv` (`/`), `IMod` (`%`), `IPow` (`**`), `INeg` (`-$x`), `IIndex` (`$x[...]`) and `IContains` (`in`).
+    - `IOrdered` has a single `number compare(Self $other)`, which gives `<`, `<=`, `>` and `>=`, and is what `sort()` uses. `!=` comes from `IEquals`.
     - `&&`, `||` and `??` stay built-in, since they skip their right side, and so do `=`, `.`, `..`, `.is()` and `.as()`.
     - The type of `$a + $b` is the return type of the method, so the checker still knows it.
 - Interfaces can be generic, with the same `<T>` as functions, and a class can implement the same interface several times with different types. When an operator is used on an object, the type of the right side picks which one runs:
@@ -195,11 +196,11 @@ class Vector {
 
     pub new(@x, @y) {}
 
-    implement Mul<number> {
+    implement IMul<number> {
         Vector mul(number $n) = Vector(@x * $n, @y * $n);
     }
 
-    implement Mul<Vector> {
+    implement IMul<Vector> {
         number mul(Vector $other) = @x * $other.x + @y * $other.y;
     }
 }
@@ -242,7 +243,7 @@ Built in steps, each with tests and examples:
 1. Done: classes. Fields with and without values, `const` fields, the constructor that takes every field, `new` with `@field` parameters, methods, `@`, static fields and methods with `Self::`, `extends`, `override`, `@super(...)` and `@super.method()`, `.is()` and `.as()` with classes (also of another module, i.e. `shapes::Point`), and `pub class` in modules. The checker knows them, and private fields and methods can only be used by their own class. See `examples/classes.lks`.
 2. Done: interfaces. `implement` blocks, default methods, interfaces that extend others, `Self`, the `TypeError` for a `Self` parameter of another class, `.is()` and `.as()` with interfaces, and the checker's errors for missing or wrong methods. See `examples/interfaces.lks`.
 3. Done: enums. Values with fields through the constructor, methods, `implement` blocks, `name()`, `values()`, `from()`, `fromIgnoreCase()`, and the checker's error for a `switch` used as a value that misses a value. See `examples/enums.lks`.
-4. Operators through interfaces, and `==` with `Equals`.
+4. Operators through interfaces, and `==` with `IEquals`.
 5. Generic classes and interfaces.
 6. Exceptions as classes.
 7. Importing a type from its own file, and circular imports.

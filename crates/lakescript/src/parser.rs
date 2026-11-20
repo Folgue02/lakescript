@@ -420,16 +420,13 @@ impl Parser {
         if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
             return Err(Diagnostic::new(format!("the name of a {word} is written in PascalCase *(i.e. `{}`)*", pascal(&name)), self.span_from(start)));
         }
-        let mut generics = Vec::new();
-        if self.eat(&TokenKind::Lt) {
-            loop {
-                generics.push(self.expect_ident("for the type parameter")?);
-                if !self.eat(&TokenKind::Comma) {
-                    break;
-                }
-            }
-            self.expect_closing_angle("after the type parameters")?;
+        if kind == ClassKind::Interface && !(name.len() > 1 && name.starts_with('I') && name[1..].starts_with(|c: char| c.is_ascii_uppercase())) {
+            return Err(Diagnostic::new(
+                format!("the name of an interface starts with `I` *(i.e. `I{}`)*, so it's never confused with a class", pascal(&name)),
+                self.span_from(start),
+            ));
         }
+        let generics = self.type_params()?;
         let mut extends = Vec::new();
         if matches!(&self.peek().kind, TokenKind::Ident(w) if w == "extends") {
             self.advance();

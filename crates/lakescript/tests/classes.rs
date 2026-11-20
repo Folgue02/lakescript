@@ -217,32 +217,32 @@ fn without_the_checker_the_vm_still_says_what_is_wrong() {
 }
 
 const SHAPES: &str = "
-interface Named {
+interface INamed {
     string name();
     string greeting() = f\"Hello, {@name()}\";
 }
-interface Pet extends Named {
+interface IPet extends INamed {
     string sound();
 }
-interface Equals {
+interface IEquals {
     bool equals?(Self $other);
     bool notEquals?(Self $other) = !@equals?($other);
 }
 class Dog {
     pub string @called;
-    implement Equals {
+    implement IEquals {
         bool equals?(Self $other) = $other.called == @called;
     }
-    implement Pet {
+    implement IPet {
         string name() = @called;
         string sound() = 'woof';
     }
 }
 class Robot {
-    implement Equals {
+    implement IEquals {
         bool equals?(Self $other) = true;
     }
-    implement Named {
+    implement INamed {
         string name() = 'robot';
         string greeting() = 'BEEP';
     }
@@ -256,9 +256,9 @@ fn interfaces_give_methods_and_defaults() {
         const $rex = Dog('rex');
         outln([$rex.equals?(Dog('rex')), $rex.notEquals?(Dog('max'))]);
         outln([$rex.greeting(), Robot().greeting()]);
-        const list<Named> $all = [$rex, Robot()];
+        const list<INamed> $all = [$rex, Robot()];
         outln($all.map(($n) -> $n.name()));
-        outln([$rex.is(Pet), $rex.is(Named), $rex.is(Equals), Robot().is(Pet), Robot().is(Named)]);"
+        outln([$rex.is(IPet), $rex.is(INamed), $rex.is(IEquals), Robot().is(IPet), Robot().is(INamed)]);"
     );
     assert_eq!(run(&script), "[true, true]\n['Hello, rex', 'BEEP']\n['rex', 'robot']\n[true, true, true, false, true]\n");
 }
@@ -266,10 +266,10 @@ fn interfaces_give_methods_and_defaults() {
 #[test]
 fn self_in_an_interface_is_the_class_that_implements_it() {
     let script = "
-        interface Copyable { Self copy(); }
+        interface ICopyable { Self copy(); }
         class Box {
             pub number @size;
-            implement Copyable { Self copy() = Box(@size + 1); }
+            implement ICopyable { Self copy() = Box(@size + 1); }
         }
         outln(Box(1).copy().copy().size);
     ";
@@ -277,7 +277,7 @@ fn self_in_an_interface_is_the_class_that_implements_it() {
     // Through the interface, another class gets there, and the method says so
     let script = format!(
         "{SHAPES}
-        Equals $e = Dog('rex');
+        IEquals $e = Dog('rex');
         try {{ $e.equals?(Robot()); }} catch (TypeError $x) {{ outln($x.message()); }}"
     );
     assert_eq!(run(&script), "`Dog.equals?` needs a `Dog` for `$other`, not a Robot\n");
@@ -288,26 +288,27 @@ fn subclasses_keep_the_interfaces() {
     let script = format!(
         "{SHAPES}
         class Puppy extends Dog {{}}
-        Named $n = Puppy('bit');
-        outln([$n.greeting(), $n.is(Pet), $n.is(Dog)]);"
+        INamed $n = Puppy('bit');
+        outln([$n.greeting(), $n.is(IPet), $n.is(Dog)]);"
     );
     assert_eq!(run(&script), "['Hello, bit', true, true]\n");
 }
 
 #[test]
 fn the_checker_finds_mistakes_with_interfaces() {
-    let i = "interface Named { string name(); string hi() = 'hi ' + @name(); }\n";
-    assert!(rejected(&format!("{i}class A {{ implement Named {{ }} }}")).contains("`A` implements `Named`, but it has no method `name`"));
-    assert!(rejected(&format!("{i}class A {{ implement Named {{ number name() = 1; }} }}")).contains("must be `string name()`"));
-    assert!(rejected(&format!("{i}class A {{ implement Named {{ string name() = 'a'; string x() = 'b'; }} }}")).contains("`Named` has no method `x`"));
-    assert!(rejected(&format!("{i}class A {{ string name() = 'a'; implement Named {{ }} }}")).contains("goes in its `implement Named"));
-    assert!(rejected(&format!("{i}class A extends Named {{}}")).contains("it doesn't extend it"));
-    assert!(rejected(&format!("{i}Named();")).contains("it doesn't create objects"));
+    let i = "interface INamed { string name(); string hi() = 'hi ' + @name(); }\n";
+    assert!(rejected(&format!("{i}class A {{ implement INamed {{ }} }}")).contains("`A` implements `INamed`, but it has no method `name`"));
+    assert!(rejected(&format!("{i}class A {{ implement INamed {{ number name() = 1; }} }}")).contains("must be `string name()`"));
+    assert!(rejected(&format!("{i}class A {{ implement INamed {{ string name() = 'a'; string x() = 'b'; }} }}")).contains("`INamed` has no method `x`"));
+    assert!(rejected(&format!("{i}class A {{ string name() = 'a'; implement INamed {{ }} }}")).contains("goes in its `implement INamed"));
+    assert!(rejected(&format!("{i}class A extends INamed {{}}")).contains("it doesn't extend it"));
+    assert!(rejected(&format!("{i}INamed();")).contains("it doesn't create objects"));
     assert!(rejected("class X {}\nclass A { implement X {} }").contains("can only implement interfaces"));
-    assert!(rejected("interface A extends B {}\ninterface B extends A {}").contains("can't extend itself"));
-    assert!(rejected("interface I { void m(); }\ninterface J extends I { void n(); }\nclass C { implement J { void n() {} } }").contains("has no method `m`"));
-    assert!(rejected("interface I {}\nclass C { implement I {} implement I {} }").contains("two `implement` blocks"));
-    assert!(rejected("interface I { void m(); }\nclass A { implement I { void m() {} } }\nclass B { }\nI $i = B();").contains("its value is a B"));
+    assert!(rejected("interface IA extends IB {}\ninterface IB extends IA {}").contains("can't extend itself"));
+    assert!(rejected("interface IM { void m(); }\ninterface IN extends IM { void n(); }\nclass C { implement IN { void n() {} } }").contains("has no method `m`"));
+    assert!(rejected("interface IM {}\nclass C { implement IM {} implement IM {} }").contains("two `implement` blocks"));
+    assert!(rejected("interface Named {}").contains("starts with `I`"));
+    assert!(rejected("interface IM { void m(); }\nclass A { implement IM { void m() {} } }\nclass B { }\nIM $i = B();").contains("its value is a B"));
 }
 
 const STATUS: &str = "
@@ -348,16 +349,16 @@ fn enums_have_a_fixed_set_of_values() {
 #[test]
 fn enums_can_have_a_constructor_and_interfaces() {
     let script = "
-        interface Labeled { string label(); }
+        interface ILabeled { string label(); }
         enum Size {
             SMALL(1), LARGE(10);
             pub const number @weight;
             pub new(number $kilos) {
                 @weight = $kilos * 1000;
             }
-            implement Labeled { string label() = @name().lower(); }
+            implement ILabeled { string label() = @name().lower(); }
         }
-        outln([Size::LARGE.weight, Size::SMALL.label(), Size::SMALL.is(Labeled)]);
+        outln([Size::LARGE.weight, Size::SMALL.label(), Size::SMALL.is(ILabeled)]);
     ";
     assert_eq!(run(script), "[10000, 'small', true]\n");
 }
