@@ -675,6 +675,26 @@ impl Parser {
         while self.eat(&TokenKind::Slash) {
             path.push(self.path_part("in the path of the module")?);
         }
+        let start = self.peek().span;
+        for part in &path[..path.len() - 1] {
+            if part.starts_with(|c: char| c.is_ascii_uppercase()) {
+                return Err(Diagnostic::new(
+                    format!("`{part}` is a folder, and folders are written in lowercase: only the last part of a path can be a type *(i.e. `people/ChildClass`)*"),
+                    start,
+                ));
+            }
+        }
+        let last = path.last().unwrap().clone();
+        if last.starts_with(|c: char| c.is_ascii_uppercase()) {
+            // `use people/ChildClass;` imports the type itself
+            if self.check(&TokenKind::ColonColon) {
+                return self.error_here(format!("`{last}` is a type, and `use .../{last};` imports it: nothing goes after `::`"));
+            }
+            let alias = if self.eat_as() { Some(self.expect_ident("after `as`")?) } else { None };
+            self.expect(&TokenKind::Semicolon, "after `use`")?;
+            let items = UseItems::Items(vec![UseItem { name: last, variable: false, alias }]);
+            return Ok(UseDecl { path, items, type_module: true });
+        }
         let items = if self.eat(&TokenKind::ColonColon) {
             let mut items = Vec::new();
             if self.eat(&TokenKind::LBrace) {
@@ -694,7 +714,7 @@ impl Parser {
             UseItems::Module { alias }
         };
         self.expect(&TokenKind::Semicolon, "after `use`")?;
-        Ok(UseDecl { path, items })
+        Ok(UseDecl { path, items, type_module: false })
     }
 
     /// A folder or file name in a `use` path. Reserved words are allowed,

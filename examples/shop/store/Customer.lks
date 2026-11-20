@@ -1,0 +1,19 @@
+// A file named like a type holds that type, and `use store/Customer;`
+// imports it directly. `Customer` and `Order` use each other.
+use store/Order;
+use store/Status;
+
+pub class Customer {
+    pub string @name;
+    list<Order> @orders = [];
+
+    pub Order order(string $item, number $cents) {
+        const $order = Order($item, $cents, @);
+        @orders.push($order);
+        return $order;
+    }
+
+    pub list<Order> pending() = @orders.filter(($o) -> $o.status == Status::PENDING);
+
+    pub number spent() = @orders.filter(($o) -> $o.status == Status::PAID).map(($o) -> $o.cents).sum();
+}

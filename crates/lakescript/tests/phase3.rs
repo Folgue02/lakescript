@@ -153,11 +153,69 @@ fn errors_in_modules_name_their_file() {
 }
 
 #[test]
-fn circular_imports_are_an_error() {
+fn constants_that_need_each_other_are_an_error() {
     let dir = TempDir::new("cycle");
     dir.file("a.lks", "use b;\npub const number $x = b::$y;\n");
     dir.file("b.lks", "use a;\npub const number $y = a::$x;\n");
-    assert!(error_in(&dir, "use a;\noutln(a::$x);").contains("circular import"));
+    assert!(error_in(&dir, "use a;\noutln(a::$x);").contains("isn't ready yet: that module is still loading"));
+}
+
+#[test]
+fn modules_can_use_each_other() {
+    let dir = TempDir::new("mutual");
+    dir.file("a.lks", "use b;\npub number one() = 1;\npub number three() = b::two() + 1;\n");
+    dir.file("b.lks", "use a;\npub number two() = a::one() + 1;\n");
+    assert_eq!(run_in(&dir, "use a;\noutln(a::three());"), "3\n");
+    let path = dir.file("main.lks", "use a;\nuse b;\noutln([a::three(), b::two()]);\n");
+    let output = CapturedOutput::new();
+    let mut engine = Engine::with_output(output.clone());
+    if let Err(e) = engine.run_file(&path) {
+        panic!("{}", e.render("main.lks"));
+    }
+    assert_eq!(output.text(), "[3, 2]\n");
+}
+
+#[test]
+fn classes_in_modules_can_use_each_other() {
+    let dir = TempDir::new("classcycle");
+    dir.file("Order.lks", "use Customer;\npub class Order {\n    pub string @item;\n    pub Customer @customer;\n    pub string label() = f\"{@item} for {@customer.name}\";\n}\n");
+    dir.file(
+        "Customer.lks",
+        "use Order;\npub class Customer {\n    pub string @name;\n    list<Order> @orders = [];\n    pub Order order(string $item) {\n        const $o = Order($item, @);\n        @orders.push($o);\n        return $o;\n    }\n    pub number count() = @orders.length();\n}\n",
+    );
+    let path = dir.file("main.lks", "use Customer;\nconst $ana = Customer('Ana');\noutln($ana.order('book').label());\n$ana.order('pen');\noutln($ana.count());\n");
+    let output = CapturedOutput::new();
+    let mut engine = Engine::with_output(output.clone());
+    if let Err(e) = engine.run_file(&path) {
+        panic!("{}", e.render("main.lks"));
+    }
+    assert_eq!(output.text(), "book for Ana\n2\n");
+}
+
+#[test]
+fn a_module_named_like_a_type_holds_that_type() {
+    let dir = TempDir::new("typemodules");
+    dir.file("people/Person.lks", "pub class Person {\n    pub string @name;\n}\nstring helper() = 'x';\n");
+    dir.file("people/Thing.lks", "pub class Thing {}\npub void extra() {}\n");
+    dir.file("people/Named.lks", "pub class Wrong {}\n");
+    let path = dir.file("main.lks", "use people/Person;\nuse people/Person as P;\noutln(P('ana').is(Person));\n");
+    let output = CapturedOutput::new();
+    let mut engine = Engine::with_output(output.clone());
+    if let Err(e) = engine.run_file(&path) {
+        panic!("{}", e.render("main.lks"));
+    }
+    assert_eq!(output.text(), "true\n");
+    let check = |source: &str| {
+        let bad = dir.file("bad.lks", source);
+        Engine::with_output(CapturedOutput::new()).run_file(&bad).unwrap_err().message
+    };
+    assert!(check("use people/Thing;").contains("the only thing it can make `pub`, and `extra` is `pub` too"));
+    assert!(check("use people/Named;").contains("must declare `pub class Named`"));
+    assert!(check("use people/Person::{Person};").contains("nothing goes after `::`"));
+    assert!(check("use People/Person;").contains("folders are written in lowercase"));
+    assert!(check("use people/person;").contains("must match the name of the file exactly"));
+    dir.file("people/per_son.lks", "pub void x() {}\n");
+    assert!(check("use people/Person;").contains("have the same name in another case"));
 }
 
 #[test]

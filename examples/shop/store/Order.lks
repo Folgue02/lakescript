@@ -1,0 +1,15 @@
+use store/Customer;
+use store/Status;
+
+pub class Order {
+    pub string @item;
+    pub number @cents;
+    pub Customer @customer;
+    pub Status @status = Status::PENDING;
+
+    pub void pay() {
+        @status = Status::PAID;
+    }
+
+    pub string label() = f"{@item} for {@customer.name} ({@status.name().lower()})";
+}

@@ -262,7 +262,7 @@ Built in steps, each with tests and examples:
 4. Done: generic classes and interfaces. `Stack<string>()`, types found out from the constructor's arguments, superclasses and interfaces with types *(i.e. `extends Stack<number>`)*, and a class that implements the same interface with different types. See `examples/generics.lks`.
 5. Done: operators. The built-in interfaces behind them, `==` with `IEquals`, `.sort()` with `IOrdered`, and `same?()`. See `examples/operators.lks`.
 6. Done: exceptions as classes. A class extends a built-in exception, gets the field `message`, and is thrown and caught like one *(see [errors.md](errors.md))*. See `examples/errors.lks`.
-7. Importing a type from its own file, and circular imports.
+7. Done: importing a type from its own file *(i.e. `use people/Person;`)* with its rules, and modules that use each other. See `examples/shop/`.
 8. `command` and `subcommand`.
 
 Not working yet: two different interfaces with a method of the same name in one class.

@@ -42,6 +42,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [json.lks](json.lks) | `std/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
 | [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
 | [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, typed `pub const`s and a module's private `let` | |
+| [shop/main.lks](shop/main.lks) | A file per type: `use store/Customer;` imports the class itself, and `Customer` and `Order` use each other | |
 | [backup/backup.lks](backup/backup.lks) | A real script: arguments, a JSON config, a helper module, `tar`, rotating old backups | `lks examples/backup/backup.lks <folder> <backups folder>` |
 
 ## A project

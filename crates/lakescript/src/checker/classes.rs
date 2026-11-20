@@ -18,19 +18,33 @@ impl Checker<'_> {
         if scope.types.contains_key(&decl.name) || scope.funcs.contains_key(&decl.name) {
             return self.fail(format!("`{}` already exists", decl.name), span);
         }
-        let interface = decl.kind == ClassKind::Interface;
         let is_enum = decl.kind == ClassKind::Enum;
         if is_enum && !decl.generics.is_empty() {
             return self.fail("an enum can't have type parameters", span);
         }
-        let generics = decl.generics.iter().map(|g| Rc::from(g.as_str())).collect();
-        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, generics, body: RefCell::new(ClassBody::default()) }));
+        let class = self.class_ref(decl);
         let depth = self.returns.len();
         let scope = self.scopes.last_mut().unwrap();
         scope.types.insert(decl.name.clone(), Ty::Object(class.clone(), Vec::new()));
         scope.pending.insert(decl.name.clone());
         scope.depth = depth;
         Ok(class)
+    }
+
+    /// The class of a declaration. A module's classes are kept by file, so a
+    /// class is the same type wherever it's used.
+    pub(super) fn class_ref(&mut self, decl: &ClassDecl) -> ClassRef {
+        let make = || {
+            let generics = decl.generics.iter().map(|g| Rc::from(g.as_str())).collect();
+            let interface = decl.kind == ClassKind::Interface;
+            let is_enum = decl.kind == ClassKind::Enum;
+            ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, generics, body: RefCell::new(ClassBody::default()) }))
+        };
+        match &self.path {
+            // Only the top level of a module: classes in functions are new every time
+            Some(path) if self.scopes.len() == 2 => self.modules.classes.entry((path.clone(), decl.name.clone())).or_insert_with(make).clone(),
+            _ => make(),
+        }
     }
 
     /// The types of a class's fields and methods, and what calling it takes.

@@ -34,6 +34,13 @@ pub struct Modules<'a> {
     pub loader: &'a crate::modules::Loader,
     pub cache: &'a mut HashMap<PathBuf, Result<ModuleSig, Diagnostic>>,
     pub checking: Vec<PathBuf>,
+    /// Every class of every module, by its file and name, so a class is the
+    /// same type in all the modules that use it, also when they use each other.
+    pub classes: &'a mut HashMap<(PathBuf, String), ClassRef>,
+    /// The signatures of modules read from their declarations, without
+    /// checking their code, for modules that import each other.
+    pub declared: &'a mut HashMap<PathBuf, ModuleSig>,
+    pub declaring: Vec<PathBuf>,
 }
 
 #[derive(Default, Clone)]
@@ -92,6 +99,10 @@ pub struct Checker<'a> {
     /// The file being checked, for errors in modules.
     file: Option<String>,
     host_functions: Vec<String>,
+    /// The module being checked, for its classes' place in `Modules::classes`.
+    path: Option<PathBuf>,
+    /// Only reading the declarations of a module *(see `declarations`)*.
+    declaring: bool,
     /// The classes whose code is being checked, the innermost last: what `@` is.
     this: Vec<This>,
     /// Where the stack was when checking started, so deeply nested code is an error instead of a crash.
@@ -134,6 +145,8 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             file: None,
             host_functions: host_functions.to_vec(),
+            path: None,
+            declaring: false,
             this: Vec::new(),
             stack_base: crate::stack::position(),
             stack_budget: crate::stack::DEFAULT_BUDGET,
@@ -478,7 +491,27 @@ impl<'a> Checker<'a> {
                 early.insert(i);
             }
         }
-        // Classes get their names first, so their fields and methods can use any of them
+        self.declare_classes(stmts)?;
+        for stmt in stmts {
+            let inner = match &stmt.kind {
+                StmtKind::Pub(inner) => &**inner,
+                _ => stmt,
+            };
+            if let StmtKind::Function(decl) = &inner.kind {
+                self.hoist(decl, inner.span)?;
+            }
+        }
+        for (i, stmt) in stmts.iter().enumerate() {
+            if !early.contains(&i) {
+                self.stmt(stmt)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Gives a block's classes their names, and then their signatures, so
+    /// their fields and methods can use any of them.
+    fn declare_classes(&mut self, stmts: &[Stmt]) -> Check<()> {
         let mut classes = Vec::new();
         for stmt in stmts {
             let (inner, public) = match &stmt.kind {
@@ -513,20 +546,6 @@ impl<'a> Checker<'a> {
                 let (decl, class, _, span) = classes.iter().find(|(d, ..)| !done.contains(&d.name)).unwrap();
                 self.class_body(decl, class, *span)?;
                 done.push(decl.name.clone());
-            }
-        }
-        for stmt in stmts {
-            let inner = match &stmt.kind {
-                StmtKind::Pub(inner) => &**inner,
-                _ => stmt,
-            };
-            if let StmtKind::Function(decl) = &inner.kind {
-                self.hoist(decl, inner.span)?;
-            }
-        }
-        for (i, stmt) in stmts.iter().enumerate() {
-            if !early.contains(&i) {
-                self.stmt(stmt)?;
             }
         }
         Ok(())
@@ -865,6 +884,28 @@ impl<'a> Checker<'a> {
 
     fn use_decl(&mut self, decl: &UseDecl, span: Span) -> Check<()> {
         let module = self.module(&decl.path, span)?;
+        if decl.type_module {
+            // A module named like a type holds that type, and only shares it
+            let name = decl.path.last().unwrap();
+            let file = format!("{}.lks", decl.path.join("/"));
+            if !module.types.contains_key(name) {
+                return self.fail(format!("`{file}` is named like a type, so it must declare `pub class {name}`, `pub interface {name}` or `pub enum {name}`"), span);
+            }
+            let others: Vec<String> = module
+                .types
+                .keys()
+                .chain(module.functions.keys())
+                .filter(|n| *n != name)
+                .cloned()
+                .chain(module.constants.keys().map(|c| format!("${c}")))
+                .collect();
+            if let Some(other) = others.first() {
+                return self.fail(
+                    format!("`{file}` holds the type `{name}`, so that's the only thing it can make `pub`, and `{other}` is `pub` too. Move it to another module, or make it private"),
+                    span,
+                );
+            }
+        }
         match &decl.items {
             UseItems::Module { alias } => {
                 let name = alias.clone().unwrap_or_else(|| decl.path.last().cloned().unwrap_or_default());
@@ -889,6 +930,9 @@ impl<'a> Checker<'a> {
                             self.scopes.last_mut().unwrap().funcs.insert(local.clone(), f);
                         }
                         if let Some(t) = ty {
+                            if self.scopes.last().unwrap().types.contains_key(&local) {
+                                return self.fail(format!("`{local}` is already imported: give one of them another name with `as`"), span);
+                            }
                             self.scopes.last_mut().unwrap().types.insert(local, t);
                         }
                     }
@@ -913,15 +957,123 @@ impl<'a> Checker<'a> {
                 if let Some(cached) = self.modules.cache.get(&file) {
                     return cached.clone();
                 }
-                if self.modules.checking.contains(&file) {
-                    let chain: Vec<String> = self.modules.checking.iter().chain(std::iter::once(&file)).map(|p| p.display().to_string()).collect();
-                    return self.fail(format!("circular import: {}", chain.join(" uses ")), span);
+                // Modules that import each other: the signatures come from the declarations
+                if self.declaring || self.modules.checking.contains(&file) {
+                    return self.declarations(&file);
                 }
                 let result = self.check_module(&file);
                 self.modules.cache.insert(file, result.clone());
                 result
             }
         }
+    }
+
+    /// The signature of a module read from its declarations, without checking
+    /// its code: for modules that import each other. Everything `pub` has its
+    /// type written, so nothing else is needed.
+    fn declarations(&mut self, file: &std::path::Path) -> Check<ModuleSig> {
+        if let Some(sig) = self.modules.declared.get(file) {
+            return Ok(sig.clone());
+        }
+        let shown = file.display().to_string();
+        let located = |mut d: Diagnostic| {
+            d.file = Some(shown.clone());
+            d
+        };
+        let source = std::fs::read_to_string(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
+        let program = crate::parse_file(&source, u32::MAX).map_err(located)?;
+        let mut sig = ModuleSig { path: shown.clone(), ..Default::default() };
+        let public_classes = program.iter().filter_map(|s| match &s.kind {
+            StmtKind::Pub(inner) => match &inner.kind {
+                StmtKind::Class(d) => Some(d.clone()),
+                _ => None,
+            },
+            _ => None,
+        });
+        if self.modules.declaring.iter().any(|p| p == file) {
+            // Reached again while its declarations are read: only its types,
+            // whose fields and methods are filled in before any code uses them
+            for decl in public_classes {
+                let class = self.modules.classes.entry((file.to_path_buf(), decl.name.clone())).or_insert_with(|| {
+                    ClassRef(Rc::new(types::ClassSig {
+                        name: Rc::from(decl.name.as_str()),
+                        interface: decl.kind == ClassKind::Interface,
+                        is_enum: decl.kind == ClassKind::Enum,
+                        generics: decl.generics.iter().map(|g| Rc::from(g.as_str())).collect(),
+                        body: std::cell::RefCell::new(types::ClassBody::default()),
+                    }))
+                });
+                sig.types.insert(decl.name.clone(), Ty::Object(class.clone(), Vec::new()));
+            }
+            return Ok(sig);
+        }
+        let mut state = State::default();
+        let modules = Modules {
+            loader: self.modules.loader,
+            cache: &mut *self.modules.cache,
+            checking: self.modules.checking.clone(),
+            classes: &mut *self.modules.classes,
+            declared: &mut *self.modules.declared,
+            declaring: {
+                let mut d = self.modules.declaring.clone();
+                d.push(file.to_path_buf());
+                d
+            },
+        };
+        let host_functions = self.host_functions.clone();
+        let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
+        checker.stack_budget = self.stack_budget;
+        checker.file = Some(shown.clone());
+        checker.path = Some(file.to_path_buf());
+        checker.declaring = true;
+        checker.declare_block(&program).map_err(located)?;
+        let globals = checker.scopes[1].clone();
+        for stmt in &program {
+            let StmtKind::Pub(inner) = &stmt.kind else { continue };
+            match &inner.kind {
+                StmtKind::Function(d) => {
+                    if let Some(f) = globals.funcs.get(&d.name) {
+                        sig.functions.insert(d.name.clone(), f.clone());
+                    }
+                }
+                StmtKind::Class(d) => {
+                    if let Some(t) = globals.types.get(&d.name) {
+                        sig.types.insert(d.name.clone(), t.clone());
+                    }
+                    if let Some(f) = globals.funcs.get(&d.name) {
+                        sig.functions.insert(d.name.clone(), f.clone());
+                    }
+                }
+                StmtKind::Let { name, ty: Some(ty), .. } => {
+                    let t = checker.ty(ty).map_err(located)?;
+                    sig.constants.insert(name.clone(), t);
+                }
+                _ => {}
+            }
+        }
+        self.modules.declared.insert(file.to_path_buf(), sig.clone());
+        Ok(sig)
+    }
+
+    /// The part of `block` that declares: `use`, classes and the signatures of functions.
+    fn declare_block(&mut self, stmts: &[Stmt]) -> Check<()> {
+        for stmt in stmts {
+            if let StmtKind::Use(_) = &stmt.kind {
+                self.stmt(stmt)?;
+            }
+        }
+        let classes = self.declare_classes(stmts)?;
+        let _ = classes;
+        for stmt in stmts {
+            let inner = match &stmt.kind {
+                StmtKind::Pub(inner) => &**inner,
+                _ => stmt,
+            };
+            if let StmtKind::Function(decl) = &inner.kind {
+                self.hoist(decl, inner.span)?;
+            }
+        }
+        Ok(())
     }
 
     fn check_module(&mut self, file: &std::path::Path) -> Check<ModuleSig> {
@@ -933,15 +1085,23 @@ impl<'a> Checker<'a> {
         let source = std::fs::read_to_string(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
         let program = crate::parse_file(&source, u32::MAX).map_err(located)?;
         let mut state = State::default();
-        let modules = Modules { loader: self.modules.loader, cache: &mut *self.modules.cache, checking: {
-            let mut c = self.modules.checking.clone();
-            c.push(file.to_path_buf());
-            c
-        } };
+        let modules = Modules {
+            loader: self.modules.loader,
+            cache: &mut *self.modules.cache,
+            checking: {
+                let mut c = self.modules.checking.clone();
+                c.push(file.to_path_buf());
+                c
+            },
+            classes: &mut *self.modules.classes,
+            declared: &mut *self.modules.declared,
+            declaring: self.modules.declaring.clone(),
+        };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
         checker.stack_budget = self.stack_budget;
         checker.file = Some(shown.clone());
+        checker.path = Some(file.to_path_buf());
         let mut public_fns = Vec::new();
         let mut public_consts = Vec::new();
         let mut public_types = Vec::new();
@@ -1218,6 +1378,14 @@ impl<'a> Checker<'a> {
                 Some(t) => t,
                 None => return self.fail(format!("`${name}` isn't declared"), span),
             },
+            // A class's constructor, read when it's used: in modules that use each
+            // other, it's only known once the class's signature is complete
+            ExprKind::Function(name)
+                if !self.not_declared_yet(name)
+                    && self.class_named(name).is_some_and(|c| !c.0.interface && !c.0.is_enum && c.0.body.borrow().constructor.is_some()) =>
+            {
+                Ty::Func(self.class_named(name).unwrap().0.body.borrow().constructor.clone().unwrap())
+            }
             ExprKind::Function(name) => match self.lookup_func(name) {
                 Some(_) if self.not_declared_yet(name) => {
                     return self.fail(

@@ -66,6 +66,8 @@ fn language_examples() {
         ("examples/generics.lks", "FIX THE BUG"),
         ("examples/generics.lks", "8081 PORT"),
         ("examples/generics.lks", "Vector(x: 3, y: 6)"),
+        ("examples/shop/main.lks", "book for Ana (paid)"),
+        ("examples/shop/main.lks", "Ana spent 19.99"),
         ("examples/operators.lks", "16.49 EUR"),
         ("examples/operators.lks", "['1 EUR', '3 EUR', '5 EUR']"),
         ("examples/operators.lks", "[true, true]"),

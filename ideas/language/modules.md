@@ -129,4 +129,7 @@ string _read(string $path) = readFile($path);   // only usable in this file
 
 - `::` is a single token, so it's never confused with a symbol *(`:name`)*.
 - The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*.
-- Modules can import each other, directly or through other modules *(i.e. `Order` and `Customer`, each in its own file)*. This works because a module's top level only has declarations, and everything `pub` has its type written. How it works is in [classes.md](classes.md#circular-imports). From phase 7: until then, circular imports are an error.
+- Modules can import each other, directly or through other modules *(i.e. `Order` and `Customer`, each in its own file)*. This works because a module's top level only has declarations, and everything `pub` has its type written. How it works is in [classes.md](classes.md#circular-imports).
+    - The checker reads the signatures of a module that's in the middle of being checked from its declarations, without checking its code, since everything `pub` has its type written.
+    - When the script runs, a module that's still loading is given as far as it got to the modules it uses, and the names they import from it get their values when it finishes. So functions and classes can call each other freely.
+    - Only a constant that needs the other module while it's still loading fails, with an error that says so *(i.e. `$x` of `a.lks` isn't ready yet: that module is still loading, because it uses this one)*.

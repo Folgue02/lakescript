@@ -1185,18 +1185,28 @@ impl<'a> Interpreter<'a> {
 
     // ---- Modules ----
 
-    fn use_items(&mut self, proto: &Proto, i: usize, globals: &Globals, span: Span) -> Exec<()> {
+    fn use_items(&mut self, proto: &Proto, i: usize, globals: &Rc<Globals>, span: Span) -> Exec<()> {
         let import = &proto.imports[i];
         let source = self.host.loader.resolve(&import.path).map_err(|m| flow_error(m, span))?;
         // Importing names needs their values now
         let module = self.load(source, span)?;
+        let loading = self.host.loader.in_progress.iter().find(|(_, m)| Rc::ptr_eq(m, &module)).map(|(p, _)| p.clone());
+        let mut later = Vec::new();
         for (name, variable, global, local) in &import.items {
             let key = if *variable { format!("${name}") } else { name.clone() };
             if !module.public.contains(&key) {
                 let what = if *variable { "constant" } else { "function or type" };
                 return error(format!("`{}` has no `pub` {what} named `{key}`", module.path), span);
             }
-            let value = module.globals.get(&key).unwrap_or(Value::Null);
+            let value = match (module.globals.get(&key), &loading) {
+                (Some(v), _) => v,
+                // The module uses this one back and is still loading: the value comes when it finishes
+                (None, Some(_)) => {
+                    later.push((key.clone(), *global));
+                    continue;
+                }
+                (None, None) => Value::Null,
+            };
             let mut slots = globals.slots.borrow_mut();
             let slot = &mut slots[*global as usize];
             if slot.declared {
@@ -1205,6 +1215,9 @@ impl<'a> Interpreter<'a> {
             slot.value = value;
             slot.declared = true;
             slot.constant = true;
+        }
+        if let (Some(path), false) = (loading, later.is_empty()) {
+            self.host.loader.pending.push((path, globals.clone(), later));
         }
         Ok(())
     }
@@ -1227,6 +1240,10 @@ impl<'a> Interpreter<'a> {
         }
         match module.globals.get(&key) {
             Some(v) => Ok(v),
+            None if self.host.loader.in_progress.values().any(|m| Rc::ptr_eq(m, &module)) => error(
+                format!("`{key}` of `{}` isn't ready yet: that module is still loading, because it uses this one. Modules that use each other can only use each other's functions and classes once they're loaded", module.path),
+                span,
+            ),
             None => error(format!("`{}` has no {what} named `{key}`", module.path), span),
         }
     }
@@ -1247,9 +1264,9 @@ impl<'a> Interpreter<'a> {
         if let Some(m) = self.host.loader.cache.get(&path) {
             return Ok(m.clone());
         }
-        if self.host.loader.loading.contains(&path) {
-            let chain: Vec<String> = self.host.loader.loading.iter().chain(std::iter::once(&path)).map(|p| p.display().to_string()).collect();
-            return error(format!("circular import: {}", chain.join(" uses ")), span);
+        // Modules that use each other: the one still loading, as far as it got
+        if let Some(m) = self.host.loader.in_progress.get(&path) {
+            return Ok(m.clone());
         }
         let shown = path.display().to_string();
         let source = std::fs::read_to_string(&path).map_err(|e| flow_error_as("IOError", format!("can't read the module '{shown}': {e}"), span))?;
@@ -1261,13 +1278,27 @@ impl<'a> Interpreter<'a> {
             .module(&program, &shown)
             .map_err(|d| flow_error(d.message, d.span))?;
 
+        let module = Rc::new(Module { path: shown, globals: globals.clone(), public });
         self.host.loader.loading.push(path.clone());
-        let body = Rc::new(Function::User(UserFunction { proto, upvalues: Vec::new(), globals: globals.clone() }));
+        self.host.loader.in_progress.insert(path.clone(), module.clone());
+        let body = Rc::new(Function::User(UserFunction { proto, upvalues: Vec::new(), globals }));
         let result = self.call(&body, Vec::new(), Vec::new(), span);
         self.host.loader.loading.pop();
+        self.host.loader.in_progress.remove(&path);
         result?;
-        let module = Rc::new(Module { path: shown, globals, public });
-        self.host.loader.cache.insert(path, module.clone());
+        self.host.loader.cache.insert(path.clone(), module.clone());
+        // The names other modules imported from it while it was loading
+        let (ready, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.host.loader.pending).into_iter().partition(|(p, ..)| *p == path);
+        self.host.loader.pending = waiting;
+        for (_, importer, names) in ready {
+            for (key, global) in names {
+                let mut slots = importer.slots.borrow_mut();
+                let slot = &mut slots[global as usize];
+                slot.value = module.globals.get(&key).unwrap_or(Value::Null);
+                slot.declared = true;
+                slot.constant = true;
+            }
+        }
         Ok(module)
     }
 }

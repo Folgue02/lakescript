@@ -244,6 +244,9 @@ pub struct UseDecl {
     /// `["std", "fs"]` for `use std/fs;`
     pub path: Vec<String>,
     pub items: UseItems,
+    /// `use people/ChildClass;`: the last part is a type, and its module is that
+    /// type *(see `ideas/language/classes.md`)*. `items` imports it.
+    pub type_module: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -122,8 +122,14 @@ pub struct Loader {
     pub disabled: HashSet<String>,
     pub cache: HashMap<PathBuf, Rc<Module>>,
     pub std_cache: HashMap<String, Rc<Module>>,
-    /// The modules being loaded right now, to find circular imports.
+    /// The modules being loaded right now. A module that a module it uses
+    /// uses back gets it while it's still loading.
     pub loading: Vec<PathBuf>,
+    pub in_progress: HashMap<PathBuf, Rc<Module>>,
+    /// Names imported from a module that was still loading, given their
+    /// values when it finishes: the module, where they go, and their names
+    /// and the globals they go into.
+    pub pending: Vec<(PathBuf, Rc<Globals>, Vec<(String, u32)>)>,
 }
 
 impl Loader {
@@ -147,6 +153,10 @@ impl Loader {
         let found: Vec<PathBuf> = self.roots.iter().map(|r| r.join(&relative)).filter(|p| p.is_file()).collect();
         match found.as_slice() {
             [] => {
+                // On a file system that sees case, a name in another case isn't found: say why
+                for root in &self.roots {
+                    check_case(root, path)?;
+                }
                 let roots: Vec<String> = self.roots.iter().map(|r| r.display().to_string()).collect();
                 if roots.is_empty() {
                     Err(format!("module `{joined}` not found: there's nowhere to look for modules"))
@@ -154,7 +164,11 @@ impl Loader {
                     Err(format!("module `{joined}` not found in {}", roots.join(", ")))
                 }
             }
-            [one] => Ok(ModuleSource::File(one.canonicalize().unwrap_or_else(|_| one.clone()))),
+            [one] => {
+                let root = self.roots.iter().find(|r| r.join(&relative) == *one).cloned().unwrap_or_default();
+                check_case(&root, path)?;
+                Ok(ModuleSource::File(one.canonicalize().unwrap_or_else(|_| one.clone())))
+            }
             [first, second, ..] => Err(format!(
                 "module `{joined}` is in two places: {} and {}",
                 first.display(),
@@ -162,4 +176,34 @@ impl Loader {
             )),
         }
     }
+}
+
+/// The path of a `use` must match the files' names exactly, even where the
+/// file system ignores case *(i.e. macOS)*, so a script that works on one
+/// machine works on all. And two modules in a folder can't have names that
+/// only differ in case or in `_` *(i.e. `ChildClass.lks` and `child_class.lks`)*.
+fn check_case(root: &std::path::Path, path: &[String]) -> Result<(), String> {
+    let joined = path.join("/");
+    let simple = |name: &str| name.to_ascii_lowercase().replace('_', "");
+    let mut dir = root.to_path_buf();
+    for (i, part) in path.iter().enumerate() {
+        let last = i == path.len() - 1;
+        let wanted = if last { format!("{part}.lks") } else { part.clone() };
+        let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(()) };
+        let names: Vec<String> = entries.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        if !names.iter().any(|n| *n == wanted) {
+            if let Some(real) = names.iter().find(|n| n.eq_ignore_ascii_case(&wanted)) {
+                return Err(format!("`use {joined}` must match the name of the file exactly, which is `{real}`"));
+            }
+        }
+        if last {
+            let stem = simple(part);
+            let clash = names.iter().find(|n| *n != &wanted && n.ends_with(".lks") && simple(n.trim_end_matches(".lks")) == stem);
+            if let Some(other) = clash {
+                return Err(format!("`{wanted}` and `{other}` have the same name in another case: rename one of them"));
+            }
+        }
+        dir.push(part);
+    }
+    Ok(())
 }

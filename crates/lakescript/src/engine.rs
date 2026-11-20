@@ -54,6 +54,8 @@ pub struct Engine {
     prelude: Option<Rc<crate::checker::prelude::Prelude>>,
     check_state: crate::checker::State,
     check_cache: HashMap<PathBuf, Result<crate::checker::prelude::ModuleSig, Diagnostic>>,
+    check_classes: HashMap<(PathBuf, String), crate::checker::types::ClassRef>,
+    check_declared: HashMap<PathBuf, crate::checker::prelude::ModuleSig>,
     /// Functions registered by the program embedding Lakescript. The checker knows nothing about their types.
     host_functions: Vec<String>,
     builtins_ready: bool,
@@ -105,6 +107,8 @@ impl Engine {
             prelude: None,
             check_state: Default::default(),
             check_cache: HashMap::new(),
+            check_classes: HashMap::new(),
+            check_declared: HashMap::new(),
             host_functions: Vec::new(),
             builtins_ready: false,
         };
@@ -252,7 +256,14 @@ impl Engine {
 
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {
         let prelude = self.prelude.get_or_insert_with(|| Rc::new(crate::checker::prelude::Prelude::load())).clone();
-        let modules = crate::checker::Modules { loader: &self.host.loader, cache: &mut self.check_cache, checking: Vec::new() };
+        let modules = crate::checker::Modules {
+            loader: &self.host.loader,
+            cache: &mut self.check_cache,
+            checking: Vec::new(),
+            classes: &mut self.check_classes,
+            declared: &mut self.check_declared,
+            declaring: Vec::new(),
+        };
         let mut checker = crate::checker::Checker::new(&prelude, modules, &mut self.check_state, &self.host_functions);
         checker.stack_budget = self.stack_budget;
         checker.check_program(program)

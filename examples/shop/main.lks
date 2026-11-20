@@ -1,0 +1,20 @@
+#!/usr/bin/lks
+// A file per type: `use store/Customer;` imports the class itself, and
+// classes in different files can use each other.
+//
+//   lks examples/shop/main.lks
+
+use store/Customer;
+use store/Order;
+
+const $ana = Customer('Ana');
+const $book = $ana.order('book', 1999);
+$ana.order('pen', 250);
+$book.pay();
+
+outln($book.label());
+outln($ana.pending().map(($o) -> $o.label()));
+outln(f"{$ana.name} spent {$ana.spent() / 100}");
+
+Order $first = $ana.pending()[0];
+outln($first.customer.name);
