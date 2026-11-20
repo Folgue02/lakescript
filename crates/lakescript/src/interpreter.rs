@@ -1,40 +1,43 @@
-//! Runs the syntax tree directly (phase 1 of `ideas/roadmap.md`).
+//! The VM: runs the bytecode the compiler writes *(see `ideas/tooling/vm.md`)*.
+//!
+//! Frames live on the heap, so how deep the calls of a script go doesn't
+//! depend on Rust's stack. Rust's stack is only used when Rust code calls a
+//! script's function (a method like `.map()` calling its function), and each
+//! of those checks the stack budget.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use indexmap::IndexMap;
 
-use crate::ast::*;
+use crate::ast::{BinaryOp, UnaryOp};
+use crate::bytecode::{ArgKind, Capture, Op, Proto, for_kind};
+use crate::command::{CommandKind, CommandValue, shell_quote};
+use crate::compiler::Compiler;
 use crate::diagnostic::Diagnostic;
+use crate::engine::Outcome;
+use crate::exceptions;
+use crate::host::Host;
 use crate::methods;
-use crate::scope::{self, Env, SetError};
+use crate::modules::{Globals, Module, ModuleSlot, ModuleSource};
+use crate::patterns;
+use crate::stack::position as stack_position;
 use crate::token::Span;
 use crate::types;
-use crate::exceptions;
-use crate::patterns;
-use crate::command::{CommandKind, CommandValue, shell_quote};
-use crate::engine::Outcome;
-use crate::host::Host;
-use crate::modules::{Module, ModuleSlot, ModuleSource};
 use crate::value::{ExceptionValue, Function, Key, NativeContext, NativeError, Range, RegexValue, ResultValue, UserFunction, Value};
 
-/// Why the normal flow stopped.
+/// Why the normal flow stopped, when it crosses Rust code.
 pub enum Flow {
-    Break(Span),
-    Continue(Span),
-    Return(Value, Span),
-    /// The value of the block of an `if` or `switch` expression.
-    Yield(Value, Span),
     /// An exception was thrown.
     Throw(Rc<ExceptionValue>),
     /// `exit()` was called with this code.
     Exit(i32),
 }
 
-const YIELD_OUTSIDE: &str = "`yield` can only be used in the block of an `if` or `switch` used as a value";
-
 pub type Exec<T> = Result<T, Flow>;
+
+/// Arguments given by name: the name, the value, and where it is.
+pub type Named = Vec<(String, Value, Span)>;
 
 /// Throws a generic `Exception`.
 pub fn error<T>(message: impl Into<String>, span: Span) -> Exec<T> {
@@ -75,32 +78,67 @@ pub fn uncaught(exception: &ExceptionValue) -> Diagnostic {
     Diagnostic::new(message, exception.span)
 }
 
+const TOO_DEEP: &str = "too many nested calls. Is there a recursion that never ends?";
+
+/// A call of a script's function that is running.
+struct Frame {
+    function: Rc<Function>,
+    /// The next instruction, while this frame isn't the one running.
+    ip: usize,
+    /// Where its slots start in the stack. The function called is just below.
+    base: usize,
+    cells: Vec<Rc<RefCell<Value>>>,
+    /// Which parameters were given, one bit each.
+    given: u64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HandlerKind {
+    Catch,
+    Finally,
+    TryExpr,
+}
+
+/// A `try` that is running.
+struct Handler {
+    kind: HandlerKind,
+    /// Where to go when something is thrown.
+    ip: usize,
+    frame: usize,
+    /// The height of the stack when it started.
+    sp: usize,
+    /// For a `finally`: the slot where the exception or `exit()` waits.
+    slot: usize,
+}
+
 pub struct Interpreter<'a> {
     /// Output, input, modules, the script's folder and environment...
     pub host: &'a mut Host,
-    /// Where the stack was when the script started, and how much of it the
-    /// script may use. Each call checks it, so a recursion that never ends
-    /// stops with an error instead of crashing the host program.
+    stack: Vec<Value>,
+    frames: Vec<Frame>,
+    handlers: Vec<Handler>,
+    /// Where Rust's stack was when the script started, and how much of it
+    /// the script may use, for the calls from Rust code.
     stack_base: usize,
     stack_budget: usize,
+    /// How many calls can be nested.
+    max_frames: usize,
+    /// What a frame's cells hold before their variable is declared.
+    empty_cell: Rc<RefCell<Value>>,
 }
-
-use crate::stack::position as stack_position;
 
 impl<'a> Interpreter<'a> {
     pub fn new(host: &'a mut Host, stack_budget: usize) -> Self {
-        Interpreter { host, stack_base: stack_position(), stack_budget }
-    }
-
-    /// Stops code that's nested too deeply before it overflows the stack.
-    #[inline(always)]
-    fn check_stack(&self, span: Span) -> Exec<()> {
-        // A little more room than calls get, so an endless recursion is
-        // reported as one, by the check in `call`
-        if stack_position().abs_diff(self.stack_base) > self.stack_budget + self.stack_budget / 8 {
-            return error("the code is nested too deeply", span);
+        Interpreter {
+            host,
+            stack: Vec::with_capacity(256),
+            frames: Vec::with_capacity(16),
+            handlers: Vec::new(),
+            stack_base: stack_position(),
+            stack_budget,
+            max_frames: (stack_budget / 64).clamp(256, 100_000),
+            empty_cell: Rc::new(RefCell::new(Value::Null)),
         }
-        Ok(())
     }
 
     /// What native functions and commands can use.
@@ -140,710 +178,120 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    /// Runs the statements of a whole script.
-    pub fn run(&mut self, program: &[Stmt], env: &Env) -> Result<Outcome, Diagnostic> {
-        for stmt in program {
-            match self.exec(stmt, env) {
-                Ok(()) => {}
-                Err(Flow::Exit(code)) => return Ok(Outcome::Exit(code)),
-                Err(Flow::Throw(exception)) => return Err(uncaught(&exception)),
-                Err(Flow::Break(span)) => return Err(Diagnostic::new("`break` outside a loop", span)),
-                Err(Flow::Continue(span)) => return Err(Diagnostic::new("`continue` outside a loop", span)),
-                Err(Flow::Return(_, span)) => return Err(Diagnostic::new("`return` outside a function", span)),
-                Err(Flow::Yield(_, span)) => return Err(Diagnostic::new(YIELD_OUTSIDE, span)),
-            }
-        }
-        Ok(Outcome::Finished)
-    }
-
-    // ---- Statements ----
-
-    fn exec(&mut self, stmt: &Stmt, env: &Env) -> Exec<()> {
-        self.check_stack(stmt.span)?;
-        match &stmt.kind {
-            StmtKind::Let { constant, name, value, .. } => {
-                let value = self.eval(value, env)?;
-                if !scope::declare(env, name, value, *constant) {
-                    return error(format!("`${name}` already exists. Variables can't be declared twice"), stmt.span);
-                }
-            }
-            StmtKind::LetList { constant, names, rest, value } => {
-                let value = self.eval(value, env)?;
-                self.destructure(env, names, rest, value, *constant, stmt.span)?;
-            }
-            StmtKind::Yield(value) => {
-                let value = self.eval(value, env)?;
-                return Err(Flow::Yield(value, stmt.span));
-            }
-            StmtKind::Switch(switch) => {
-                self.switch(switch, env, false)?;
-            }
-            StmtKind::Use(decl) => self.exec_use(decl, env, stmt.span)?,
-            StmtKind::Pub(inner) => self.exec(inner, env)?,
-            StmtKind::Throw(value) => {
-                let value = self.eval(value, env)?;
-                let Value::Exception(exception) = value else {
-                    return error_as(
-                        exceptions::TYPE_ERROR,
-                        format!("only exceptions can be thrown, not a {} *(i.e. `throw ValueError('...')`)*", value.type_name()),
-                        stmt.span,
-                    );
-                };
-                // A new exception gets the place where it's thrown; a caught one keeps its own
-                let exception = if exception.span == Span::default() {
-                    exceptions::new(&exception.kind, exception.message.clone(), stmt.span)
-                } else {
-                    exception
-                };
-                return Err(Flow::Throw(exception));
-            }
-            StmtKind::Try { body, catches, finally } => {
-                let mut result = self.exec_block(body, &scope::new_scope(env));
-                if let Err(Flow::Throw(exception)) = &result {
-                    let exception = exception.clone();
-                    for catch in catches {
-                        let value = Value::Exception(exception.clone());
-                        let matched = match &catch.ty {
-                            None => true,
-                            Some(ty) => types::matches(&value, ty).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, ty.span))?,
-                        };
-                        if matched {
-                            let scope = scope::new_scope(env);
-                            if !scope::declare(&scope, &catch.name, value, false) {
-                                return error(format!("`${}` already exists. Variables can't be declared twice", catch.name), stmt.span);
-                            }
-                            result = self.exec_block(&catch.body, &scope);
-                            break;
-                        }
-                    }
-                }
-                if let Some(finally) = finally {
-                    self.exec_block(finally, &scope::new_scope(env))?;
-                }
-                return result;
-            }
-            StmtKind::Function(decl) => {
-                let function = Function::User(UserFunction { decl: Rc::new(decl.clone()), env: env.clone() });
-                if !scope::declare_function(env, &decl.name, Rc::new(function)) {
-                    return error(format!("a function named `{}` already exists", decl.name), stmt.span);
-                }
-            }
-            StmtKind::TypeAlias { .. } => {}
-            StmtKind::If { cond, then, otherwise } => {
-                if self.condition(cond, env, "if")? {
-                    self.exec_scoped(then, env)?;
-                } else if let Some(otherwise) = otherwise {
-                    self.exec_scoped(otherwise, env)?;
-                }
-            }
-            StmtKind::While { cond, body } => {
-                while self.condition(cond, env, "while")? {
-                    match self.exec_scoped(body, env) {
-                        Err(Flow::Break(_)) => break,
-                        Ok(()) | Err(Flow::Continue(_)) => {}
-                        Err(other) => return Err(other),
-                    }
-                }
-            }
-            StmtKind::For { pattern, iterable, body } => self.exec_for(pattern, iterable, body, env)?,
-            StmtKind::Break => return Err(Flow::Break(stmt.span)),
-            StmtKind::Continue => return Err(Flow::Continue(stmt.span)),
-            StmtKind::Return(value) => {
-                let value = match value {
-                    Some(expr) => self.eval(expr, env)?,
-                    None => Value::Null,
-                };
-                return Err(Flow::Return(value, stmt.span));
-            }
-            StmtKind::Block(stmts) => self.exec_block(stmts, &scope::new_scope(env))?,
-            StmtKind::Expr(expr) => {
-                self.eval(expr, env)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn exec_block(&mut self, stmts: &[Stmt], env: &Env) -> Exec<()> {
-        for stmt in stmts {
-            self.exec(stmt, env)?;
-        }
-        Ok(())
-    }
-
-    /// Runs a body in its own scope, so declarations inside it stay inside.
-    fn exec_scoped(&mut self, stmt: &Stmt, env: &Env) -> Exec<()> {
-        match &stmt.kind {
-            StmtKind::Block(stmts) => self.exec_block(stmts, &scope::new_scope(env)),
-            _ => self.exec(stmt, &scope::new_scope(env)),
-        }
-    }
-
-    fn condition(&mut self, cond: &Expr, env: &Env, keyword: &str) -> Exec<bool> {
-        match self.eval(cond, env)? {
-            Value::Bool(b) => Ok(b),
-            other => error_as(
-                exceptions::TYPE_ERROR,
-                format!("the condition of `{keyword}` must be a bool, but this is a {}", other.type_name()),
-                cond.span,
-            ),
-        }
-    }
-
-    fn exec_for(&mut self, pattern: &ForPattern, iterable: &Expr, body: &Stmt, env: &Env) -> Exec<()> {
-        let value = self.eval(iterable, env)?;
-        if let ForPattern::List { .. } = pattern {
-            let Value::List(list) = &value else {
-                return error(format!("`for ([...] in ...)` needs a list of lists, not a {}", value.type_name()), iterable.span);
-            };
-            return self.exec_for_list(list.clone(), pattern, body, env);
-        }
-        // What each pass gets: (index or key, value)
-        let items: Vec<(Value, Value)> = match (&value, pattern) {
-            (Value::Map(map), ForPattern::Value(_) | ForPattern::KeyValue { .. }) => {
-                map.borrow().iter().map(|(k, v)| (k.to_value(), v.clone())).collect()
-            }
-            (Value::Map(_), ForPattern::Indexed { .. }) => {
-                return error("use `for ($key => $value in $map)` to loop over a map with its keys", iterable.span);
-            }
-            (_, ForPattern::KeyValue { .. }) => {
-                return error(format!("`=>` only works with maps, and this is a {}", value.type_name()), iterable.span);
-            }
-            (Value::List(list), _) => {
-                // Looped by position, so elements added while looping are seen, like in JavaScript
-                return self.exec_for_list(list.clone(), pattern, body, env);
-            }
-            (Value::Range(range), _) => {
-                range.iter().enumerate().map(|(i, n)| (Value::Int(i as i64), Value::Int(n))).collect()
-            }
-            (Value::Str(s), _) => {
-                s.chars().enumerate().map(|(i, c)| (Value::Int(i as i64), Value::string(&c.to_string()))).collect()
-            }
-            _ => return error(format!("can't loop over a {}", value.type_name()), iterable.span),
-        };
-
-        for (first, second) in items {
-            let pass = scope::new_scope(env);
-            match pattern {
-                ForPattern::Value(name) => {
-                    // A map without `=>` loops over its keys
-                    let v = if matches!(value, Value::Map(_)) { first } else { second };
-                    scope::declare(&pass, name, v, false);
-                }
-                ForPattern::Indexed { index, value: name } | ForPattern::KeyValue { key: index, value: name } => {
-                    self.declare_loop_vars(&pass, index, first, name, second, iterable.span)?;
-                }
-                ForPattern::List { .. } => unreachable!("handled before"),
-            }
-            match self.exec_scoped(body, &pass) {
-                Err(Flow::Break(_)) => break,
-                Ok(()) | Err(Flow::Continue(_)) => {}
-                Err(other) => return Err(other),
-            }
-        }
-        Ok(())
-    }
-
-    fn exec_for_list(&mut self, list: Rc<RefCell<Vec<Value>>>, pattern: &ForPattern, body: &Stmt, env: &Env) -> Exec<()> {
-        let mut i = 0;
-        loop {
-            let Some(item) = list.borrow().get(i).cloned() else { break };
-            let pass = scope::new_scope(env);
-            match pattern {
-                ForPattern::Value(name) => {
-                    scope::declare(&pass, name, item, false);
-                }
-                ForPattern::Indexed { index, value } => {
-                    self.declare_loop_vars(&pass, index, Value::Int(i as i64), value, item, body.span)?;
-                }
-                ForPattern::List { names, rest } => {
-                    self.destructure(&pass, names, rest, item, false, body.span)?;
-                }
-                ForPattern::KeyValue { .. } => unreachable!("checked before"),
-            }
-            match self.exec_scoped(body, &pass) {
-                Err(Flow::Break(_)) => break,
-                Ok(()) | Err(Flow::Continue(_)) => {}
-                Err(other) => return Err(other),
-            }
-            i += 1;
-        }
-        Ok(())
-    }
-
-    /// `let [$a, $b, ...$rest] = $list;`
-    fn destructure(&mut self, env: &Env, names: &[String], rest: &Option<String>, value: Value, constant: bool, span: Span) -> Exec<()> {
-        let Value::List(list) = value else {
-            return error(format!("only lists can be destructured, and this is a {}", value.type_name()), span);
-        };
-        let items = list.borrow().clone();
-        match rest {
-            None if items.len() != names.len() => {
-                return error(format!("expected a list with {} elements, but it has {}", names.len(), items.len()), span);
-            }
-            Some(_) if items.len() < names.len() => {
-                return error(format!("expected a list with at least {} elements, but it has {}", names.len(), items.len()), span);
-            }
-            _ => {}
-        }
-        let mut items = items.into_iter();
-        for name in names {
-            if !scope::declare(env, name, items.next().unwrap(), constant) {
-                return error(format!("`${name}` already exists. Variables can't be declared twice"), span);
-            }
-        }
-        if let Some(rest) = rest {
-            if !scope::declare(env, rest, Value::list(items.collect()), constant) {
-                return error(format!("`${rest}` already exists. Variables can't be declared twice"), span);
-            }
-        }
-        Ok(())
-    }
-
-    /// The value of an `if` or `switch` branch.
-    fn branch(&mut self, branch: &Branch, env: &Env) -> Exec<Value> {
-        match branch {
-            Branch::Expr(expr) => self.eval(expr, env),
-            Branch::Block(stmts, span) => match self.exec_block(stmts, &scope::new_scope(env)) {
-                Ok(()) => error("this block must give its value with `yield`", *span),
-                Err(Flow::Yield(value, _)) => Ok(value),
-                Err(other) => Err(other),
-            },
-        }
-    }
-
-    fn switch(&mut self, switch: &Switch, env: &Env, as_value: bool) -> Exec<Value> {
-        let subject = self.eval(&switch.subject, env)?;
-        for case in &switch.cases {
-            for pattern in &case.patterns {
-                let matched = match pattern {
-                    Pattern::Value(expr) => match self.eval(expr, env)? {
-                        Value::Range(range) if !matches!(subject, Value::Range(_)) => {
-                            subject.as_whole().is_some_and(|n| range.contains(n))
-                        }
-                        value => subject.same(&value),
-                    },
-                    Pattern::Type(ty) => types::matches(&subject, ty).map_err(|m| flow_error(m, ty.span))?,
-                };
-                if matched {
-                    return self.case_body(&case.body, env);
-                }
-            }
-        }
-        match &switch.default {
-            Some(body) => self.case_body(body, env),
-            None if as_value => error(format!("no case of the `switch` matches {}", describe(&subject)), switch.subject.span),
-            None => Ok(Value::Null),
-        }
-    }
-
-    fn case_body(&mut self, body: &CaseBody, env: &Env) -> Exec<Value> {
-        match body {
-            CaseBody::Value(branch) => self.branch(branch, env),
-            CaseBody::Stmt(stmt) => {
-                self.exec_scoped(stmt, env)?;
-                Ok(Value::Null)
-            }
-        }
-    }
-
-    fn declare_loop_vars(&mut self, pass: &Env, a: &str, av: Value, b: &str, bv: Value, span: Span) -> Exec<()> {
-        if a == b {
-            return error(format!("`${a}` is used twice in the `for`"), span);
-        }
-        if !scope::declare(pass, a, av, false) || !scope::declare(pass, b, bv, false) {
-            return error("a variable of the `for` already exists outside it", span);
-        }
-        Ok(())
-    }
-
-    // ---- Expressions ----
-
-    /// Evaluates an expression. The common cases are handled here and the
-    /// rest in `eval_rest`, so this function's stack frame stays small: it's
-    /// on the stack once for every nested expression and call.
-    pub fn eval(&mut self, expr: &Expr, env: &Env) -> Exec<Value> {
-        match &expr.kind {
-            ExprKind::Int(n) => Ok(Value::Int(*n)),
-            ExprKind::Variable(name) => match scope::lookup(env, name) {
-                Some(value) => Ok(value),
-                None => undeclared(name, expr.span),
-            },
-            ExprKind::Binary { op, left, right } => self.eval_binary(*op, left, right, env, expr.span),
-            ExprKind::Call { callee, args } => self.eval_call(callee, args, env, expr.span),
-            _ => self.eval_rest(expr, env),
-        }
-    }
-
-    #[inline(never)]
-    fn eval_call(&mut self, callee: &Expr, args: &[Arg], env: &Env, span: Span) -> Exec<Value> {
-        let callee_value = self.eval(callee, env)?;
-        let Value::Function(function) = callee_value else {
-            return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", callee_value.type_name()), callee.span);
-        };
-        let (positional, named) = self.eval_args(args, env)?;
-        self.call(&function, positional, named, span)
-    }
-
-    #[inline(never)]
-    fn eval_rest(&mut self, expr: &Expr, env: &Env) -> Exec<Value> {
-        self.check_stack(expr.span)?;
-        let span = expr.span;
-        Ok(match &expr.kind {
-            ExprKind::Int(n) => Value::Int(*n),
-            ExprKind::Float(n) => Value::Float(*n),
-            ExprKind::Str(s) => Value::string(s),
-            ExprKind::Bool(b) => Value::Bool(*b),
-            ExprKind::Null => Value::Null,
-            ExprKind::Symbol(name) => Value::Symbol(Rc::from(name.as_str())),
-            ExprKind::Interpolated(parts) => {
-                let mut text = String::new();
-                for part in parts {
-                    match part {
-                        StringPart::Text(t) => text.push_str(t),
-                        StringPart::Expr(e) => text.push_str(&self.eval(e, env)?.to_string()),
-                    }
-                }
-                Value::string(&text)
-            }
-            ExprKind::Regex { pattern, flags } => {
-                Value::Regex(self.regex(pattern, flags).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span))?)
-            }
-            ExprKind::Command(parts) => {
-                let mut script = String::new();
-                for part in parts {
-                    match part {
-                        StringPart::Text(t) => script.push_str(t),
-                        StringPart::Expr(e) => {
-                            let value = self.eval(e, env)?;
-                            script.push_str(&command_argument(&value).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, e.span))?);
-                        }
-                    }
-                }
-                Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Shell(script)))))
-            }
-            ExprKind::ModuleFunction { module, name } => {
-                let m = self.module_named(module, env, span)?;
-                if !m.public.contains(name) {
-                    return error(format!("`{}` has no `pub` function named `{name}`", m.path), span);
-                }
-                match scope::lookup_function(&m.env, name) {
-                    Some(f) => Value::Function(f),
-                    None => return error(format!("`{}` has no function named `{name}`", m.path), span),
-                }
-            }
-            ExprKind::ModuleConstant { module, name } => {
-                let m = self.module_named(module, env, span)?;
-                if !m.public.contains(&format!("${name}")) {
-                    return error(format!("`{}` has no `pub` constant named `${name}`", m.path), span);
-                }
-                match scope::lookup(&m.env, name) {
-                    Some(v) => v,
-                    None => return error(format!("`{}` has no constant named `${name}`", m.path), span),
-                }
-            }
-            ExprKind::List { items, .. } => {
-                let mut values = Vec::with_capacity(items.len());
-                for item in items {
-                    values.push(self.eval(item, env)?);
-                }
-                Value::list(values)
-            }
-            ExprKind::Map { entries, .. } => {
-                let mut map = IndexMap::new();
-                for (k, v) in entries {
-                    let key = self.key(k, env)?;
-                    let value = self.eval(v, env)?;
-                    map.insert(key, value);
-                }
-                Value::Map(Rc::new(RefCell::new(map)))
-            }
-            ExprKind::Variable(name) => match scope::lookup(env, name) {
-                Some(value) => value,
-                None => return error(format!("`${name}` isn't declared"), span),
-            },
-            ExprKind::Function(name) => match scope::lookup_function(env, name) {
-                Some(function) => Value::Function(function),
-                None => return error(format!("there's no function named `{name}`. Functions must be defined before they're used"), span),
-            },
-            ExprKind::Unary { op, operand } => {
-                let value = self.eval(operand, env)?;
-                unary(*op, value, span)?
-            }
-            ExprKind::Binary { op, left, right } => self.eval_binary(*op, left, right, env, span)?,
-            ExprKind::PathTest { op, path } => match self.eval(path, env)? {
-                Value::Str(p) => Value::Bool(patterns::path_test(*op, &self.host.state.resolve(&p).display().to_string())),
-                other => return error(format!("`{}` needs a path string, not a {}", op.symbol(), other.type_name()), path.span),
-            },
-            ExprKind::Range { start, end, inclusive } => {
-                let Some(end) = end else {
-                    return error("a range without an end can only be used as an index *(i.e. `$text[2..]`)*", span);
-                };
-                let start = self.range_bound(start, env)?;
-                let end = self.range_bound(end, env)?;
-                Value::Range(Range { start, end, inclusive: *inclusive, step: 1 })
-            }
-            ExprKind::Ternary { cond, then, otherwise } => {
-                if self.condition(cond, env, "? :")? {
-                    self.eval(then, env)?
-                } else {
-                    self.eval(otherwise, env)?
-                }
-            }
-            ExprKind::Assign { op, target, value } => self.eval_assign(*op, target, value, env, span)?,
-            ExprKind::Increment { target, delta, prefix } => {
-                let old = self.eval(target, env)?;
-                if old.as_f64().is_none() {
-                    return error(format!("`++` and `--` only work on numbers, and this is a {}", old.type_name()), span);
-                }
-                let new = arithmetic(BinaryOp::Add, &old, &Value::Int(*delta as i64)).map_err(|m| op_error(m, span))?;
-                self.store(target, new.clone(), env)?;
-                if *prefix { new } else { old }
-            }
-            ExprKind::Call { callee, args } => self.eval_call(callee, args, env, span)?,
-            ExprKind::MethodCall { receiver, method, args, nullable } => {
-                let receiver = self.eval(receiver, env)?;
-                if *nullable && matches!(receiver, Value::Null) {
-                    return Ok(Value::Null);
-                }
-                let (positional, named) = self.eval_args(args, env)?;
-                if !named.is_empty() {
-                    return error("methods don't take named arguments yet", span);
-                }
-                methods::call(self, receiver, method, positional, span)?
-            }
-            ExprKind::TypeCheck { receiver, ty, check, nullable } => {
-                let value = self.eval(receiver, env)?;
-                if *nullable && matches!(value, Value::Null) {
-                    return Ok(Value::Null);
-                }
-                let ok = types::matches(&value, ty).map_err(|m| flow_error(m, ty.span))?;
-                match check {
-                    TypeCheckKind::Is => Value::Bool(ok),
-                    TypeCheckKind::As if ok => value,
-                    TypeCheckKind::As => {
-                        return error_as(exceptions::TYPE_ERROR, format!("`.as({ty})` failed: the value is {}", describe(&value)), span);
-                    }
-                }
-            }
-            ExprKind::Lambda(decl) => {
-                Value::Function(Rc::new(Function::User(UserFunction { decl: decl.clone(), env: env.clone() })))
-            }
-            ExprKind::If { cond, then, otherwise } => {
-                if self.condition(cond, env, "if")? {
-                    self.branch(then, env)?
-                } else {
-                    self.branch(otherwise, env)?
-                }
-            }
-            ExprKind::Switch(switch) => self.switch(switch, env, true)?,
-            ExprKind::Try(inner) => match self.eval(inner, env) {
-                Ok(value) => Value::Result(Rc::new(ResultValue::Ok(value))),
-                Err(Flow::Throw(exception)) => Value::Result(Rc::new(ResultValue::Error(Value::Exception(exception)))),
-                Err(other) => return Err(other),
-            },
-            ExprKind::Index { target, index, nullable } => {
-                let container = self.eval(target, env)?;
-                if *nullable && matches!(container, Value::Null) {
-                    return Ok(Value::Null);
-                }
-                self.eval_index(container, index, env)?
-            }
-        })
-    }
-
-    #[inline(never)]
-    fn eval_binary(&mut self, op: BinaryOp, left: &Expr, right: &Expr, env: &Env, span: Span) -> Exec<Value> {
-        self.check_stack(span)?;
-        // The ones that don't always evaluate their right side
-        match op {
-            BinaryOp::And | BinaryOp::Or => {
-                let name = if op == BinaryOp::And { "&&" } else { "||" };
-                let Value::Bool(l) = self.eval(left, env)? else {
-                    return error_as(exceptions::TYPE_ERROR, format!("both sides of `{name}` must be bools"), left.span);
-                };
-                if (op == BinaryOp::And && !l) || (op == BinaryOp::Or && l) {
-                    return Ok(Value::Bool(l));
-                }
-                return match self.eval(right, env)? {
-                    Value::Bool(r) => Ok(Value::Bool(r)),
-                    _ => error_as(exceptions::TYPE_ERROR, format!("both sides of `{name}` must be bools"), right.span),
-                };
-            }
-            BinaryOp::Coalesce => {
-                let l = self.eval(left, env)?;
-                return if matches!(l, Value::Null) { self.eval(right, env) } else { Ok(l) };
-            }
-            _ => {}
-        }
-        let l = self.eval(left, env)?;
-        let r = self.eval(right, env)?;
-        match op {
-            BinaryOp::Like | BinaryOp::NotLike => {
-                let (Value::Str(text), Value::Str(pattern)) = (&l, &r) else {
-                    return error_as(exceptions::TYPE_ERROR, format!("`{}` needs two strings, but got a {} and a {}", op.symbol(), l.type_name(), r.type_name()), span);
-                };
-                let found = patterns::like(text, pattern).map_err(|m| flow_error(m, right.span))?;
-                Ok(Value::Bool(found == (op == BinaryOp::Like)))
-            }
-            BinaryOp::Match | BinaryOp::NotMatch => {
-                let Value::Str(text) = &l else {
-                    return error(format!("`{}` needs a string on its left, not a {}", op.symbol(), l.type_name()), left.span);
-                };
-                let regex = self.as_regex(&r).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, right.span))?;
-                Ok(Value::Bool(regex.compiled.is_match(text) == (op == BinaryOp::Match)))
-            }
-            _ => binary(op, l, r).map_err(|m| op_error(m, span)),
-        }
-    }
-
-    fn eval_assign(&mut self, op: Option<BinaryOp>, target: &Expr, value: &Expr, env: &Env, span: Span) -> Exec<Value> {
-        let new = match op {
-            None => self.eval(value, env)?,
-            Some(op) => {
-                let old = self.eval(target, env)?;
-                let r = self.eval(value, env)?;
-                binary(op, old, r).map_err(|m| op_error(m, span))?
-            }
-        };
-        self.store(target, new.clone(), env)?;
-        Ok(new)
-    }
-
-    /// Writes into a variable or an index.
-    fn store(&mut self, target: &Expr, value: Value, env: &Env) -> Exec<()> {
-        match &target.kind {
-            ExprKind::Variable(name) => match scope::assign(env, name, value) {
-                Ok(()) => Ok(()),
-                Err(SetError::Undeclared) => {
-                    error(format!("`${name}` isn't declared. Declare it with `let ${name} = ...;`"), target.span)
-                }
-                Err(SetError::Constant) => error(format!("`${name}` is a constant, it can't be changed"), target.span),
-            },
-            ExprKind::Index { target: container, index, .. } => {
-                let container = self.eval(container, env)?;
-                match container {
-                    Value::List(list) => {
-                        let i = self.eval(index, env)?;
-                        let len = list.borrow().len();
-                        let pos = list_position(&i, len).map_err(|m| index_error(m, index.span))?;
-                        list.borrow_mut()[pos] = value;
-                        Ok(())
-                    }
-                    Value::Map(map) => {
-                        let key = self.key(index, env)?;
-                        map.borrow_mut().insert(key, value);
-                        Ok(())
-                    }
-                    Value::Str(_) => error("strings can't be changed. Build a new one instead", target.span),
-                    other => error(format!("a {} can't be indexed", other.type_name()), target.span),
-                }
-            }
-            _ => error("only variables and indexes can be assigned to", target.span),
-        }
-    }
-
-    fn eval_index(&mut self, container: Value, index: &Expr, env: &Env) -> Exec<Value> {
-        // `$list[2..]`: a range without an end goes to the end
-        if let ExprKind::Range { start, end: None, .. } = &index.kind {
-            let start = self.range_bound(start, env)?;
-            let len = match &container {
-                Value::List(l) => l.borrow().len(),
-                Value::Str(s) => s.chars().count(),
-                other => return error(format!("a {} can't be sliced", other.type_name()), index.span),
-            };
-            let range = Range { start, end: len as i64, inclusive: false, step: 1 };
-            return slice(&container, range, len).map_err(|m| index_error(m, index.span));
-        }
-        match container {
-            Value::Map(map) => {
-                let key = self.key(index, env)?;
-                Ok(map.borrow().get(&key).cloned().unwrap_or(Value::Null))
-            }
-            Value::List(_) | Value::Str(_) => {
-                let i = self.eval(index, env)?;
-                let len = match &container {
-                    Value::List(l) => l.borrow().len(),
-                    Value::Str(s) => s.chars().count(),
-                    _ => unreachable!(),
-                };
-                if let Value::Range(range) = i {
-                    return slice(&container, range, len).map_err(|m| index_error(m, index.span));
-                }
-                let pos = list_position(&i, len).map_err(|m| index_error(m, index.span))?;
-                Ok(match &container {
-                    Value::List(l) => l.borrow()[pos].clone(),
-                    Value::Str(s) => Value::string(&s.chars().nth(pos).unwrap().to_string()),
-                    _ => unreachable!(),
-                })
-            }
-            other => error(format!("a {} can't be indexed", other.type_name()), index.span),
-        }
-    }
-
-    fn key(&mut self, expr: &Expr, env: &Env) -> Exec<Key> {
-        let value = self.eval(expr, env)?;
-        match Key::from_value(&value) {
-            Some(key) => Ok(key),
-            None => error(format!("map keys can be strings, numbers or symbols, not a {}", value.type_name()), expr.span),
-        }
-    }
-
-    fn range_bound(&mut self, expr: &Expr, env: &Env) -> Exec<i64> {
-        let value = self.eval(expr, env)?;
-        match value.as_whole() {
-            Some(n) => Ok(n),
-            None => error(format!("ranges need whole numbers, and this is {}", describe(&value)), expr.span),
+    /// Runs a compiled script.
+    pub fn run(&mut self, proto: Rc<Proto>, globals: Rc<Globals>) -> Result<Outcome, Diagnostic> {
+        let script = Rc::new(Function::User(UserFunction { proto, upvalues: Vec::new(), globals }));
+        match self.call(&script, Vec::new(), Vec::new(), Span::default()) {
+            Ok(_) => Ok(Outcome::Finished),
+            Err(Flow::Exit(code)) => Ok(Outcome::Exit(code)),
+            Err(Flow::Throw(exception)) => Err(uncaught(&exception)),
         }
     }
 
     // ---- Calls ----
 
-    fn eval_args(&mut self, args: &[Arg], env: &Env) -> Exec<(Vec<Value>, Vec<(String, Value, Span)>)> {
-        let mut positional = Vec::new();
-        let mut named = Vec::new();
-        for arg in args {
-            let value = self.eval(&arg.value, env)?;
-            if arg.spread {
-                match value {
-                    Value::List(list) => positional.extend(list.borrow().iter().cloned()),
-                    other => return error(format!("only lists can be spread with `...`, not a {}", other.type_name()), arg.value.span),
-                }
-            } else if let Some(name) = &arg.name {
-                named.push((name.clone(), value, arg.value.span));
-            } else {
-                positional.push(value);
-            }
-        }
-        Ok((positional, named))
-    }
-
+    /// Calls a function from Rust code, and runs it to the end.
     pub fn call(
         &mut self,
         function: &Rc<Function>,
         positional: Vec<Value>,
-        named: Vec<(String, Value, Span)>,
+        named: Named,
         span: Span,
     ) -> Exec<Value> {
-        match &**function {
-            Function::Native(native) => self.call_native(native, positional, named, span),
+        if let Function::Native(native) = &**function {
+            return self.call_native(native, positional, named, span);
+        }
+        if stack_position().abs_diff(self.stack_base) > self.stack_budget {
+            return error(TOO_DEEP, span);
+        }
+        let height = self.stack.len();
+        if let Err(e) = self.enter(function.clone(), positional, named, span) {
+            self.stack.truncate(height);
+            return Err(e);
+        }
+        let entry = self.frames.len() - 1;
+        self.execute(entry)
+    }
+
+    /// Starts a call. A native function runs now and its value is pushed;
+    /// for a script's function, a frame is pushed and `true` returned.
+    fn enter(&mut self, function: Rc<Function>, positional: Vec<Value>, named: Named, span: Span) -> Exec<bool> {
+        match &*function {
+            Function::Native(native) => {
+                let value = self.call_native(native, positional, named, span)?;
+                self.stack.push(value);
+                Ok(false)
+            }
             Function::User(user) => {
-                if stack_position().abs_diff(self.stack_base) > self.stack_budget {
-                    return error("too many nested calls. Is there a recursion that never ends?", span);
-                }
-                let call_env = self.bind_params(user, positional, named, span)?;
-                match &user.decl.body {
-                    FunctionBody::Expr(expr) => self.eval(expr, &call_env),
-                    FunctionBody::Block(stmts) => match self.exec_block(stmts, &call_env) {
-                        Ok(()) => Ok(Value::Null),
-                        Err(Flow::Return(value, _)) => Ok(value),
-                        Err(Flow::Break(s)) => error("`break` outside a loop", s),
-                        Err(Flow::Continue(s)) => error("`continue` outside a loop", s),
-                        Err(Flow::Yield(_, s)) => error(YIELD_OUTSIDE, s),
-                        Err(e) => Err(e),
-                    },
-                }
+                let (values, given) = bind(user, positional, named, span)?;
+                self.stack.push(Value::Function(function.clone()));
+                let base = self.stack.len();
+                self.stack.extend(values);
+                self.push_frame(function, base, given, span)?;
+                Ok(true)
             }
         }
+    }
+
+    #[inline(always)]
+    fn push_frame(&mut self, function: Rc<Function>, base: usize, given: u64, span: Span) -> Exec<()> {
+        if self.frames.len() >= self.max_frames {
+            return error(TOO_DEEP, span);
+        }
+        let Function::User(user) = &*function else { unreachable!("only a script's functions get frames") };
+        self.stack.resize(base + user.proto.slots as usize, Value::Null);
+        let cells = if user.proto.cells == 0 { Vec::new() } else { vec![self.empty_cell.clone(); user.proto.cells as usize] };
+        self.frames.push(Frame { function, ip: 0, base, cells, given });
+        Ok(())
+    }
+
+    /// The `Call` instruction: the function is `argc` values below the top.
+    #[inline(always)]
+    fn call_op(&mut self, argc: usize, span: Span) -> Exec<bool> {
+        let callee = self.stack.len() - argc - 1;
+        let function = match &self.stack[callee] {
+            Value::Function(f) => f.clone(),
+            other => return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", other.type_name()), span),
+        };
+        if let Function::User(user) = &*function {
+            if user.proto.simple && argc == user.proto.params.len() {
+                self.push_frame(function, callee + 1, u64::MAX, span)?;
+                return Ok(true);
+            }
+        }
+        let args = self.stack.split_off(callee + 1);
+        self.stack.pop();
+        self.enter(function, args, Vec::new(), span)
+    }
+
+    /// The `CallComplex` instruction, with named or spread arguments.
+    fn call_complex(&mut self, kinds: &[ArgKind], span: Span) -> Exec<bool> {
+        let callee = self.stack.len() - kinds.len() - 1;
+        let function = match &self.stack[callee] {
+            Value::Function(f) => f.clone(),
+            other => return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", other.type_name()), span),
+        };
+        let (positional, named) = self.complex_args(kinds, callee + 1)?;
+        self.stack.pop();
+        self.enter(function, positional, named, span)
+    }
+
+    /// Takes the arguments of a complex call off the stack.
+    fn complex_args(&mut self, kinds: &[ArgKind], start: usize) -> Exec<(Vec<Value>, Named)> {
+        let values = self.stack.split_off(start);
+        let mut positional = Vec::with_capacity(values.len());
+        let mut named = Vec::new();
+        for (kind, value) in kinds.iter().zip(values) {
+            match kind {
+                ArgKind::Positional => positional.push(value),
+                ArgKind::Spread(span) => match value {
+                    Value::List(list) => positional.extend(list.borrow().iter().cloned()),
+                    other => return error(format!("only lists can be spread with `...`, not a {}", other.type_name()), *span),
+                },
+                ArgKind::Named(name, span) => named.push((name.to_string(), value, *span)),
+            }
+        }
+        Ok((positional, named))
     }
 
     #[inline(never)]
@@ -851,7 +299,7 @@ impl<'a> Interpreter<'a> {
         &mut self,
         native: &crate::value::NativeFunction,
         positional: Vec<Value>,
-        named: Vec<(String, Value, Span)>,
+        named: Named,
         span: Span,
     ) -> Exec<Value> {
         let mut args = positional;
@@ -881,58 +329,719 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    // ---- Modules ----
+    // ---- Running ----
 
-    fn exec_use(&mut self, decl: &UseDecl, env: &Env, span: Span) -> Exec<()> {
-        let source = self.host.loader.resolve(&decl.path).map_err(|m| flow_error(m, span))?;
-        match &decl.items {
-            UseItems::Module { alias } => {
-                let name = alias.clone().unwrap_or_else(|| decl.path.last().cloned().unwrap_or_default());
-                if !scope::declare_module(env, &name, ModuleSlot::Pending(source)) {
-                    return error(format!("a module named `{name}` is already imported"), span);
-                }
+    /// Runs until the frame `entry` returns, handling what's thrown.
+    fn execute(&mut self, entry: usize) -> Exec<Value> {
+        loop {
+            match self.dispatch(entry) {
+                Ok(value) => return Ok(value),
+                Err(flow) => self.unwind(flow, entry)?,
             }
-            UseItems::Items(items) => {
-                // Importing names needs their values now
-                let module = self.load(source, span)?;
-                for item in items {
-                    let key = if item.variable { format!("${}", item.name) } else { item.name.clone() };
-                    let local = item.alias.clone().unwrap_or_else(|| item.name.clone());
-                    if !module.public.contains(&key) {
-                        let what = if item.variable { "constant" } else { "function" };
-                        return error(format!("`{}` has no `pub` {what} named `{key}`", module.path), span);
+        }
+    }
+
+    /// Finds the `try` that handles what was thrown, and goes there. When
+    /// there's none in the frames of this run, they're dropped and the error
+    /// goes back to the Rust code that started it.
+    fn unwind(&mut self, flow: Flow, entry: usize) -> Exec<()> {
+        while let Some(handler) = self.handlers.last() {
+            if handler.frame < entry {
+                break;
+            }
+            let handler = self.handlers.pop().expect("there's a handler");
+            if handler.kind != HandlerKind::Finally && matches!(flow, Flow::Exit(_)) {
+                // `exit()` only runs the `finally`s
+                continue;
+            }
+            self.frames.truncate(handler.frame + 1);
+            self.stack.truncate(handler.sp);
+            let frame = &mut self.frames[handler.frame];
+            frame.ip = handler.ip;
+            let base = frame.base;
+            match (handler.kind, flow) {
+                (HandlerKind::Finally, Flow::Throw(e)) => self.stack[base + handler.slot] = Value::Exception(e),
+                (HandlerKind::Finally, Flow::Exit(code)) => self.stack[base + handler.slot] = Value::Int(code as i64),
+                (_, Flow::Throw(e)) => self.stack.push(Value::Exception(e)),
+                (_, Flow::Exit(_)) => unreachable!("skipped above"),
+            }
+            return Ok(());
+        }
+        let base = self.frames[entry].base;
+        self.frames.truncate(entry);
+        self.stack.truncate(base - 1);
+        Err(flow)
+    }
+
+    fn pop(&mut self) -> Value {
+        self.stack.pop().expect("the compiler keeps the stack balanced")
+    }
+
+    fn top(&mut self) -> &mut Value {
+        self.stack.last_mut().expect("the compiler keeps the stack balanced")
+    }
+
+    fn code_of(&self, frame: usize) -> (Rc<Proto>, Rc<Globals>) {
+        match &*self.frames[frame].function {
+            Function::User(user) => (user.proto.clone(), user.globals.clone()),
+            Function::Native(_) => unreachable!("only a script's functions get frames"),
+        }
+    }
+
+    fn globals_of(&self, frame: usize) -> Rc<Globals> {
+        match &*self.frames[frame].function {
+            Function::User(user) => user.globals.clone(),
+            Function::Native(_) => unreachable!("only a script's functions get frames"),
+        }
+    }
+
+    fn upvalue(&self, frame: usize, i: u32) -> &Rc<RefCell<Value>> {
+        match &*self.frames[frame].function {
+            Function::User(user) => &user.upvalues[i as usize],
+            Function::Native(_) => unreachable!("only a script's functions get frames"),
+        }
+    }
+
+    /// Runs instructions until the frame `entry` returns or something is thrown.
+    fn dispatch(&mut self, entry: usize) -> Exec<Value> {
+        let mut fi = self.frames.len() - 1;
+        let (mut proto, mut globals) = self.code_of(fi);
+        let mut ip = self.frames[fi].ip;
+        let mut base = self.frames[fi].base;
+
+        macro_rules! span {
+            () => {
+                proto.spans[ip - 1]
+            };
+        }
+        macro_rules! reload {
+            () => {{
+                fi = self.frames.len() - 1;
+                (proto, globals) = self.code_of(fi);
+                ip = self.frames[fi].ip;
+                base = self.frames[fi].base;
+            }};
+        }
+        macro_rules! arith {
+            ($op:expr, $int:expr, $float:expr) => {{
+                let r = self.pop();
+                let l = self.top();
+                let fast = match (&*l, &r) {
+                    (Value::Int(a), Value::Int(b)) => $int(*a, *b),
+                    (Value::Float(a), Value::Float(b)) => $float(*a, *b),
+                    _ => None,
+                };
+                *l = match fast {
+                    Some(v) => v,
+                    None => arithmetic($op, l, &r).map_err(|m| op_error(m, span!()))?,
+                };
+            }};
+        }
+        macro_rules! compare_op {
+            ($op:expr, $cmp:tt) => {{
+                let r = self.pop();
+                let l = self.top();
+                *l = match (&*l, &r) {
+                    (Value::Int(a), Value::Int(b)) => Value::Bool(a $cmp b),
+                    _ => compare($op, l, &r).map_err(|m| op_error(m, span!()))?,
+                };
+            }};
+        }
+
+        loop {
+            let op = proto.code[ip];
+            ip += 1;
+            match op {
+                // ---- Values ----
+                Op::Const(c) => self.stack.push(proto.consts[c as usize].clone()),
+                Op::Int(n) => self.stack.push(Value::Int(n as i64)),
+                Op::Null => self.stack.push(Value::Null),
+                Op::True => self.stack.push(Value::Bool(true)),
+                Op::False => self.stack.push(Value::Bool(false)),
+                Op::Pop => {
+                    self.pop();
+                }
+                Op::Dup => {
+                    let v = self.top().clone();
+                    self.stack.push(v);
+                }
+
+                // ---- Variables ----
+                Op::LoadLocal(s) => {
+                    let v = self.stack[base + s as usize].clone();
+                    self.stack.push(v);
+                }
+                Op::StoreLocal(s) => {
+                    let v = self.pop();
+                    self.stack[base + s as usize] = v;
+                }
+                Op::LoadCell(c) => {
+                    let v = self.frames[fi].cells[c as usize].borrow().clone();
+                    self.stack.push(v);
+                }
+                Op::StoreCell(c) => {
+                    let v = self.pop();
+                    *self.frames[fi].cells[c as usize].borrow_mut() = v;
+                }
+                Op::DeclareCell(c) => {
+                    let v = self.pop();
+                    self.frames[fi].cells[c as usize] = Rc::new(RefCell::new(v));
+                }
+                Op::SlotToCell { slot, cell } => {
+                    let v = std::mem::replace(&mut self.stack[base + slot as usize], Value::Null);
+                    self.frames[fi].cells[cell as usize] = Rc::new(RefCell::new(v));
+                }
+                Op::LoadUpvalue(u) => {
+                    let v = self.upvalue(fi, u).borrow().clone();
+                    self.stack.push(v);
+                }
+                Op::StoreUpvalue(u) => {
+                    let v = self.pop();
+                    *self.upvalue(fi, u).borrow_mut() = v;
+                }
+                Op::LoadGlobal(g) => {
+                    let slots = globals.slots.borrow();
+                    let global = &slots[g as usize];
+                    if !global.declared {
+                        return Err(undeclared(&global.key, span!()));
                     }
-                    let declared = if item.variable {
-                        let value = scope::lookup(&module.env, &item.name).unwrap_or(Value::Null);
-                        scope::declare(env, &local, value, true)
-                    } else {
-                        match scope::lookup_function(&module.env, &item.name) {
-                            Some(f) => scope::declare_function(env, &local, f),
-                            None => false,
-                        }
+                    let v = global.value.clone();
+                    drop(slots);
+                    self.stack.push(v);
+                }
+                Op::StoreGlobal(g) => {
+                    let v = self.pop();
+                    let mut slots = globals.slots.borrow_mut();
+                    let global = &mut slots[g as usize];
+                    let name = global.key.trim_start_matches('$');
+                    if !global.declared {
+                        return error(format!("`${name}` isn't declared. Declare it with `let ${name} = ...;`"), span!());
+                    }
+                    if global.constant {
+                        return error(format!("`${name}` is a constant, it can't be changed"), span!());
+                    }
+                    global.value = v;
+                }
+                Op::DefineGlobal { global: g, constant } => {
+                    let v = self.pop();
+                    let mut slots = globals.slots.borrow_mut();
+                    let global = &mut slots[g as usize];
+                    if global.declared {
+                        return Err(already_exists(&global.key, span!()));
+                    }
+                    global.value = v;
+                    global.declared = true;
+                    global.constant = constant;
+                }
+                Op::LoadBuiltin(b) => {
+                    let f = self.host.builtins[b as usize].clone();
+                    self.stack.push(Value::Function(f));
+                }
+                Op::SaveSp(s) => {
+                    let height = self.stack.len() as i64;
+                    self.stack[base + s as usize] = Value::Int(height);
+                }
+                Op::RestoreSp(s) => {
+                    if let Value::Int(height) = self.stack[base + s as usize] {
+                        self.stack.truncate(height as usize);
+                    }
+                }
+
+                // ---- Operators ----
+                Op::Add => arith!(BinaryOp::Add, |a: i64, b: i64| a.checked_add(b).map(Value::Int), |a: f64, b: f64| Some(Value::Float(a + b))),
+                Op::Sub => arith!(BinaryOp::Sub, |a: i64, b: i64| a.checked_sub(b).map(Value::Int), |a: f64, b: f64| Some(Value::Float(a - b))),
+                Op::Mul => arith!(BinaryOp::Mul, |a: i64, b: i64| a.checked_mul(b).map(Value::Int), |a: f64, b: f64| Some(Value::Float(a * b))),
+                Op::Div => arith!(BinaryOp::Div, |a: i64, b: i64| Some(Value::Float(a as f64 / b as f64)), |a: f64, b: f64| Some(Value::Float(a / b))),
+                Op::Rem => arith!(
+                    BinaryOp::Rem,
+                    |a: i64, b: i64| if b == 0 { None } else { Some(Value::Int(a.wrapping_rem(b))) },
+                    |a: f64, b: f64| if b == 0.0 { None } else { Some(Value::Float(a % b)) }
+                ),
+                Op::Eq => {
+                    let r = self.pop();
+                    let l = self.top();
+                    *l = Value::Bool(l.same(&r));
+                }
+                Op::NotEq => {
+                    let r = self.pop();
+                    let l = self.top();
+                    *l = Value::Bool(!l.same(&r));
+                }
+                Op::Lt => compare_op!(BinaryOp::Lt, <),
+                Op::Gt => compare_op!(BinaryOp::Gt, >),
+                Op::LtEq => compare_op!(BinaryOp::LtEq, <=),
+                Op::GtEq => compare_op!(BinaryOp::GtEq, >=),
+                Op::Binary(op) => {
+                    let r = self.pop();
+                    let l = self.pop();
+                    let v = binary(op, l, r).map_err(|m| op_error(m, span!()))?;
+                    self.stack.push(v);
+                }
+                Op::Unary(op) => {
+                    let v = self.pop();
+                    let v = unary(op, v, span!())?;
+                    self.stack.push(v);
+                }
+                Op::Pattern(op) => {
+                    let r = self.pop();
+                    let l = self.pop();
+                    let v = self.pattern(op, l, r, span!())?;
+                    self.stack.push(v);
+                }
+                Op::PathTest(op) => {
+                    let v = match self.pop() {
+                        Value::Str(p) => Value::Bool(patterns::path_test(op, &self.host.state.resolve(&p).display().to_string())),
+                        other => return error(format!("`{}` needs a path string, not a {}", op.symbol(), other.type_name()), span!()),
                     };
-                    if !declared {
-                        let shown = if item.variable { format!("${local}") } else { local };
-                        return error(format!("`{shown}` already exists"), span);
+                    self.stack.push(v);
+                }
+                Op::CheckNumber => {
+                    let v = self.top();
+                    if v.as_f64().is_none() {
+                        let message = format!("`++` and `--` only work on numbers, and this is a {}", v.type_name());
+                        return error(message, span!());
+                    }
+                }
+                Op::CheckBool(and) => {
+                    if !matches!(self.top(), Value::Bool(_)) {
+                        return Err(logic_error(and, span!()));
+                    }
+                }
+
+                // ---- Jumps ----
+                Op::Jump(t) => ip = t as usize,
+                Op::JumpIfFalse { target, keyword } => match self.pop() {
+                    Value::Bool(true) => {}
+                    Value::Bool(false) => ip = target as usize,
+                    other => {
+                        let keyword = ["if", "while", "? :"][keyword as usize];
+                        let message = format!("the condition of `{keyword}` must be a bool, but this is a {}", other.type_name());
+                        return error_as(exceptions::TYPE_ERROR, message, span!());
+                    }
+                },
+                Op::JumpIfNot { op, target } => {
+                    let r = self.pop();
+                    let l = self.pop();
+                    let holds = match (&l, &r, op) {
+                        (Value::Int(a), Value::Int(b), BinaryOp::Lt) => a < b,
+                        (Value::Int(a), Value::Int(b), BinaryOp::Gt) => a > b,
+                        (Value::Int(a), Value::Int(b), BinaryOp::LtEq) => a <= b,
+                        (Value::Int(a), Value::Int(b), BinaryOp::GtEq) => a >= b,
+                        (_, _, BinaryOp::Eq) => l.same(&r),
+                        (_, _, BinaryOp::NotEq) => !l.same(&r),
+                        _ => matches!(compare(op, &l, &r).map_err(|m| op_error(m, span!()))?, Value::Bool(true)),
+                    };
+                    if !holds {
+                        ip = target as usize;
+                    }
+                }
+                Op::JumpIfTrueRaw(t) => {
+                    if matches!(self.pop(), Value::Bool(true)) {
+                        ip = t as usize;
+                    }
+                }
+                Op::JumpIfFalseRaw(t) => {
+                    if !matches!(self.pop(), Value::Bool(true)) {
+                        ip = t as usize;
+                    }
+                }
+                Op::JumpLogic { target, and } => {
+                    let Value::Bool(b) = *self.top() else {
+                        return Err(logic_error(and, span!()));
+                    };
+                    if b != and {
+                        ip = target as usize;
+                    } else {
+                        self.pop();
+                    }
+                }
+                Op::JumpIfNotNull(t) => {
+                    if matches!(self.top(), Value::Null) {
+                        self.pop();
+                    } else {
+                        ip = t as usize;
+                    }
+                }
+                Op::JumpIfNull(t) => {
+                    if matches!(self.top(), Value::Null) {
+                        ip = t as usize;
+                    }
+                }
+
+                // ---- Collections and strings ----
+                Op::CheckKey => {
+                    let v = self.top();
+                    if Key::from_value(v).is_none() {
+                        return Err(key_error(v, span!()));
+                    }
+                }
+                Op::List(n) => {
+                    let items = self.stack.split_off(self.stack.len() - n as usize);
+                    self.stack.push(Value::list(items));
+                }
+                Op::Map(n) => {
+                    let items = self.stack.split_off(self.stack.len() - 2 * n as usize);
+                    let mut map = IndexMap::with_capacity(n as usize);
+                    let mut items = items.into_iter();
+                    while let (Some(k), Some(v)) = (items.next(), items.next()) {
+                        map.insert(Key::from_value(&k).expect("checked by CheckKey"), v);
+                    }
+                    self.stack.push(Value::Map(Rc::new(RefCell::new(map))));
+                }
+                Op::Interpolate(n) => {
+                    let parts = self.stack.split_off(self.stack.len() - n as usize);
+                    let mut text = String::new();
+                    for part in parts {
+                        match part {
+                            Value::Str(s) => text.push_str(&s),
+                            other => text.push_str(&other.to_string()),
+                        }
+                    }
+                    self.stack.push(Value::string(&text));
+                }
+                Op::QuoteArgument => {
+                    let v = self.pop();
+                    let quoted = command_argument(&v).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, span!()))?;
+                    self.stack.push(Value::string(&quoted));
+                }
+                Op::Command(n) => {
+                    let parts = self.stack.split_off(self.stack.len() - n as usize);
+                    let script: String = parts.iter().map(|p| p.to_string()).collect();
+                    self.stack.push(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Shell(script))))));
+                }
+                Op::Regex(r) => {
+                    let (pattern, flags) = &proto.regexes[r as usize];
+                    let regex = self.regex(pattern, flags).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span!()))?;
+                    self.stack.push(Value::Regex(regex));
+                }
+                Op::RangeBound => {
+                    let v = self.top();
+                    match v.as_whole() {
+                        Some(n) => *v = Value::Int(n),
+                        None => return error(format!("ranges need whole numbers, and this is {}", describe(v)), span!()),
+                    }
+                }
+                Op::Range { inclusive } => {
+                    let end = self.pop().as_whole().unwrap_or(0);
+                    let start = self.pop().as_whole().unwrap_or(0);
+                    self.stack.push(Value::Range(Range { start, end, inclusive, step: 1 }));
+                }
+                Op::Index => {
+                    let index = self.pop();
+                    let container = self.pop();
+                    let v = index_value(container, index, span!())?;
+                    self.stack.push(v);
+                }
+                Op::SliceFrom => {
+                    let start = self.pop().as_whole().unwrap_or(0);
+                    let container = self.pop();
+                    let len = match &container {
+                        Value::List(l) => l.borrow().len(),
+                        Value::Str(s) => s.chars().count(),
+                        other => return error(format!("a {} can't be sliced", other.type_name()), span!()),
+                    };
+                    let range = Range { start, end: len as i64, inclusive: false, step: 1 };
+                    let v = slice(&container, range, len).map_err(|m| index_error(m, span!()))?;
+                    self.stack.push(v);
+                }
+                Op::SetIndex => {
+                    let value = self.pop();
+                    let index = self.pop();
+                    let container = self.pop();
+                    set_index(&container, index, value.clone(), span!())?;
+                    self.stack.push(value);
+                }
+                Op::UpdateIndex { op, mode } => {
+                    let rhs = self.pop();
+                    let index = self.pop();
+                    let container = self.pop();
+                    let old = index_value(container.clone(), index.clone(), span!())?;
+                    if mode > 0 && old.as_f64().is_none() {
+                        return error(format!("`++` and `--` only work on numbers, and this is a {}", old.type_name()), span!());
+                    }
+                    let new = binary(op, old.clone(), rhs).map_err(|m| op_error(m, span!()))?;
+                    set_index(&container, index, new.clone(), span!())?;
+                    self.stack.push(if mode == 2 { old } else { new });
+                }
+                Op::Destructure { names, rest } => {
+                    let v = self.pop();
+                    self.destructure(v, names as usize, rest, span!())?;
+                }
+
+                // ---- Types ----
+                Op::Is { ty, catch } => {
+                    let v = self.pop();
+                    let ok = types::matches(&v, &proto.types[ty as usize]).map_err(|m| {
+                        if catch { flow_error_as(exceptions::TYPE_ERROR, m, span!()) } else { flow_error(m, span!()) }
+                    })?;
+                    self.stack.push(Value::Bool(ok));
+                }
+                Op::As(ty) => {
+                    let ty = &proto.types[ty as usize];
+                    let v = self.top();
+                    if !types::matches(v, ty).map_err(|m| flow_error(m, span!()))? {
+                        let message = format!("`.as({ty})` failed: the value is {}", describe(v));
+                        return error_as(exceptions::TYPE_ERROR, message, span!());
+                    }
+                }
+
+                // ---- Functions ----
+                Op::Closure(p) => {
+                    let inner = proto.protos[p as usize].clone();
+                    let upvalues = inner
+                        .captures
+                        .iter()
+                        .map(|c| match c {
+                            Capture::Cell(i) => self.frames[fi].cells[*i as usize].clone(),
+                            Capture::Upvalue(i) => self.upvalue(fi, *i).clone(),
+                        })
+                        .collect();
+                    let function = UserFunction { proto: inner, upvalues, globals: self.globals_of(fi) };
+                    self.stack.push(Value::Function(Rc::new(Function::User(function))));
+                }
+                Op::Call(argc) => {
+                    self.frames[fi].ip = ip;
+                    if self.call_op(argc as usize, span!())? {
+                        reload!();
+                    }
+                }
+                Op::CallComplex(c) => {
+                    self.frames[fi].ip = ip;
+                    if self.call_complex(&proto.calls[c as usize], span!())? {
+                        reload!();
+                    }
+                }
+                Op::CallMethod { name, argc } => {
+                    self.frames[fi].ip = ip;
+                    let args = self.stack.split_off(self.stack.len() - argc as usize);
+                    let receiver = self.pop();
+                    let v = methods::call(self, receiver, &proto.names[name as usize], args, span!())?;
+                    self.stack.push(v);
+                }
+                Op::CallMethodComplex { name, call } => {
+                    self.frames[fi].ip = ip;
+                    let kinds = &proto.calls[call as usize];
+                    let (args, _) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
+                    let receiver = self.pop();
+                    let v = methods::call(self, receiver, &proto.names[name as usize], args, span!())?;
+                    self.stack.push(v);
+                }
+                Op::Return => {
+                    let value = self.pop();
+                    let frame = self.frames.pop().expect("a frame is running");
+                    self.stack.truncate(frame.base - 1);
+                    if self.frames.len() == entry {
+                        return Ok(value);
+                    }
+                    self.stack.push(value);
+                    reload!();
+                }
+                Op::JumpIfGiven { param, target } => {
+                    if param < 64 && self.frames[fi].given & (1 << param) != 0 {
+                        ip = target as usize;
+                    }
+                }
+
+                // ---- Modules ----
+                Op::UseModule { module, path } => {
+                    let source = self.host.loader.resolve(&proto.imports[path as usize].path).map_err(|m| flow_error(m, span!()))?;
+                    globals.modules.borrow_mut()[module as usize] = Some(ModuleSlot::Pending(source));
+                }
+                Op::UseItems(i) => {
+                    self.frames[fi].ip = ip;
+                    self.use_items(&proto, i as usize, &globals, span!())?;
+                }
+                Op::ModuleMember { module, name, constant } => {
+                    self.frames[fi].ip = ip;
+                    let v = self.module_member(&globals, module as usize, &proto.names[name as usize], constant, span!())?;
+                    self.stack.push(v);
+                }
+
+                // ---- Exceptions ----
+                Op::Throw => {
+                    let v = self.pop();
+                    let Value::Exception(exception) = v else {
+                        let message = format!("only exceptions can be thrown, not a {} *(i.e. `throw ValueError('...')`)*", v.type_name());
+                        return error_as(exceptions::TYPE_ERROR, message, span!());
+                    };
+                    // A new exception gets the place where it's thrown; a caught one keeps its own
+                    let exception = if exception.span == Span::default() {
+                        exceptions::new(&exception.kind, exception.message.clone(), span!())
+                    } else {
+                        exception
+                    };
+                    return Err(Flow::Throw(exception));
+                }
+                Op::Rethrow => match self.pop() {
+                    Value::Exception(e) => return Err(Flow::Throw(e)),
+                    _ => unreachable!("only exceptions are caught"),
+                },
+                Op::PushCatch(t) => self.push_handler(HandlerKind::Catch, t, fi, 0),
+                Op::PushTry(t) => self.push_handler(HandlerKind::TryExpr, t, fi, 0),
+                Op::PushFinally { target, slot } => self.push_handler(HandlerKind::Finally, target, fi, slot),
+                Op::PopHandler => {
+                    self.handlers.pop();
+                }
+                Op::EndFinally(s) => match std::mem::replace(&mut self.stack[base + s as usize], Value::Null) {
+                    Value::Exception(e) => return Err(Flow::Throw(e)),
+                    Value::Int(code) => return Err(Flow::Exit(code as i32)),
+                    _ => {}
+                },
+                Op::WrapOk => {
+                    let v = self.pop();
+                    self.stack.push(Value::Result(Rc::new(ResultValue::Ok(v))));
+                }
+                Op::WrapError => {
+                    let v = self.pop();
+                    self.stack.push(Value::Result(Rc::new(ResultValue::Error(v))));
+                }
+                Op::Fail(n) => return error(&*proto.names[n as usize], span!()),
+                Op::NoCase(s) => {
+                    let subject = &self.stack[base + s as usize];
+                    return error(format!("no case of the `switch` matches {}", describe(subject)), span!());
+                }
+                Op::CaseMatches(s) => {
+                    let pattern = self.pop();
+                    let subject = &self.stack[base + s as usize];
+                    let matched = match pattern {
+                        Value::Range(range) if !matches!(subject, Value::Range(_)) => subject.as_whole().is_some_and(|n| range.contains(n)),
+                        pattern => subject.same(&pattern),
+                    };
+                    self.stack.push(Value::Bool(matched));
+                }
+
+                // ---- Loops ----
+                Op::ForPrepare { slot, kind } => {
+                    let iterable = self.pop();
+                    let (seq, extra) = for_sequence(iterable, kind, span!())?;
+                    let at = base + slot as usize;
+                    self.stack[at] = seq;
+                    self.stack[at + 1] = Value::Int(0);
+                    self.stack[at + 2] = extra;
+                }
+                Op::ForNext { slot, exit, kind } => {
+                    let at = base + slot as usize;
+                    let Value::Int(i) = self.stack[at + 1] else { unreachable!("the index of a `for`") };
+                    let item = match &self.stack[at] {
+                        Value::List(list) => list.borrow().get(i as usize).cloned(),
+                        Value::Range(range) => range_at(range, i).map(Value::Int),
+                        _ => unreachable!("set by ForPrepare"),
+                    };
+                    let Some(item) = item else {
+                        ip = exit as usize;
+                        continue;
+                    };
+                    self.stack[at + 1] = Value::Int(i + 1);
+                    match kind {
+                        for_kind::INDEXED => {
+                            self.stack.push(Value::Int(i));
+                            self.stack.push(item);
+                        }
+                        for_kind::KEY_VALUE => {
+                            let value = match &self.stack[at + 2] {
+                                Value::List(values) => values.borrow().get(i as usize).cloned().unwrap_or(Value::Null),
+                                _ => Value::Null,
+                            };
+                            self.stack.push(item);
+                            self.stack.push(value);
+                        }
+                        _ => self.stack.push(item),
                     }
                 }
             }
         }
+    }
+
+    fn push_handler(&mut self, kind: HandlerKind, target: u32, frame: usize, slot: u32) {
+        let sp = self.stack.len();
+        self.handlers.push(Handler { kind, ip: target as usize, frame, sp, slot: slot as usize });
+    }
+
+    fn pattern(&mut self, op: BinaryOp, l: Value, r: Value, span: Span) -> Exec<Value> {
+        match op {
+            BinaryOp::Like | BinaryOp::NotLike => {
+                let (Value::Str(text), Value::Str(pattern)) = (&l, &r) else {
+                    let message = format!("`{}` needs two strings, but got a {} and a {}", op.symbol(), l.type_name(), r.type_name());
+                    return error_as(exceptions::TYPE_ERROR, message, span);
+                };
+                let found = patterns::like(text, pattern).map_err(|m| flow_error(m, span))?;
+                Ok(Value::Bool(found == (op == BinaryOp::Like)))
+            }
+            _ => {
+                let Value::Str(text) = &l else {
+                    return error(format!("`{}` needs a string on its left, not a {}", op.symbol(), l.type_name()), span);
+                };
+                let regex = self.as_regex(&r).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span))?;
+                Ok(Value::Bool(regex.compiled.is_match(text) == (op == BinaryOp::Match)))
+            }
+        }
+    }
+
+    /// Pushes the elements of a list for `let [$a, $b, ...$rest]`.
+    fn destructure(&mut self, value: Value, names: usize, rest: bool, span: Span) -> Exec<()> {
+        let Value::List(list) = value else {
+            return error(format!("only lists can be destructured, and this is a {}", value.type_name()), span);
+        };
+        let items = list.borrow();
+        if !rest && items.len() != names {
+            return error(format!("expected a list with {names} elements, but it has {}", items.len()), span);
+        }
+        if rest && items.len() < names {
+            return error(format!("expected a list with at least {names} elements, but it has {}", items.len()), span);
+        }
+        self.stack.extend(items[..names].iter().cloned());
+        if rest {
+            self.stack.push(Value::list(items[names..].to_vec()));
+        }
         Ok(())
     }
 
-    /// The module imported as `name`, loading it the first time it's used.
-    fn module_named(&mut self, name: &str, env: &Env, span: Span) -> Exec<Rc<Module>> {
-        let Some(slot) = scope::lookup_module(env, name) else {
-            return error(format!("there's no module named `{name}`. Import it with `use`"), span);
+    // ---- Modules ----
+
+    fn use_items(&mut self, proto: &Proto, i: usize, globals: &Globals, span: Span) -> Exec<()> {
+        let import = &proto.imports[i];
+        let source = self.host.loader.resolve(&import.path).map_err(|m| flow_error(m, span))?;
+        // Importing names needs their values now
+        let module = self.load(source, span)?;
+        for (name, variable, global, local) in &import.items {
+            let key = if *variable { format!("${name}") } else { name.clone() };
+            if !module.public.contains(&key) {
+                let what = if *variable { "constant" } else { "function" };
+                return error(format!("`{}` has no `pub` {what} named `{key}`", module.path), span);
+            }
+            let value = module.globals.get(&key).unwrap_or(Value::Null);
+            let mut slots = globals.slots.borrow_mut();
+            let slot = &mut slots[*global as usize];
+            if slot.declared {
+                return error(format!("`{local}` already exists"), span);
+            }
+            slot.value = value;
+            slot.declared = true;
+            slot.constant = true;
+        }
+        Ok(())
+    }
+
+    /// `name::function` or `name::$constant`, loading the module the first time.
+    fn module_member(&mut self, globals: &Globals, m: usize, name: &str, constant: bool, span: Span) -> Exec<Value> {
+        let slot = globals.modules.borrow()[m].clone();
+        let module = match slot {
+            Some(ModuleSlot::Loaded(module)) => module,
+            Some(ModuleSlot::Pending(source)) => {
+                let module = self.load(source, span)?;
+                globals.modules.borrow_mut()[m] = Some(ModuleSlot::Loaded(module.clone()));
+                module
+            }
+            None => return error(format!("the module of `{name}` isn't imported yet"), span),
         };
-        let pending = match &*slot.borrow() {
-            ModuleSlot::Loaded(m) => return Ok(m.clone()),
-            ModuleSlot::Pending(source) => source.clone(),
-        };
-        let module = self.load(pending, span)?;
-        *slot.borrow_mut() = ModuleSlot::Loaded(module.clone());
-        Ok(module)
+        let (key, what) = if constant { (format!("${name}"), "constant") } else { (name.to_string(), "function") };
+        if !module.public.contains(&key) {
+            return error(format!("`{}` has no `pub` {what} named `{key}`", module.path), span);
+        }
+        match module.globals.get(&key) {
+            Some(v) => Ok(v),
+            None => error(format!("`{}` has no {what} named `{key}`", module.path), span),
+        }
     }
 
     /// Loads a module once: later loads give the same one.
@@ -960,87 +1069,164 @@ impl<'a> Interpreter<'a> {
         let file = self.host.loader.files.len() as u32;
         self.host.loader.files.push(shown.clone());
         let program = crate::parse_budgeted(&source, file, self.stack_budget).map_err(|d| flow_error(d.message, d.span))?;
+        let globals = Rc::new(Globals::default());
+        let (proto, public) = Compiler::new(&globals, &self.host.builtin_names, self.stack_budget)
+            .module(&program, &shown)
+            .map_err(|d| flow_error(d.message, d.span))?;
 
-        let env = scope::new_scope(&self.host.builtins);
-        let mut public = std::collections::HashSet::new();
         self.host.loader.loading.push(path.clone());
-        let result = (|| -> Exec<()> {
-            for stmt in &program {
-                let inner = match &stmt.kind {
-                    StmtKind::Pub(inner) => {
-                        match &inner.kind {
-                            StmtKind::Function(decl) => public.insert(decl.name.clone()),
-                            StmtKind::Let { name, .. } => public.insert(format!("${name}")),
-                            _ => false,
-                        };
-                        &**inner
-                    }
-                    _ => stmt,
-                };
-                let declaration = matches!(
-                    inner.kind,
-                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { constant: true, .. }
-                );
-                if !declaration {
-                    return error(
-                        "an imported module can only have declarations at its top level: functions, `const` and `type`",
-                        stmt.span,
-                    );
-                }
-                self.exec(stmt, &env)?;
-            }
-            Ok(())
-        })();
+        let body = Rc::new(Function::User(UserFunction { proto, upvalues: Vec::new(), globals: globals.clone() }));
+        let result = self.call(&body, Vec::new(), Vec::new(), span);
         self.host.loader.loading.pop();
         result?;
-        let module = Rc::new(Module { path: shown, env, public });
+        let module = Rc::new(Module { path: shown, globals, public });
         self.host.loader.cache.insert(path, module.clone());
         Ok(module)
     }
+}
 
-    /// The scope of a call, with every parameter declared.
-    #[inline(never)]
-    fn bind_params(
-        &mut self,
-        user: &UserFunction,
-        mut positional: Vec<Value>,
-        mut named: Vec<(String, Value, Span)>,
-        span: Span,
-    ) -> Exec<Env> {
-        let decl = &user.decl;
-        let call_env = scope::new_scope(&user.env);
-        positional.reverse(); // so the next one is popped from the end
-        for param in &decl.params {
-            let value = if param.variadic {
-                positional.reverse();
-                Value::list(std::mem::take(&mut positional))
-            } else if let Some(v) = positional.pop() {
-                if named.iter().any(|(n, ..)| n == &param.name) {
-                    return error_as(exceptions::TYPE_ERROR, format!("`{}` was given twice", param.name), span);
-                }
-                v
-            } else if let Some(i) = named.iter().position(|(n, ..)| n == &param.name) {
-                named.remove(i).1
-            } else if let Some(default) = &param.default {
-                // Evaluated on every call, in the function's own scope
-                self.eval(default, &call_env)?
-            } else {
-                return error_as(exceptions::TYPE_ERROR, format!("`{}` needs a value for `${}`", decl.name, param.name), span);
-            };
-            if !scope::declare(&call_env, &param.name, value, false) {
-                return error(
-                    format!("the parameter `${}` of `{}` has the name of a variable that already exists", param.name, decl.name),
-                    span,
-                );
+/// The values of a call's parameters, from its arguments, and which were given.
+fn bind(user: &UserFunction, mut positional: Vec<Value>, mut named: Named, span: Span) -> Exec<(Vec<Value>, u64)> {
+    let proto = &user.proto;
+    let name = &proto.name;
+    let mut values = Vec::with_capacity(proto.params.len());
+    let mut given = 0u64;
+    positional.reverse(); // so the next one is popped from the end
+    for (i, param) in proto.params.iter().enumerate() {
+        let bit = if i < 64 { 1 << i } else { 0 };
+        let value = if param.variadic {
+            positional.reverse();
+            given |= bit;
+            Value::list(std::mem::take(&mut positional))
+        } else if let Some(v) = positional.pop() {
+            if named.iter().any(|(n, ..)| **n == *param.name) {
+                return error_as(exceptions::TYPE_ERROR, format!("`{}` was given twice", param.name), span);
             }
+            given |= bit;
+            v
+        } else if let Some(j) = named.iter().position(|(n, ..)| **n == *param.name) {
+            given |= bit;
+            named.remove(j).1
+        } else if param.has_default {
+            Value::Null
+        } else {
+            return error_as(exceptions::TYPE_ERROR, format!("`{name}` needs a value for `${}`", param.name), span);
+        };
+        values.push(value);
+    }
+    if !positional.is_empty() {
+        return error_as(exceptions::TYPE_ERROR, format!("`{name}` takes {} arguments, but got more", proto.params.len()), span);
+    }
+    if let Some((n, _, arg_span)) = named.first() {
+        return error_as(exceptions::TYPE_ERROR, format!("`{name}` has no parameter named `{n}`"), *arg_span);
+    }
+    Ok((values, given))
+}
+
+/// What a `for` loops over, and the values of a map's keys.
+fn for_sequence(iterable: Value, kind: u8, span: Span) -> Exec<(Value, Value)> {
+    if kind == for_kind::LIST {
+        return match iterable {
+            Value::List(_) => Ok((iterable, Value::Null)),
+            other => error(format!("`for ([...] in ...)` needs a list of lists, not a {}", other.type_name()), span),
+        };
+    }
+    match (&iterable, kind) {
+        (Value::Map(map), for_kind::VALUE | for_kind::KEY_VALUE) => {
+            let map = map.borrow();
+            let keys = Value::list(map.keys().map(|k| k.to_value()).collect());
+            let values = Value::list(map.values().cloned().collect());
+            Ok((keys, values))
         }
-        if !positional.is_empty() {
-            return error_as(exceptions::TYPE_ERROR, format!("`{}` takes {} arguments, but got more", decl.name, decl.params.len()), span);
+        (Value::Map(_), _) => error("use `for ($key => $value in $map)` to loop over a map with its keys", span),
+        (_, for_kind::KEY_VALUE) => error(format!("`=>` only works with maps, and this is a {}", iterable.type_name()), span),
+        // Looped by position, so elements added while looping are seen, like in JavaScript
+        (Value::List(_) | Value::Range(_), _) => Ok((iterable, Value::Null)),
+        (Value::Str(s), _) => Ok((Value::list(s.chars().map(|c| Value::string(c.encode_utf8(&mut [0; 4]))).collect()), Value::Null)),
+        _ => error(format!("can't loop over a {}", iterable.type_name()), span),
+    }
+}
+
+/// The `i`th number of a range, like `Range::iter`.
+fn range_at(range: &Range, i: i64) -> Option<i64> {
+    let down = range.start > range.end;
+    let offset = i.checked_mul(range.step)?;
+    let n = if down { range.start.checked_sub(offset)? } else { range.start.checked_add(offset)? };
+    let inside = match (down, range.inclusive) {
+        (false, false) => n < range.end,
+        (false, true) => n <= range.end,
+        (true, false) => n > range.end,
+        (true, true) => n >= range.end,
+    };
+    inside.then_some(n)
+}
+
+fn index_value(container: Value, index: Value, span: Span) -> Exec<Value> {
+    match container {
+        Value::Map(map) => {
+            let Some(key) = Key::from_value(&index) else { return Err(key_error(&index, span)) };
+            Ok(map.borrow().get(&key).cloned().unwrap_or(Value::Null))
         }
-        if let Some((name, _, arg_span)) = named.first() {
-            return error_as(exceptions::TYPE_ERROR, format!("`{}` has no parameter named `{name}`", decl.name), *arg_span);
+        Value::List(_) | Value::Str(_) => {
+            let len = match &container {
+                Value::List(l) => l.borrow().len(),
+                Value::Str(s) => s.chars().count(),
+                _ => unreachable!(),
+            };
+            if let Value::Range(range) = index {
+                return slice(&container, range, len).map_err(|m| index_error(m, span));
+            }
+            let pos = list_position(&index, len).map_err(|m| index_error(m, span))?;
+            Ok(match &container {
+                Value::List(l) => l.borrow()[pos].clone(),
+                Value::Str(s) => Value::string(&s.chars().nth(pos).unwrap().to_string()),
+                _ => unreachable!(),
+            })
         }
-        Ok(call_env)
+        other => error(format!("a {} can't be indexed", other.type_name()), span),
+    }
+}
+
+fn set_index(container: &Value, index: Value, value: Value, span: Span) -> Exec<()> {
+    match container {
+        Value::List(list) => {
+            let len = list.borrow().len();
+            let pos = list_position(&index, len).map_err(|m| index_error(m, span))?;
+            list.borrow_mut()[pos] = value;
+            Ok(())
+        }
+        Value::Map(map) => {
+            let Some(key) = Key::from_value(&index) else { return Err(key_error(&index, span)) };
+            map.borrow_mut().insert(key, value);
+            Ok(())
+        }
+        Value::Str(_) => error("strings can't be changed. Build a new one instead", span),
+        other => error(format!("a {} can't be indexed", other.type_name()), span),
+    }
+}
+
+fn key_error(value: &Value, span: Span) -> Flow {
+    flow_error(format!("map keys can be strings, numbers or symbols, not a {}", value.type_name()), span)
+}
+
+fn logic_error(and: bool, span: Span) -> Flow {
+    let name = if and { "&&" } else { "||" };
+    flow_error_as(exceptions::TYPE_ERROR, format!("both sides of `{name}` must be bools"), span)
+}
+
+#[cold]
+fn undeclared(key: &str, span: Span) -> Flow {
+    match key.strip_prefix('$') {
+        Some(name) => flow_error(format!("`${name}` isn't declared"), span),
+        None => flow_error(format!("there's no function named `{key}`. Functions must be defined before they're used"), span),
+    }
+}
+
+#[cold]
+fn already_exists(key: &str, span: Span) -> Flow {
+    match key.strip_prefix('$') {
+        Some(name) => flow_error(format!("`${name}` already exists. Variables can't be declared twice"), span),
+        None => flow_error(format!("a function named `{key}` already exists"), span),
     }
 }
 
@@ -1069,12 +1255,6 @@ fn command_argument(value: &Value) -> Result<String, String> {
         }
         other => Err(format!("a {} can't be used in a command", other.type_name())),
     }
-}
-
-#[cold]
-#[inline(never)]
-fn undeclared(name: &str, span: Span) -> Exec<Value> {
-    error(format!("`${name}` isn't declared"), span)
 }
 
 /// The first line of a regex error, which says what's wrong.

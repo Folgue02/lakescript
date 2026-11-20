@@ -6,9 +6,7 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 
-use crate::ast::FunctionDecl;
 use crate::token::Span;
-use crate::scope::Env;
 
 #[derive(Clone)]
 pub enum Value {
@@ -140,10 +138,12 @@ pub enum Function {
     Native(NativeFunction),
 }
 
+/// A function written in Lakescript: its code, the variables of the functions
+/// around it that it uses, and the top level of the script or module it's in.
 pub struct UserFunction {
-    pub decl: Rc<FunctionDecl>,
-    /// The scope the function was defined in, so it can use the variables around it.
-    pub env: Env,
+    pub(crate) proto: Rc<crate::bytecode::Proto>,
+    pub(crate) upvalues: Vec<Rc<RefCell<Value>>>,
+    pub(crate) globals: Rc<crate::modules::Globals>,
 }
 
 /// What a native function can use besides its arguments.
@@ -203,7 +203,7 @@ pub struct NativeFunction {
 impl Function {
     pub fn name(&self) -> &str {
         match self {
-            Function::User(f) => &f.decl.name,
+            Function::User(f) => &f.proto.name,
             Function::Native(f) => &f.name,
         }
     }

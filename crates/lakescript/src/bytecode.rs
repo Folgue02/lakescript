@@ -1,0 +1,276 @@
+//! The bytecode the compiler writes and the VM runs *(see `ideas/tooling/vm.md`)*.
+//! It's private to the library: it can change in any version.
+//!
+//! The VM is a stack machine. A function's frame is a window of the stack:
+//! its local variables come first, in numbered slots, and the values being
+//! computed are pushed above them. A local variable that a closure uses lives
+//! in a cell instead, so the closure and the function share it.
+
+use std::rc::Rc;
+
+use crate::ast::{BinaryOp, PathTestOp, TypeExpr, UnaryOp};
+use crate::token::Span;
+use crate::value::Value;
+
+/// One instruction. Numbers in them are indexes: into the frame's slots or
+/// cells, the closure's upvalues, the module's globals, or the tables of the
+/// `Proto`. Jumps go to an instruction's position in `Proto::code`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Op {
+    // ---- Values ----
+    Const(u32),
+    Int(i32),
+    Null,
+    True,
+    False,
+    Pop,
+    Dup,
+
+    // ---- Variables ----
+    LoadLocal(u32),
+    /// Pops into a slot.
+    StoreLocal(u32),
+    LoadCell(u32),
+    StoreCell(u32),
+    /// Pops into a new cell, so a variable declared again (in the next pass of a
+    /// loop) is a new variable, and closures made before keep the old one.
+    DeclareCell(u32),
+    /// Moves a parameter from its slot to a new cell.
+    SlotToCell { slot: u32, cell: u32 },
+    LoadUpvalue(u32),
+    StoreUpvalue(u32),
+    LoadGlobal(u32),
+    /// Assigns an existing global variable.
+    StoreGlobal(u32),
+    /// Pops into a global, which must not exist yet.
+    DefineGlobal { global: u32, constant: bool },
+    LoadBuiltin(u32),
+    /// Saves the height of the stack into a slot, for `RestoreSp`.
+    SaveSp(u32),
+    /// Drops what was pushed since `SaveSp`.
+    RestoreSp(u32),
+
+    // ---- Operators ----
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    Eq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+    /// Any other binary operator except `&&`, `||` and `??`.
+    Binary(BinaryOp),
+    Unary(UnaryOp),
+    /// `-like`, `-notlike`, `-match`, `-notmatch`
+    Pattern(BinaryOp),
+    PathTest(PathTestOp),
+    /// Checks the value on top is a number, for `++` and `--`.
+    CheckNumber,
+    /// Checks the value on top is a bool, for the right side of `&&` (`false`) or `||` (`true`).
+    CheckBool(bool),
+
+    // ---- Jumps ----
+    Jump(u32),
+    /// Pops a condition, which must be a bool. `keyword` says which one it was
+    /// for the error: `0` is `if`, `1` is `while`, `2` is `? :`.
+    JumpIfFalse { target: u32, keyword: u8 },
+    /// Compares the two values on top with `==`, `!=`, `<`, `>`, `<=` or `>=`,
+    /// and jumps when it's false. It's the condition of an `if`, `while` or
+    /// `? :` in one instruction.
+    JumpIfNot { op: BinaryOp, target: u32 },
+    /// Pops a bool the VM made itself.
+    JumpIfTrueRaw(u32),
+    JumpIfFalseRaw(u32),
+    /// The left side of `&&` (`and: true`) or `||`: jumps keeping it when it
+    /// decides the result, or pops it.
+    JumpLogic { target: u32, and: bool },
+    /// Jumps keeping the value when it isn't `null`, for `??`.
+    JumpIfNotNull(u32),
+    /// Jumps keeping the value when it's `null`, for `?.` and `?[`.
+    JumpIfNull(u32),
+
+    // ---- Collections and strings ----
+    /// Checks that the value on top can be a map key.
+    CheckKey,
+    List(u32),
+    /// Pops pairs of key and value.
+    Map(u32),
+    /// Joins the values into a string.
+    Interpolate(u32),
+    /// Quotes the value on top for `sh`, for `%x"..."`.
+    QuoteArgument,
+    /// Joins the parts into a command.
+    Command(u32),
+    Regex(u32),
+    /// Checks the value on top is a whole number, for the ends of a range.
+    RangeBound,
+    Range { inclusive: bool },
+    Index,
+    /// `$text[2..]`: pops the start.
+    SliceFrom,
+    /// Pops the value, the index and the container, and pushes the value back.
+    SetIndex,
+    /// Changes `container[index]` with `op` and the value on top. `mode`: `0`
+    /// for `op=`, `1` for `++$x` and `--$x`, `2` for `$x++` and `$x--`.
+    UpdateIndex { op: BinaryOp, mode: u8 },
+    /// `let [$a, ...$rest] = ...`: checks the list has `names` elements (or
+    /// more, with a rest) and pushes them, and then the rest as a list.
+    Destructure { names: u32, rest: bool },
+
+    // ---- Types ----
+    /// `.is(type)`. `catch`: the type of a `catch`, whose errors are `TypeError`s.
+    Is { ty: u32, catch: bool },
+    As(u32),
+
+    // ---- Functions ----
+    Closure(u32),
+    Call(u32),
+    /// A call with named or spread arguments, described by `Proto::calls`.
+    CallComplex(u32),
+    CallMethod { name: u32, argc: u32 },
+    CallMethodComplex { name: u32, call: u32 },
+    Return,
+    /// Jumps when the parameter was given, to skip its default.
+    JumpIfGiven { param: u32, target: u32 },
+
+    // ---- Modules ----
+    /// Imports a whole module under a name. It's loaded the first time it's used.
+    UseModule { module: u32, path: u32 },
+    /// Imports some names of a module, described by `Proto::imports`.
+    UseItems(u32),
+    /// `name::function` or `name::$constant`. `name` is in `Proto::names`.
+    ModuleMember { module: u32, name: u32, constant: bool },
+
+    // ---- Exceptions ----
+    Throw,
+    /// Throws again the exception on top, from where it was first thrown.
+    Rethrow,
+    /// Starts a `try` whose `catch`es are at `target`.
+    PushCatch(u32),
+    /// Starts a `try` with a `finally` at `target`. What stopped the body is kept in `slot`.
+    PushFinally { target: u32, slot: u32 },
+    /// Starts a `try` expression, whose error is handled at `target`.
+    PushTry(u32),
+    PopHandler,
+    /// Ends a `finally` that was run because of an exception or `exit()`, to carry on with it.
+    EndFinally(u32),
+    /// `try expr`: wraps the value on top in a `result`.
+    WrapOk,
+    WrapError,
+    /// Throws an `Exception` with this message *(in `Proto::names`)*.
+    Fail(u32),
+    /// Throws when no case of a `switch` used as a value matches the value in the slot.
+    NoCase(u32),
+    /// Whether the value in the slot matches the pattern on top, for a `case`.
+    CaseMatches(u32),
+
+    // ---- Loops ----
+    /// Gets a `for` ready: pops what it loops over into `slot` (and the two after it).
+    ForPrepare { slot: u32, kind: u8 },
+    /// The next pass of a `for`, or a jump to `exit` when it's done. Pushes the
+    /// value, or the index or key and then the value.
+    ForNext { slot: u32, exit: u32, kind: u8 },
+}
+
+/// What a `for` gives each pass.
+pub mod for_kind {
+    /// `for ($x in ...)`, and `for ([...] in ...)`, which destructures the value.
+    pub const VALUE: u8 = 0;
+    /// `for ($i, $x in ...)`
+    pub const INDEXED: u8 = 1;
+    /// `for ($k => $v in ...)`
+    pub const KEY_VALUE: u8 = 2;
+    /// `for ([$a, $b] in ...)`
+    pub const LIST: u8 = 3;
+}
+
+/// Where a closure finds a variable of the function around it.
+#[derive(Debug, Clone, Copy)]
+pub enum Capture {
+    /// A cell of the frame that creates the closure.
+    Cell(u32),
+    /// An upvalue of the function that creates the closure.
+    Upvalue(u32),
+}
+
+/// How the arguments of a complex call are laid out on the stack, in order.
+#[derive(Debug, Clone)]
+pub enum ArgKind {
+    Positional,
+    /// `...$list`
+    Spread(Span),
+    /// `name: value`
+    Named(Rc<str>, Span),
+}
+
+#[derive(Debug, Clone)]
+pub struct Param {
+    pub name: Rc<str>,
+    pub has_default: bool,
+    pub variadic: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct Import {
+    pub path: Vec<String>,
+    /// Name in the module, whether it's a constant, and the global it goes into.
+    pub items: Vec<(String, bool, u32, String)>,
+}
+
+/// A compiled function, or a whole script or module.
+#[derive(Debug, Default)]
+pub struct Proto {
+    pub name: Rc<str>,
+    pub params: Vec<Param>,
+    pub code: Vec<Op>,
+    /// The place in the source of each instruction, for errors.
+    pub spans: Vec<Span>,
+    pub consts: Vec<Value>,
+    pub names: Vec<Rc<str>>,
+    pub types: Vec<TypeExpr>,
+    pub regexes: Vec<(String, String)>,
+    pub protos: Vec<Rc<Proto>>,
+    pub calls: Vec<Vec<ArgKind>>,
+    pub imports: Vec<Import>,
+    pub captures: Vec<Capture>,
+    /// How many slots and cells a frame of this function needs.
+    pub slots: u32,
+    pub cells: u32,
+    /// Whether a call with exactly one value per parameter can skip binding.
+    pub simple: bool,
+}
+
+
+impl Proto {
+    /// The instructions as text, with the functions inside after them, for `lks --bytecode`.
+    pub fn listing(&self) -> String {
+        let mut out = String::new();
+        self.write_listing(&mut out, &self.name);
+        out
+    }
+
+    fn write_listing(&self, out: &mut String, path: &str) {
+        use std::fmt::Write;
+        let params: Vec<&str> = self.params.iter().map(|p| &*p.name).collect();
+        let _ = writeln!(out, "{path}({}): {} slots, {} cells", params.join(", "), self.slots, self.cells);
+        for (i, op) in self.code.iter().enumerate() {
+            let span = self.spans[i];
+            let detail = match op {
+                Op::Const(c) => format!("  {:?}", self.consts[*c as usize]),
+                Op::CallMethod { name, .. } | Op::CallMethodComplex { name, .. } | Op::ModuleMember { name, .. } | Op::Fail(name) => {
+                    format!("  {}", self.names[*name as usize])
+                }
+                _ => String::new(),
+            };
+            let _ = writeln!(out, "  {i:4}  {:>4}:{:<3}  {op:?}{detail}", span.line, span.column);
+        }
+        for (i, inner) in self.protos.iter().enumerate() {
+            let _ = writeln!(out);
+            inner.write_listing(out, &format!("{path}/{i}:{}", inner.name));
+        }
+    }
+}

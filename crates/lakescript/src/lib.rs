@@ -7,8 +7,10 @@
 //! - never panics because of what a script does.
 
 pub mod ast;
+mod bytecode;
 mod checker;
 mod command;
+mod compiler;
 pub mod diagnostic;
 mod engine;
 mod exceptions;
@@ -19,7 +21,6 @@ mod methods;
 mod modules;
 pub mod parser;
 mod patterns;
-mod scope;
 mod stack;
 mod stdlib;
 pub mod token;

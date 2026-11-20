@@ -19,6 +19,7 @@ lks [options] <script> [arguments for the script...]
 | `-V`, `--version` | Shows the version |
 | `--tokens` | For debugging `lks`: prints the tokens of the script instead of running it |
 | `--ast` | For debugging `lks`: prints the syntax tree of the script instead of running it |
+| `--bytecode` | For debugging `lks`: prints the bytecode of the script instead of running it. It changes between versions |
 
 ## Environment variables
 

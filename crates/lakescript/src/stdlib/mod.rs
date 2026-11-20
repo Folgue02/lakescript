@@ -11,8 +11,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 
 use crate::exceptions::TYPE_ERROR;
-use crate::modules::Module;
-use crate::scope;
+use crate::modules::{Globals, Module};
 use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeResult, Value};
 
 pub const MODULES: &[&str] = &["std/env", "std/fs", "std/io", "std/json", "std/path", "std/process"];
@@ -63,20 +62,21 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/process" => process::register(&mut exports),
         _ => return None,
     }
-    let env = scope::root_scope();
+    let globals = Rc::new(Globals::default());
     let mut public = HashSet::new();
     let short = name.rsplit('/').next().unwrap_or(name);
     for (fname, params, func) in exports.functions {
         let full = format!("{short}::{fname}");
         let params = params.iter().map(|p| p.to_string()).collect();
-        scope::declare_function(&env, fname, Rc::new(Function::Native(NativeFunction { name: full, params, func })));
+        let function = Value::Function(Rc::new(Function::Native(NativeFunction { name: full, params, func })));
+        globals.define(fname, function, true);
         public.insert(fname.to_string());
     }
     for (cname, value) in exports.constants {
-        scope::declare(&env, cname, value, true);
+        globals.define(&format!("${cname}"), value, true);
         public.insert(format!("${cname}"));
     }
-    Some(Rc::new(Module { path: exports.name, env, public }))
+    Some(Rc::new(Module { path: exports.name, globals, public }))
 }
 
 // ---- Helpers for the arguments of native functions ----

@@ -1,7 +1,7 @@
 # Type checking
 
 - Types are optional. They're checked once, before the script runs, and then removed, so there are no type checks while the script runs. Typed and untyped code run at the same speed.
-- `lks` checks the types every time before running a script. Until there's a cache *(phase 5)*, this makes startup a bit slower.
+- `lks` checks the types every time before running a script. It costs less than a millisecond for most scripts.
 - A type error stops the script before its first line runs, like a syntax error. There are no type warnings.
 - A check against `null` narrows the type: after `if ($x == null) return;`, or inside `if ($x != null) { ... }`, `$x` isn't nullable anymore, like in TypeScript and Kotlin. The same as `.is()` and `case string ->` already do.
 - The check can be turned off completely, for scripts that are shipped already checked. Since types never change what the code does, the script behaves the same.
@@ -30,5 +30,5 @@ $ages['Daniel'] = 24;       // $ages is a map<string, number>
 - Lists are invariant: a `list<string>` can't be passed where a `list<?string>` is expected, since the function could add a `null` to it. `any` is accepted everywhere.
 - Functions declared with a return type other than `void` must end with a `return` or a `throw` on every path.
 - A function registered by a program that embeds Lakescript is `any`: it takes any arguments and returns `any`.
-- Checking takes less than a millisecond for small scripts. From phase 5 its result is cached with the bytecode.
+- Checking takes less than a millisecond for small scripts. Once there's a bytecode cache, its result will be cached with the bytecode.
 

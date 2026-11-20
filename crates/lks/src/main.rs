@@ -26,6 +26,7 @@ Options:
 For debugging lks itself:
   --tokens         Print the tokens of the script instead of running it
   --ast            Print the syntax tree of the script instead of running it
+  --bytecode       Print the bytecode of the script instead of running it
 ";
 
 fn main() -> ExitCode {
@@ -44,6 +45,7 @@ struct Options {
     no_type_check: bool,
     show_tokens: bool,
     show_ast: bool,
+    show_bytecode: bool,
 }
 
 /// What the command line asks for.
@@ -65,6 +67,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
             "--no-type-check" => options.no_type_check = true,
             "--tokens" => options.show_tokens = true,
             "--ast" => options.show_ast = true,
+            "--bytecode" => options.show_bytecode = true,
             "-h" | "--help" => return Ok(Request::Help),
             "-V" | "--version" => return Ok(Request::Version),
             "--" => match args.next() {
@@ -98,7 +101,7 @@ fn run() -> ExitCode {
         }
     };
 
-    if options.show_tokens || options.show_ast {
+    if options.show_tokens || options.show_ast || options.show_bytecode {
         let source = match std::fs::read_to_string(&script) {
             Ok(source) => source,
             Err(err) => {
@@ -106,7 +109,7 @@ fn run() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        return debug_print(&script, &source, options.show_tokens, options.show_ast);
+        return debug_print(&script, &source, &options);
     }
 
     let mut engine = Engine::new();
@@ -136,7 +139,8 @@ fn show(diagnostic: &lakescript::Diagnostic, script: &str) -> String {
     }
 }
 
-fn debug_print(path: &str, source: &str, show_tokens: bool, show_ast: bool) -> ExitCode {
+fn debug_print(path: &str, source: &str, options: &Options) -> ExitCode {
+    let (show_tokens, show_ast) = (options.show_tokens, options.show_ast);
     let result = lexer::tokenize(source).and_then(|tokens| {
         if show_tokens {
             for token in &tokens {
@@ -150,6 +154,15 @@ fn debug_print(path: &str, source: &str, show_tokens: bool, show_ast: bool) -> E
             if show_ast {
                 for stmt in &program {
                     println!("{stmt}");
+                }
+            }
+            if options.show_bytecode {
+                match Engine::new().bytecode(source) {
+                    Ok(listing) => print!("{listing}"),
+                    Err(diagnostic) => {
+                        eprintln!("{}", show(&diagnostic, path));
+                        return ExitCode::FAILURE;
+                    }
                 }
             }
             ExitCode::SUCCESS

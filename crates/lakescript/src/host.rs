@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::modules::Loader;
-use crate::scope::Env;
-use crate::value::RegexValue;
+use crate::value::{Function, RegexValue};
 
 pub struct Host {
     pub output: Box<dyn Write>,
@@ -25,7 +24,9 @@ pub struct Host {
     pub regexes: HashMap<String, Rc<RegexValue>>,
     pub state: ScriptState,
     pub loader: Loader,
-    pub builtins: Env,
+    /// The built-in functions and the ones the host registered, by number, and their numbers by name.
+    pub builtins: Vec<Rc<Function>>,
+    pub builtin_names: HashMap<String, u32>,
     /// The state of the random number generator, for `random()` and `shuffle()`.
     pub rng: u64,
 }

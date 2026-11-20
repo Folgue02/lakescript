@@ -11,7 +11,7 @@ use crate::diagnostic::Diagnostic;
 use crate::host::{Host, ScriptState};
 use crate::interpreter::Interpreter;
 use crate::modules::Loader;
-use crate::scope::{self, Env};
+use crate::modules::Globals;
 use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeResult, Value};
 
 /// How a script ended, when it didn't fail.
@@ -45,7 +45,7 @@ impl Outcome {
 /// assert_eq!(output.text(), "3\n");
 /// ```
 pub struct Engine {
-    globals: Env,
+    globals: Rc<Globals>,
     host: Host,
     stack_budget: usize,
     /// Whether scripts are type checked before they run.
@@ -82,8 +82,7 @@ impl Engine {
     }
 
     fn build(output: Box<dyn Write>, error: Box<dyn Write>) -> Self {
-        let builtins = scope::root_scope();
-        let globals = scope::new_scope(&builtins);
+        let globals = Rc::new(Globals::default());
         let host = Host {
             output,
             error,
@@ -94,7 +93,8 @@ impl Engine {
             regexes: HashMap::new(),
             state: ScriptState::new(),
             loader: Loader::new(),
-            builtins,
+            builtins: Vec::new(),
+            builtin_names: HashMap::new(),
             rng: crate::host::seed(),
         };
         let mut engine = Engine {
@@ -154,10 +154,13 @@ impl Engine {
     }
 
     /// How many bytes of stack a script may use before it stops with a "too
-    /// many nested calls" error, instead of overflowing the stack and crashing
-    /// the program. The default, 1 MB, is safe on threads with a stack of 2 MB
-    /// or more. Give the script a thread with a bigger stack to allow deeper
-    /// recursion.
+    /// many nested calls" or "nested too deeply" error, instead of overflowing
+    /// the stack and crashing the program. The default, 1 MB, is safe on
+    /// threads with a stack of 2 MB or more. The stack is used to read deeply
+    /// nested code and when Rust code calls a script's function *(i.e.
+    /// `.map()`)*. Calls between a script's functions don't use it, but their
+    /// depth is limited by this too: one call for every 64 bytes, from 256 up
+    /// to 100,000.
     pub fn set_stack_budget(&mut self, bytes: usize) {
         self.stack_budget = bytes;
     }
@@ -169,10 +172,15 @@ impl Engine {
         if self.builtins_ready {
             self.host_functions.push(name.to_string());
         }
-        let function = Function::Native(NativeFunction { name: name.to_string(), params: Vec::new(), func: Box::new(func) });
+        let function = Rc::new(Function::Native(NativeFunction { name: name.to_string(), params: Vec::new(), func: Box::new(func) }));
         // Replacing a built-in on purpose is allowed, so the host can override `outln`
-        self.host.builtins.borrow_mut().remove_function(name);
-        scope::declare_function(&self.host.builtins, name, Rc::new(function));
+        match self.host.builtin_names.get(name) {
+            Some(&i) => self.host.builtins[i as usize] = function,
+            None => {
+                self.host.builtin_names.insert(name.to_string(), self.host.builtins.len() as u32);
+                self.host.builtins.push(function);
+            }
+        }
     }
 
     /// Runs a script given as text. Variables and functions it declares are
@@ -182,11 +190,23 @@ impl Engine {
         if self.check_types {
             self.check(&program).map_err(|d| self.locate(d))?;
         }
+        let compiler = crate::compiler::Compiler::new(&self.globals, &self.host.builtin_names, self.stack_budget);
+        let proto = compiler.script(&program).map_err(|d| self.locate(d))?;
         let mut interpreter = Interpreter::new(&mut self.host, self.stack_budget);
-        let result = interpreter.run(&program, &self.globals);
+        let result = interpreter.run(proto, self.globals.clone());
         let _ = self.host.output.flush();
         let _ = self.host.error.flush();
         result.map_err(|d| self.locate(d))
+    }
+
+    /// The bytecode a script compiles to, as text, without running it. It's
+    /// for debugging Lakescript itself *(`lks --bytecode`)*: the bytecode
+    /// changes between versions.
+    pub fn bytecode(&mut self, source: &str) -> Result<String, Diagnostic> {
+        let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
+        let globals = Globals::default();
+        let compiler = crate::compiler::Compiler::new(&globals, &self.host.builtin_names, self.stack_budget);
+        Ok(compiler.script(&program)?.listing())
     }
 
     /// Runs a script file. Its folder is where `use` looks first (the folder

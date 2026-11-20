@@ -9,9 +9,10 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
 
 ## Decisions that follow from this
 
-- **Compiled code is cached**: the first run of a script compiles it to bytecode and saves it. Later runs of the same unchanged script skip parsing and compiling.
-    - The cache is stored in a cache folder for the current user *(i.e. `~/.cache/lakescript` on Linux, `~/Library/Caches/lakescript` on macOS)*, not next to the script.
-    - Each entry is keyed by a hash of the script's contents and the interpreter version, so an edited script or a new interpreter version is compiled again.
+- **Scripts are compiled to bytecode** and run by a VM *(see [tooling/vm.md](tooling/vm.md))*.
+- **Compiled code may be cached, later**: the first run of a script would compile it and save the bytecode, and later runs of the same unchanged script would skip parsing, checking and compiling. It's left for later because startup is already about 2 ms *(close to bash)*, so today a cache would save 1 to 3 ms. It comes back when there's more to save, i.e. with `ferry` projects of many modules.
+    - The cache would be stored in a cache folder for the current user *(i.e. `~/.cache/lakescript` on Linux, `~/Library/Caches/lakescript` on macOS)*, not next to the script.
+    - Each entry would be keyed by a hash of the script's contents and the interpreter version, so an edited script or a new interpreter version is compiled again.
 - **No JIT**: a JIT makes long programs faster but the first seconds slower, which is the opposite of what scripts need.
 - **Lazy loading**: imports and the standard library are only loaded when they're used.
 - **Regexes are compiled on first use**, not when the script starts, since a script might never reach the line that uses them.
@@ -35,4 +36,5 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
 - [stdlib/](stdlib): the standard library.
 - [tooling/](tooling): the interpreter and the tools around it.
     - [lks.md](tooling/lks.md): the command line of the interpreter.
+    - [vm.md](tooling/vm.md): the bytecode compiler and the VM.
     - [diagnostics.md](tooling/diagnostics.md): how error messages look.
