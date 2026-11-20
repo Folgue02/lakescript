@@ -992,6 +992,28 @@ impl<'a> Compiler<'a> {
         self.load(resolved);
     }
 
+    /// Pushes the class or interface a type names *(i.e. `Base`, `shapes::Point`)*.
+    fn load_type(&mut self, ty: &TypeExpr) {
+        let TypeKind::Named { name, .. } = &ty.kind else {
+            self.fail("expected a class or an interface");
+            self.emit(Op::Null);
+            return;
+        };
+        match name.split_once("::") {
+            Some((module, member)) => match self.globals.find_module(module) {
+                Some(m) => {
+                    let n = self.name(member);
+                    self.emit(Op::ModuleMember { module: m, name: n, constant: false });
+                }
+                None => {
+                    self.fail(format!("there's no module named `{module}`. Import it with `use`"));
+                    self.emit(Op::Null);
+                }
+            },
+            None => self.load_class(name),
+        }
+    }
+
     /// Pushes the classes a type names, for `Is` and `As`. Returns how many.
     fn type_classes(&mut self, ty: &TypeExpr) -> u8 {
         let names: Vec<String> = class_names(ty).into_iter().map(String::from).collect();
@@ -1035,10 +1057,11 @@ impl<'a> Compiler<'a> {
     /// A class declaration: its parts are pushed, `Op::Class` makes it, and
     /// then its static fields get their values.
     fn class(&mut self, decl: &ClassDecl) -> Compiled {
-        if decl.kind != ClassKind::Class {
-            self.fail(format!("{}s aren't ready yet", decl.kind.word()));
+        if decl.kind == ClassKind::Enum {
+            self.fail("enums aren't ready yet");
             return Ok(());
         }
+        let interface = decl.kind == ClassKind::Interface;
         let span = self.span;
         let hoisted = self.f().hoisted.remove(&decl.name);
         let target = if hoisted {
@@ -1051,20 +1074,30 @@ impl<'a> Compiler<'a> {
         self.classes.push(decl.name.clone());
         let mut info = ClassInfo {
             name: Rc::from(decl.name.as_str()),
+            interface,
             parent: false,
+            interfaces: 0,
+            required: Vec::new(),
             init: false,
             constructor: false,
             fields: Vec::new(),
             methods: Vec::new(),
             static_methods: Vec::new(),
         };
-        if let Some(parent) = decl.extends.first() {
-            match &parent.kind {
-                TypeKind::Named { name, .. } => self.load_class(name),
-                _ => self.fail("a class can only extend another class"),
-            }
+        if let (false, Some(parent)) = (interface, decl.extends.first()) {
+            self.load_type(parent);
             info.parent = true;
         }
+        // The interfaces it implements, or the ones an interface extends
+        let mut implemented: Vec<&TypeExpr> = Vec::new();
+        if interface {
+            implemented.extend(decl.extends.iter());
+        }
+        implemented.extend(decl.implements.iter());
+        for ty in &implemented {
+            self.load_type(ty);
+        }
+        info.interfaces = implemented.len() as u32;
         // `init`: the values written where the fields are declared
         let valued: Vec<&Member> = decl
             .members
@@ -1107,8 +1140,12 @@ impl<'a> Compiler<'a> {
             }
         }
         for member in &decl.members {
-            if let MemberKind::Method { decl: method, .. } = &member.kind {
+            if let MemberKind::Method { decl: method, body } = &member.kind {
                 if member.is_static {
+                    continue;
+                }
+                if !body {
+                    info.required.push(Rc::from(method.name.as_str()));
                     continue;
                 }
                 if info.methods.iter().any(|m| **m == *method.name) {
@@ -1118,6 +1155,9 @@ impl<'a> Compiler<'a> {
                 self.span = member.span;
                 let mut named = method.clone();
                 named.name = format!("{}.{}", decl.name, method.name);
+                if matches!(member.origin, Origin::Implement(_)) {
+                    self_checks(&mut named, &decl.name);
+                }
                 let proto = self.method(&named)?;
                 self.emit(Op::Closure(proto));
                 info.methods.push(Rc::from(method.name.as_str()));
@@ -1674,6 +1714,44 @@ impl<'a> Compiler<'a> {
         }
         Ok(())
     }
+}
+
+/// A method of an `implement` block can be called through the interface with
+/// an object of another class. Its `Self` parameters check that they got one
+/// of its own class, and throw a `TypeError` otherwise.
+fn self_checks(method: &mut FunctionDecl, class: &str) {
+    let mut checks = Vec::new();
+    for param in &method.params {
+        let is_self = matches!(&param.ty, Some(TypeExpr { kind: TypeKind::Named { name, args }, .. }) if args.is_empty() && (name == "Self" || name == class));
+        if !is_self {
+            continue;
+        }
+        let span = param.ty.as_ref().unwrap().span;
+        let at = |kind| Expr { kind, span };
+        let value = at(ExprKind::Variable(param.name.clone()));
+        let ty = TypeExpr { kind: TypeKind::Named { name: class.to_string(), args: Vec::new() }, span };
+        let check = at(ExprKind::TypeCheck { receiver: Box::new(value.clone()), ty, check: TypeCheckKind::Is, nullable: false });
+        let message = at(ExprKind::Interpolated(vec![
+            StringPart::Text(format!("`{}` needs a `{class}` for `${}`, not a ", method.name, param.name)),
+            StringPart::Expr(at(ExprKind::MethodCall { receiver: Box::new(value), method: "typeName".into(), args: Vec::new(), nullable: false })),
+        ]));
+        let error = at(ExprKind::Call { callee: Box::new(at(ExprKind::Function("TypeError".into()))), args: vec![Arg { name: None, value: message, spread: false }] });
+        let not = at(ExprKind::Unary { op: UnaryOp::Not, operand: Box::new(check) });
+        checks.push(Stmt { kind: StmtKind::If { cond: not, then: Box::new(Stmt { kind: StmtKind::Throw(error), span }), otherwise: None }, span });
+    }
+    if checks.is_empty() {
+        return;
+    }
+    let body = std::mem::replace(&mut method.body, FunctionBody::Block(Vec::new()));
+    let rest = match body {
+        FunctionBody::Block(stmts) => stmts,
+        FunctionBody::Expr(e) => {
+            let span = e.span;
+            vec![Stmt { kind: StmtKind::Return(Some(e)), span }]
+        }
+    };
+    checks.extend(rest);
+    method.body = FunctionBody::Block(checks);
 }
 
 #[derive(Clone, Copy)]

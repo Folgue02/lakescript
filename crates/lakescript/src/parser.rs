@@ -446,8 +446,9 @@ impl Parser {
         self.expect(&TokenKind::LBrace, &format!("to start the {word}"))?;
         let values = if kind == ClassKind::Enum { self.enum_values()? } else { Vec::new() };
         let mut members = Vec::new();
-        self.members(kind, Origin::Own, &mut members)?;
-        Ok(ClassDecl { kind, name, generics, extends, members, values, span: self.span_from(start) })
+        let mut implements = Vec::new();
+        self.members(kind, Origin::Own, &mut members, &mut implements)?;
+        Ok(ClassDecl { kind, name, generics, extends, implements, members, values, span: self.span_from(start) })
     }
 
     /// `AT_WORK, SICK(false);` at the start of an enum.
@@ -469,7 +470,7 @@ impl Parser {
     }
 
     /// The members of a class until its `}`, or of an `override { }` or `implement X { }` block.
-    fn members(&mut self, kind: ClassKind, origin: Origin, out: &mut Vec<Member>) -> Result<()> {
+    fn members(&mut self, kind: ClassKind, origin: Origin, out: &mut Vec<Member>, implements: &mut Vec<TypeExpr>) -> Result<()> {
         loop {
             self.guard()?;
             let start = self.peek().span;
@@ -484,10 +485,19 @@ impl Parser {
                 _ => String::new(),
             };
             if (word == "override" || word == "implement") && origin == Origin::Own {
+                if (word == "override" && kind != ClassKind::Class) || kind == ClassKind::Interface {
+                    return self.error_here(format!("an {} can't have `{word}` blocks", kind.word()));
+                }
                 self.advance();
                 let inner = if word == "override" { Origin::Override } else { Origin::Implement(self.parse_type()?) };
+                if let Origin::Implement(ty) = &inner {
+                    if implements.iter().any(|t: &TypeExpr| t.kind == ty.kind) {
+                        return Err(Diagnostic::new(format!("`{ty}` has two `implement` blocks: its methods go in one"), ty.span));
+                    }
+                    implements.push(ty.clone());
+                }
                 self.expect(&TokenKind::LBrace, &format!("to start the `{word}` block"))?;
-                self.members(kind, inner, out)?;
+                self.members(kind, inner, out, implements)?;
                 continue;
             }
             let public = self.eat(&TokenKind::Keyword(Keyword::Pub));
@@ -501,6 +511,9 @@ impl Parser {
                 }
                 if origin != Origin::Own {
                     return self.error_here("the constructor goes in the class itself, not in a block");
+                }
+                if kind == ClassKind::Interface {
+                    return self.error_here("interfaces can't have a constructor, since they don't create objects");
                 }
                 self.advance();
                 let params = self.params()?;

@@ -60,6 +60,8 @@ fn language_examples() {
         ("examples/classes.lks", "home is 5 away"),
         ("examples/classes.lks", "#1 write the docs (1 notes)"),
         ("examples/classes.lks", "rex says woof!"),
+        ("examples/interfaces.lks", "Total area: 31.78"),
+        ("examples/interfaces.lks", "a square with sides of 3"),
         ("examples/control_flow.lks", "['child', 'teenager', 'adult']"),
         ("examples/strings.lks", "['userAccountName', 'user_account_name', 'user-account-name', 'User Account Name']"),
         ("examples/collections.lks", "{ 'a' => 3, 'b' => 1, 'c' => 1 }"),

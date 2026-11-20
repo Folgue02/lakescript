@@ -26,6 +26,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result` |
 | [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, function types |
 | [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
+| [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
 
 ## Scripts that use the system
 

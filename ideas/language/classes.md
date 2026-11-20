@@ -121,6 +121,10 @@ $names.push('Ana');
 ## Interfaces
 
 - In a class, `Self` is the class. In an interface, it's the class that implements it, so `Self copy();` returns a `ChildClass` for a `ChildClass`.
+- An interface has methods, with or without a body. Every class that implements it writes the ones without a body in its `implement` block, and can replace the others, its defaults. Inside a default, `@` is the object, seen as the interface.
+- The methods of an interface, and of the blocks that implement it, are always public, so they don't take `pub`.
+- An interface has no fields and no constructor, and calling it is an error. It can have static methods.
+- A class with a superclass keeps its interfaces. A method of an interface goes in its `implement` block, never with the class's own methods.
 - An interface can extend other interfaces *(i.e. `interface Ordered extends Equals { ... }`)*. A class that implements it also implements the ones it extends, so `.is()` is true for all of them.
 
 ## Enums
@@ -232,13 +236,15 @@ use folgue02/geo/shapes::{Circle, Square};   // a lowercase module, as always
 Built in steps, each with tests and examples:
 
 1. Done: classes. Fields with and without values, `const` fields, the constructor that takes every field, `new` with `@field` parameters, methods, `@`, static fields and methods with `Self::`, `extends`, `override`, `@super(...)` and `@super.method()`, `.is()` and `.as()` with classes (also of another module, i.e. `shapes::Point`), and `pub class` in modules. The checker knows them, and private fields and methods can only be used by their own class. See `examples/classes.lks`.
-2. Interfaces and `implement`, with default methods, `Self` and `.is(Interface)`.
+2. Done: interfaces. `implement` blocks, default methods, interfaces that extend others, `Self`, the `TypeError` for a `Self` parameter of another class, `.is()` and `.as()` with interfaces, and the checker's errors for missing or wrong methods. See `examples/interfaces.lks`.
 3. Enums.
 4. Operators through interfaces, and `==` with `Equals`.
 5. Generic classes and interfaces.
 6. Exceptions as classes.
 7. Importing a type from its own file, and circular imports.
 8. `command` and `subcommand`.
+
+Not working yet: two interfaces with a method of the same name in one class, which comes with generic interfaces in step 5.
 
 Not checked yet: that `@` isn't read before `@super(...)`, and that `@super(...)` runs once on every path. The checker only checks that the constructor has one.
 

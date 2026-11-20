@@ -310,6 +310,8 @@ pub struct ClassDecl {
     pub generics: Vec<String>,
     /// The superclass of a class, or the interfaces an interface extends.
     pub extends: Vec<TypeExpr>,
+    /// The interfaces of its `implement` blocks, in order.
+    pub implements: Vec<TypeExpr>,
     pub members: Vec<Member>,
     /// The values of an enum.
     pub values: Vec<EnumValue>,
@@ -714,6 +716,9 @@ impl fmt::Display for ClassDecl {
         write!(f, "({} {}{generics}", self.kind.word(), self.name)?;
         if !self.extends.is_empty() {
             write!(f, " (extends {})", join(&self.extends, " "))?;
+        }
+        if !self.implements.is_empty() {
+            write!(f, " (implements {})", join(&self.implements, " "))?;
         }
         for value in &self.values {
             let args: String = value.args.iter().map(|a| format!(" {a}")).collect();

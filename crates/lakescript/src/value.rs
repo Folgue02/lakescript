@@ -36,7 +36,13 @@ pub enum Value {
 /// A class while the script runs *(see `ideas/language/classes.md`)*.
 pub struct Class {
     pub name: Rc<str>,
+    pub interface: bool,
     pub parent: Option<Rc<Class>>,
+    /// Every interface it implements, also through its superclasses and the
+    /// interfaces they extend. For an interface, the ones it extends.
+    pub interfaces: Vec<Rc<Class>>,
+    /// For an interface: its methods without a default.
+    pub required: Vec<Rc<str>>,
     /// Every field of its objects, the superclass's first.
     pub fields: Vec<FieldSlot>,
     /// Its methods and the ones it inherits, by name.
@@ -75,9 +81,12 @@ impl Class {
         self.fields.iter().position(|f| &*f.name == name)
     }
 
-    /// `true` if it's this class or one of its superclasses.
+    /// `true` if it's this class, one of its superclasses, or an interface it implements.
     pub fn is_a(&self, other: &Class) -> bool {
-        let mut class = Some(self);
+        if std::ptr::eq(self, other) || self.interfaces.iter().any(|i| std::ptr::eq(&**i, other)) {
+            return true;
+        }
+        let mut class = self.parent.as_deref();
         while let Some(c) = class {
             if std::ptr::eq(c, other) {
                 return true;
@@ -455,7 +464,7 @@ impl fmt::Display for Value {
                 ResultValue::Error(e) => write!(f, "error({e})"),
             },
             Value::Regex(r) => write!(f, "%r\"{}\"{}", r.pattern.replace('"', "\\\""), r.flags),
-            Value::Class(c) => write!(f, "<class {}>", c.name),
+            Value::Class(c) => write!(f, "<{} {}>", if c.interface { "interface" } else { "class" }, c.name),
             Value::Object(o) => {
                 write!(f, "{}(", o.class.name)?;
                 for (i, (slot, value)) in o.class.fields.iter().zip(o.fields.borrow().iter()).enumerate() {

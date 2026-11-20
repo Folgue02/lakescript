@@ -64,6 +64,9 @@ struct VarInfo {
 #[derive(Clone)]
 struct This {
     class: ClassRef,
+    /// While an interface's signatures are read, `Self` stands for the class
+    /// that implements it.
+    self_param: bool,
     /// A static method, which has no `@`.
     is_static: bool,
     constructor: bool,
@@ -421,6 +424,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     "Self" => match self.this.last() {
+                        Some(this) if this.self_param => Ty::Param(Rc::from("Self")),
                         Some(this) => Ty::Object(this.class.clone()),
                         None => return self.fail("`Self` can only be used inside a class", ty.span),
                     },
@@ -467,8 +471,30 @@ impl<'a> Checker<'a> {
                 classes.push((decl.clone(), class, public, inner.span));
             }
         }
-        for (decl, class, _, span) in &classes {
-            self.class_body(decl, class, *span)?;
+        // A superclass first, so its subclasses know its fields
+        let mut done: Vec<String> = Vec::new();
+        while done.len() < classes.len() {
+            let before = done.len();
+            for (decl, class, _, span) in &classes {
+                if done.contains(&decl.name) {
+                    continue;
+                }
+                let waits = decl.kind == ClassKind::Class
+                    && decl.extends.first().is_some_and(|p| {
+                        let TypeKind::Named { name, .. } = &p.kind else { return false };
+                        classes.iter().any(|(d, ..)| d.name == *name && !done.contains(name)) && *name != decl.name
+                    });
+                if !waits {
+                    self.class_body(decl, class, *span)?;
+                    done.push(decl.name.clone());
+                }
+            }
+            if done.len() == before {
+                // Classes that extend each other: the first one says so
+                let (decl, class, _, span) = classes.iter().find(|(d, ..)| !done.contains(&d.name)).unwrap();
+                self.class_body(decl, class, *span)?;
+                done.push(decl.name.clone());
+            }
         }
         for stmt in stmts {
             let inner = match &stmt.kind {
@@ -1149,6 +1175,9 @@ impl<'a> Checker<'a> {
                     );
                 }
                 Some(f) => Ty::Func(f),
+                None if self.class_named(name).is_some_and(|c| c.0.interface) => {
+                    return self.fail(format!("`{name}` is an interface: it doesn't create objects, classes implement it"), span);
+                }
                 None => return self.fail(format!("there's no function named `{name}`. Functions must be defined before they're used"), span),
             },
             ExprKind::ModuleFunction { module, name } => {
@@ -1467,9 +1496,11 @@ impl<'a> Checker<'a> {
             r = self.shallow(inner);
         }
         if let Ty::Object(class) = &r {
-            if let Some((m, owner)) = class.find(|b| b.methods.get(method).cloned()) {
+            if let Some((m, owner)) = class.find_method(method) {
                 self.check_access(m.public, &owner, &format!("`.{method}()`"), span)?;
-                return self.call(&m.ty, &HashMap::new(), args, method, span);
+                // In an interface's methods, `Self` is the class of the object
+                let receiver = HashMap::from([(Rc::from("Self"), r.clone())]);
+                return self.call(&m.ty, &receiver, args, method, span);
             }
             if !matches!(method, "toString" | "typeName" | "equals") {
                 return self.fail(format!("`{}` has no method `.{method}()`", class.0.name), span);

@@ -215,3 +215,97 @@ fn without_the_checker_the_vm_still_says_what_is_wrong() {
     assert!(fails("class P { pub const number @x; }\nP(1).x = 2;").contains("`const` field"));
     assert!(fails("outln(1.is(Thing));").contains("unknown type `Thing`"));
 }
+
+const SHAPES: &str = "
+interface Named {
+    string name();
+    string greeting() = f\"Hello, {@name()}\";
+}
+interface Pet extends Named {
+    string sound();
+}
+interface Equals {
+    bool equals?(Self $other);
+    bool notEquals?(Self $other) = !@equals?($other);
+}
+class Dog {
+    pub string @called;
+    implement Equals {
+        bool equals?(Self $other) = $other.called == @called;
+    }
+    implement Pet {
+        string name() = @called;
+        string sound() = 'woof';
+    }
+}
+class Robot {
+    implement Equals {
+        bool equals?(Self $other) = true;
+    }
+    implement Named {
+        string name() = 'robot';
+        string greeting() = 'BEEP';
+    }
+}
+";
+
+#[test]
+fn interfaces_give_methods_and_defaults() {
+    let script = format!(
+        "{SHAPES}
+        const $rex = Dog('rex');
+        outln([$rex.equals?(Dog('rex')), $rex.notEquals?(Dog('max'))]);
+        outln([$rex.greeting(), Robot().greeting()]);
+        const list<Named> $all = [$rex, Robot()];
+        outln($all.map(($n) -> $n.name()));
+        outln([$rex.is(Pet), $rex.is(Named), $rex.is(Equals), Robot().is(Pet), Robot().is(Named)]);"
+    );
+    assert_eq!(run(&script), "[true, true]\n['Hello, rex', 'BEEP']\n['rex', 'robot']\n[true, true, true, false, true]\n");
+}
+
+#[test]
+fn self_in_an_interface_is_the_class_that_implements_it() {
+    let script = "
+        interface Copyable { Self copy(); }
+        class Box {
+            pub number @size;
+            implement Copyable { Self copy() = Box(@size + 1); }
+        }
+        outln(Box(1).copy().copy().size);
+    ";
+    assert_eq!(run(script), "3\n");
+    // Through the interface, another class gets there, and the method says so
+    let script = format!(
+        "{SHAPES}
+        Equals $e = Dog('rex');
+        try {{ $e.equals?(Robot()); }} catch (TypeError $x) {{ outln($x.message()); }}"
+    );
+    assert_eq!(run(&script), "`Dog.equals?` needs a `Dog` for `$other`, not a Robot\n");
+}
+
+#[test]
+fn subclasses_keep_the_interfaces() {
+    let script = format!(
+        "{SHAPES}
+        class Puppy extends Dog {{}}
+        Named $n = Puppy('bit');
+        outln([$n.greeting(), $n.is(Pet), $n.is(Dog)]);"
+    );
+    assert_eq!(run(&script), "['Hello, bit', true, true]\n");
+}
+
+#[test]
+fn the_checker_finds_mistakes_with_interfaces() {
+    let i = "interface Named { string name(); string hi() = 'hi ' + @name(); }\n";
+    assert!(rejected(&format!("{i}class A {{ implement Named {{ }} }}")).contains("`A` implements `Named`, but it has no method `name`"));
+    assert!(rejected(&format!("{i}class A {{ implement Named {{ number name() = 1; }} }}")).contains("must be `string name()`"));
+    assert!(rejected(&format!("{i}class A {{ implement Named {{ string name() = 'a'; string x() = 'b'; }} }}")).contains("`Named` has no method `x`"));
+    assert!(rejected(&format!("{i}class A {{ string name() = 'a'; implement Named {{ }} }}")).contains("goes in its `implement Named"));
+    assert!(rejected(&format!("{i}class A extends Named {{}}")).contains("it doesn't extend it"));
+    assert!(rejected(&format!("{i}Named();")).contains("it doesn't create objects"));
+    assert!(rejected("class X {}\nclass A { implement X {} }").contains("can only implement interfaces"));
+    assert!(rejected("interface A extends B {}\ninterface B extends A {}").contains("can't extend itself"));
+    assert!(rejected("interface I { void m(); }\ninterface J extends I { void n(); }\nclass C { implement J { void n() {} } }").contains("has no method `m`"));
+    assert!(rejected("interface I {}\nclass C { implement I {} implement I {} }").contains("two `implement` blocks"));
+    assert!(rejected("interface I { void m(); }\nclass A { implement I { void m() {} } }\nclass B { }\nI $i = B();").contains("its value is a B"));
+}

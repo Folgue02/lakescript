@@ -1217,6 +1217,17 @@ impl Interpreter<'_> {
         let methods: Vec<Rc<Function>> = (0..info.methods.len()).map(|_| function()).collect();
         let constructor = info.constructor.then(&mut function);
         let init = info.init.then(&mut function);
+        let mut implemented = Vec::new();
+        for _ in 0..info.interfaces {
+            match self.pop() {
+                Value::Class(c) if c.interface => implemented.push(c),
+                other => {
+                    let what = if info.interface { "extend" } else { "implement" };
+                    return error(format!("`{}` can only {what} interfaces, and this is {}", info.name, describe(&other)), span);
+                }
+            }
+        }
+        implemented.reverse();
         let parent = if info.parent {
             match self.pop() {
                 Value::Class(c) => Some(c),
@@ -1236,13 +1247,38 @@ impl Interpreter<'_> {
         for (name, f) in info.methods.iter().zip(methods.into_iter().rev()) {
             table.insert(name.clone(), f);
         }
+        // Every interface, also the ones of the superclass and the ones each interface extends
+        let mut interfaces: Vec<Rc<Class>> = parent.as_ref().map(|p| p.interfaces.clone()).unwrap_or_default();
+        for i in &implemented {
+            for each in std::iter::once(i).chain(i.interfaces.iter()) {
+                if !interfaces.iter().any(|known| Rc::ptr_eq(known, each)) {
+                    interfaces.push(each.clone());
+                }
+            }
+        }
+        // The defaults of the interfaces, for the methods the class doesn't have
+        for i in &interfaces {
+            for (name, f) in &i.methods {
+                table.entry(name.clone()).or_insert_with(|| f.clone());
+            }
+        }
+        if !info.interface {
+            for i in &interfaces {
+                if let Some(missing) = i.required.iter().find(|m| !table.contains_key(*m)) {
+                    return error(format!("`{}` implements `{}`, but it has no method `{missing}`", info.name, i.name), span);
+                }
+            }
+        }
         let mut static_table = IndexMap::new();
         for (name, f) in info.static_methods.iter().zip(statics.into_iter().rev()) {
             static_table.insert(name.clone(), StaticSlot { value: Value::Function(f), constant: true });
         }
         Ok(Rc::new(Class {
             name: info.name.clone(),
+            interface: info.interface,
             parent,
+            interfaces,
+            required: info.required.clone(),
             fields,
             methods: table,
             statics: RefCell::new(static_table),
@@ -1253,6 +1289,9 @@ impl Interpreter<'_> {
 
     /// `Point(1, 2)`: a new object, with its fields' values, after its constructor.
     fn construct(&mut self, class: &Rc<Class>, positional: Vec<Value>, named: Named, span: Span) -> Exec<Value> {
+        if class.interface {
+            return error_as(exceptions::TYPE_ERROR, format!("`{}` is an interface: it doesn't create objects, classes implement it", class.name), span);
+        }
         let object = Rc::new(Object {
             class: class.clone(),
             fields: RefCell::new(vec![Value::Null; class.fields.len()]),

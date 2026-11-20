@@ -1,0 +1,60 @@
+#!/usr/bin/lks
+// Interfaces: what a class promises to have, with default methods.
+//
+//   lks examples/interfaces.lks
+
+// Methods without a body must be written by every class that implements the
+// interface. The others are defaults, which a class can replace.
+interface Shape {
+    number area();
+    string name();
+    string describe() = f"a {@name()} of {@area().round(2)}";
+}
+
+// `Self` is the class that implements it: a `Circle` compares with a `Circle`
+interface Equals {
+    bool equals?(Self $other);
+    bool notEquals?(Self $other) = !@equals?($other);
+}
+
+// An interface can extend others, and implementing it implements those too
+interface Solid extends Shape {
+    number volume(number $depth);
+}
+
+class Circle {
+    pub number @radius;
+
+    implement Shape {
+        number area() = 3.14159 * @radius ** 2;
+        string name() = 'circle';
+    }
+
+    implement Equals {
+        bool equals?(Self $other) = $other.radius == @radius;
+    }
+}
+
+class Square {
+    pub number @side;
+
+    implement Solid {
+        number area() = @side ** 2;
+        string name() = 'square';
+        string describe() = f"a square with sides of {@side}";
+        number volume(number $depth) = @area() * $depth;
+    }
+}
+
+const list<Shape> $shapes = [Circle(1), Square(3), Circle(2.5)];
+for ($shape in $shapes) {
+    outln($shape.describe());
+}
+outln(f"Total area: {$shapes.map(($s) -> $s.area()).sum().round(2)}");
+
+// `.is()` knows the interfaces
+const $square = Square(2);
+outln([$square.is(Solid), $square.is(Shape), $square.is(Equals)]);
+outln($square.volume(10));
+
+outln([Circle(1).equals?(Circle(1)), Circle(1).notEquals?(Circle(2))]);

@@ -131,7 +131,7 @@ pub enum Op {
 
     // ---- Classes ----
     /// Makes a class, described by `Proto::classes`, from what's on the stack:
-    /// the superclass, `init`, `new`, the methods and the static methods.
+    /// the superclass, the interfaces, `init`, `new`, the methods and the static methods.
     Class(u32),
     /// `$object.name`, with the name in `Proto::names`.
     GetField(u32),
@@ -241,7 +241,12 @@ pub struct Param {
 #[derive(Debug, Clone)]
 pub struct ClassInfo {
     pub name: Rc<str>,
+    pub interface: bool,
     pub parent: bool,
+    /// How many interfaces it implements (or extends, for an interface), pushed after the superclass.
+    pub interfaces: u32,
+    /// For an interface: its methods without a default.
+    pub required: Vec<Rc<str>>,
     pub init: bool,
     pub constructor: bool,
     /// The fields declared in the class itself: name, `const`, nullable, has a value.

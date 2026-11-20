@@ -3,6 +3,7 @@
 //! where they're declared.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::types::{ClassBody, ClassRef, ClassSig, FieldSig, FnTy, MemberSig, Ty, a};
@@ -13,14 +14,15 @@ use crate::token::Span;
 impl Checker<'_> {
     /// Gives a class its name in the block, before any class of the block has a body.
     pub(super) fn declare_class(&mut self, decl: &ClassDecl, span: Span) -> Check<ClassRef> {
-        if decl.kind != ClassKind::Class {
-            return self.fail(format!("{}s aren't ready yet", decl.kind.word()), span);
+        if decl.kind == ClassKind::Enum {
+            return self.fail("enums aren't ready yet", span);
         }
         let scope = self.scopes.last().unwrap();
         if scope.types.contains_key(&decl.name) || scope.funcs.contains_key(&decl.name) {
             return self.fail(format!("`{}` already exists", decl.name), span);
         }
-        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), body: RefCell::new(ClassBody::default()) }));
+        let interface = decl.kind == ClassKind::Interface;
+        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, body: RefCell::new(ClassBody::default()) }));
         let depth = self.returns.len();
         let scope = self.scopes.last_mut().unwrap();
         scope.types.insert(decl.name.clone(), Ty::Object(class.clone()));
@@ -31,7 +33,9 @@ impl Checker<'_> {
 
     /// The types of a class's fields and methods, and what calling it takes.
     pub(super) fn class_body(&mut self, decl: &ClassDecl, class: &ClassRef, span: Span) -> Check<()> {
-        self.this.push(This { class: class.clone(), is_static: false, constructor: false });
+        // In an interface's signatures, `Self` is the class that implements it
+        let self_param = class.0.interface;
+        self.this.push(This { class: class.clone(), self_param, is_static: false, constructor: false });
         let result = self.class_body_inner(decl, class, span);
         self.this.pop();
         result
@@ -42,9 +46,32 @@ impl Checker<'_> {
             return self.fail("generic classes aren't ready yet", span);
         }
         let mut body = ClassBody::default();
-        if let Some(parent) = decl.extends.first() {
+        let interface = class.0.interface;
+        // The interfaces it implements, or the ones an interface extends
+        let implemented: Vec<&TypeExpr> = if interface { decl.extends.iter().collect() } else { decl.implements.iter().collect() };
+        for ty in implemented {
+            match self.ty(ty)? {
+                Ty::Object(i) if i.0.interface => {
+                    if i.is_a(class) {
+                        return self.fail(format!("`{}` can't extend itself, directly or through other interfaces", decl.name), ty.span);
+                    }
+                    body.interfaces.push(i);
+                }
+                other => {
+                    let what = if interface { "extend" } else { "implement" };
+                    return self.fail(format!("a {} can only {what} interfaces, and {} isn't one", decl.kind.word(), a(&other)), ty.span);
+                }
+            }
+        }
+        if let (false, Some(parent)) = (interface, decl.extends.first()) {
             let t = self.ty(parent)?;
             match t {
+                Ty::Object(p) if p.0.interface => {
+                    return self.fail(
+                        format!("`{}` is an interface: a class implements it with an `implement {} {{ ... }}` block, it doesn't extend it", p.0.name, p.0.name),
+                        parent.span,
+                    );
+                }
                 Ty::Object(p) => {
                     if p.is_a(class) {
                         return self.fail(format!("`{}` can't extend itself, directly or through other classes", decl.name), parent.span);
@@ -54,7 +81,7 @@ impl Checker<'_> {
                 other => return self.fail(format!("a class can only extend another class, and {} isn't one", a(&other)), parent.span),
             }
         }
-        let inherited: Vec<FieldSig> = body.parent.as_ref().map(|p| all_fields(p)).unwrap_or_default();
+        let inherited: Vec<FieldSig> = body.parent.as_ref().map(all_fields).unwrap_or_default();
         for member in &decl.members {
             match &member.kind {
                 MemberKind::Field { constant, ty, name, value } => {
@@ -72,9 +99,11 @@ impl Checker<'_> {
                         body.fields.push(field);
                     }
                 }
-                MemberKind::Method { decl: method, .. } => {
+                MemberKind::Method { decl: method, body: has_body } => {
                     let sig = self.method_signature(method, member.span)?;
-                    let entry = MemberSig { ty: Rc::new(sig), public: member.public };
+                    // The methods of interfaces, and of the blocks that implement them, are always public
+                    let public = member.public || interface || matches!(member.origin, Origin::Implement(_));
+                    let entry = MemberSig { ty: Rc::new(sig), public, has_body: *has_body };
                     let table = if member.is_static { &mut body.static_methods } else { &mut body.methods };
                     if table.contains_key(&method.name) {
                         return self.fail(format!("`{}` has two methods named `{}`", decl.name, method.name), member.span);
@@ -83,6 +112,10 @@ impl Checker<'_> {
                 }
                 MemberKind::Constructor(_) => {}
             }
+        }
+        if interface {
+            *class.0.body.borrow_mut() = body;
+            return Ok(());
         }
         // What calling the class takes
         let ctor = decl.members.iter().find_map(|m| match &m.kind {
@@ -140,6 +173,9 @@ impl Checker<'_> {
             return self.fail(format!("classes can only be declared at the start of a block's statements, and `{}` isn't", decl.name), span);
         };
         self.scopes.last_mut().unwrap().pending.remove(&decl.name);
+        if !class.0.interface {
+            self.check_implements(decl, &class)?;
+        }
         let parent = class.0.body.borrow().parent.clone();
         // A constructor of its own is needed when the superclass has one
         let own_ctor = class.0.body.borrow().own_constructor;
@@ -161,7 +197,7 @@ impl Checker<'_> {
                     } else {
                         class.0.body.borrow().fields.iter().find(|f| f.name == *name).unwrap().ty.clone()
                     };
-                    self.this.push(This { class: class.clone(), is_static: member.is_static, constructor: false });
+                    self.this.push(This { class: class.clone(), self_param: false, is_static: member.is_static, constructor: false });
                     let found = self.expr(value, Some(&ty));
                     self.this.pop();
                     let found = found?;
@@ -176,13 +212,20 @@ impl Checker<'_> {
                         continue;
                     }
                     let table = if member.is_static { "static_methods" } else { "methods" };
-                    let sig = {
+                    let mut sig = {
                         let b = class.0.body.borrow();
                         let t = if table == "methods" { &b.methods } else { &b.static_methods };
                         t[&method.name].ty.clone()
                     };
+                    if class.0.interface {
+                        // A default is checked with `Self` as the interface: it works for any class that implements it
+                        let map = HashMap::from([(Rc::from("Self"), Ty::Object(class.clone()))]);
+                        if let Ty::Func(f) = Ty::Func(sig.clone()).substitute(&map) {
+                            sig = f;
+                        }
+                    }
                     self.check_override(decl, &class, member, method)?;
-                    self.this.push(This { class: class.clone(), is_static: member.is_static, constructor: false });
+                    self.this.push(This { class: class.clone(), self_param: false, is_static: member.is_static, constructor: false });
                     let result = self.method_body(method, &sig, member.span);
                     self.this.pop();
                     result?;
@@ -192,7 +235,7 @@ impl Checker<'_> {
                     if parent.is_some() && !calls_super(&ctor.body) {
                         return self.fail(format!("the constructor of `{}` must call `@super(...)`, the constructor of its superclass", decl.name), member.span);
                     }
-                    self.this.push(This { class: class.clone(), is_static: false, constructor: true });
+                    self.this.push(This { class: class.clone(), self_param: false, is_static: false, constructor: true });
                     let result = self.method_body(ctor, &sig, member.span);
                     self.this.pop();
                     result?;
@@ -211,8 +254,19 @@ impl Checker<'_> {
             }
             return Ok(());
         }
+        if class.0.interface {
+            return Ok(());
+        }
         let parent = class.0.body.borrow().parent.clone();
         let inherited = parent.as_ref().and_then(|p| p.find(|b| b.methods.get(&method.name).cloned()));
+        if member.origin == Origin::Own {
+            if let Some(i) = class.all_interfaces().into_iter().find(|i| i.find_method(&method.name).is_some()) {
+                return self.fail(
+                    format!("`{}` is a method of `{}`, so it goes in its `implement {} {{ ... }}` block", method.name, i.0.name, i.0.name),
+                    member.span,
+                );
+            }
+        }
         match (&member.origin, inherited) {
             (Origin::Override, None) => {
                 self.fail(format!("`{}` is in `override`, but the superclass of `{}` has no method with that name", method.name, decl.name), member.span)
@@ -236,6 +290,53 @@ impl Checker<'_> {
             }
             _ => Ok(()),
         }
+    }
+
+    /// Each `implement` block has methods of its interface, with the same
+    /// signatures, and the class has every method of its interfaces without a default.
+    fn check_implements(&mut self, decl: &ClassDecl, class: &ClassRef) -> Check<()> {
+        let this = Ty::Object(class.clone());
+        let map = HashMap::from([(Rc::from("Self"), this)]);
+        for member in &decl.members {
+            let (Origin::Implement(ty), MemberKind::Method { decl: method, .. }) = (&member.origin, &member.kind) else {
+                continue;
+            };
+            let Ty::Object(interface) = self.ty(ty)? else { continue };
+            if member.is_static {
+                return self.fail("the methods of an `implement` block can't be `static`", member.span);
+            }
+            let Some((expected, owner)) = interface.find_method(&method.name) else {
+                return self.fail(format!("`{}` has no method `{}`, so it can't go in its `implement` block", interface.0.name, method.name), member.span);
+            };
+            let Ty::Func(expected) = Ty::Func(expected.ty.clone()).substitute(&map) else { unreachable!() };
+            let found = class.0.body.borrow().methods[&method.name].ty.clone();
+            let same = expected.params.len() == found.params.len()
+                && expected.params.iter().zip(found.params.iter()).all(|(e, f)| e == f)
+                && self.assignable(&found.ret, &expected.ret);
+            if !same {
+                let params: Vec<String> = expected.params.iter().map(|p| p.to_string()).collect();
+                return self.fail(
+                    format!("`{}` must be `{} {}({})`, like in `{}`", method.name, expected.ret, method.name, params.join(", "), owner.0.name),
+                    member.span,
+                );
+            }
+        }
+        // Every method without a default, of every interface it implements
+        let own: Vec<ClassRef> = class.0.body.borrow().interfaces.clone();
+        for interface in own {
+            let mut all = vec![interface.clone()];
+            all.extend(interface.all_interfaces());
+            for i in all {
+                let required: Vec<String> = i.0.body.borrow().methods.iter().filter(|(_, m)| !m.has_body).map(|(n, _)| n.clone()).collect();
+                for name in required {
+                    let implemented = class.find(|b| b.methods.get(&name).filter(|m| m.has_body).cloned()).is_some();
+                    if !implemented {
+                        return self.fail(format!("`{}` implements `{}`, but it has no method `{name}`", decl.name, i.0.name), decl.span);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn method_body(&mut self, method: &FunctionDecl, sig: &FnTy, span: Span) -> Check<()> {

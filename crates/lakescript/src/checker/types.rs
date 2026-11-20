@@ -53,16 +53,58 @@ impl fmt::Debug for ClassRef {
 }
 
 impl ClassRef {
-    /// `true` if it's this class or one of its superclasses.
+    /// `true` if it's this class, one of its superclasses, or an interface
+    /// they implement (also through the interfaces those extend).
     pub fn is_a(&self, other: &ClassRef) -> bool {
+        if self == other {
+            return true;
+        }
+        let body = self.0.body.borrow();
+        body.parent.as_ref().is_some_and(|p| p.is_a(other)) || body.interfaces.iter().any(|i| i.is_a(other))
+    }
+
+    /// A method of the class, its superclasses or its interfaces, with the
+    /// class or interface that declares it. Methods of the class come first,
+    /// so they win over the interfaces' defaults.
+    pub fn find_method(&self, name: &str) -> Option<(MemberSig, ClassRef)> {
+        if let Some(found) = self.find(|b| b.methods.get(name).cloned()) {
+            return Some(found);
+        }
         let mut class = Some(self.clone());
         while let Some(c) = class {
-            if c == *other {
-                return true;
+            let interfaces = c.0.body.borrow().interfaces.clone();
+            for i in interfaces {
+                if let Some(found) = i.find_method(name) {
+                    return Some(found);
+                }
             }
             class = c.0.body.borrow().parent.clone();
         }
-        false
+        None
+    }
+
+    /// Every interface it implements, also through its superclasses and the
+    /// interfaces they extend.
+    pub fn all_interfaces(&self) -> Vec<ClassRef> {
+        let mut out: Vec<ClassRef> = Vec::new();
+        let body = self.0.body.borrow();
+        let mut add = |c: ClassRef| {
+            if !out.contains(&c) {
+                out.push(c);
+            }
+        };
+        if let Some(p) = &body.parent {
+            for i in p.all_interfaces() {
+                add(i);
+            }
+        }
+        for i in &body.interfaces {
+            add(i.clone());
+            for j in i.all_interfaces() {
+                add(j);
+            }
+        }
+        out
     }
 
     /// Finds a member in the class or its superclasses, with the class that declares it.
@@ -80,6 +122,7 @@ impl ClassRef {
 
 pub struct ClassSig {
     pub name: Rc<str>,
+    pub interface: bool,
     /// Filled once every class of the block has a name, so they can use each other.
     pub body: RefCell<ClassBody>,
 }
@@ -87,6 +130,8 @@ pub struct ClassSig {
 #[derive(Default)]
 pub struct ClassBody {
     pub parent: Option<ClassRef>,
+    /// The interfaces it implements, or the ones an interface extends.
+    pub interfaces: Vec<ClassRef>,
     pub fields: Vec<FieldSig>,
     pub methods: HashMap<String, MemberSig>,
     pub statics: HashMap<String, FieldSig>,
@@ -110,6 +155,8 @@ pub struct FieldSig {
 pub struct MemberSig {
     pub ty: Rc<FnTy>,
     pub public: bool,
+    /// `false` for a method of an interface without a default.
+    pub has_body: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -208,7 +255,7 @@ pub fn a(ty: &Ty) -> String {
         Ty::Nullable(_) => format!("a {ty}, which can be `null`"),
         other => {
             let text = other.to_string();
-            let article = if text.starts_with(['a', 'e', 'i', 'o', 'u']) { "an" } else { "a" };
+            let article = if text.starts_with(['a', 'e', 'i', 'o', 'u', 'A', 'E', 'I', 'O', 'U']) { "an" } else { "a" };
             format!("{article} {text}")
         }
     }
