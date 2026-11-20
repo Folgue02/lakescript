@@ -6,6 +6,7 @@ mod io;
 mod json;
 mod path;
 mod process;
+mod time;
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -14,7 +15,7 @@ use crate::exceptions::TYPE_ERROR;
 use crate::modules::{Globals, Module};
 use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeResult, Value};
 
-pub const MODULES: &[&str] = &["std/env", "std/fs", "std/io", "std/json", "std/path", "std/process"];
+pub const MODULES: &[&str] = &["std/env", "std/fs", "std/io", "std/json", "std/path", "std/process", "std/time"];
 
 pub fn exists(name: &str) -> bool {
     MODULES.contains(&name)
@@ -60,6 +61,7 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/json" => json::register(&mut exports),
         "std/path" => path::register(&mut exports),
         "std/process" => process::register(&mut exports),
+        "std/time" => time::register(&mut exports),
         _ => return None,
     }
     let globals = Rc::new(Globals::default());

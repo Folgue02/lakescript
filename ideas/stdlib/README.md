@@ -42,6 +42,7 @@ What comes with Lakescript. Its modules are under `std/` and are imported with `
 | [fs.md](fs.md) | `std/fs`: files and folders |
 | [path.md](path.md) | `std/path`: building and splitting paths |
 | [env.md](env.md) | `std/env`: environment variables |
+| [time.md](time.md) | `std/time`: the current time |
 | [io.md](io.md) | `std/io`: reading stdin |
 | [process.md](process.md) | `std/process`: arguments, the current folder, finding and running programs |
 | [json.md](json.md) | `std/json`: reading and writing JSON |

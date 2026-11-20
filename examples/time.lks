@@ -1,0 +1,11 @@
+#!/usr/bin/lks
+// `std/time`: the current time in milliseconds, to time a piece of code.
+use std/time;
+
+const $start = time::now();
+let $total = 0;
+for ($i in 1..100000) $total += $i;
+const $took = time::now() - $start;
+
+outln($total);
+outln(if ($took >= 0) 'timed it' else 'the clock went back');

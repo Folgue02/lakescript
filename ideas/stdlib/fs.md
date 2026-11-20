@@ -28,7 +28,7 @@ Every function throws when the disk says no: `FileNotFound` if the path doesn't 
 | `dir?(string $path)` | `bool` | Same as `-d $path` |
 | `link?(string $path)` | `bool` | `true` if it's a symbolic link, without following it |
 | `size(string $path)` | `number` | The size in bytes *(i.e. `fs::size($path).formatBytes()`)* |
-| `modified(string $path)` | `number` | When it was last changed, in seconds since 1970. It becomes a date once there's `std/time` |
+| `modified(string $path)` | `number` | When it was last changed, in seconds since 1970. Comparable with `time::now() / 1000`. It becomes a date once `std/time` has dates |
 | `mode(string $path)` | `number` | The Unix permissions *(i.e. `0o644`)*. On Windows, `0o444` or `0o666` |
 
 ## Folders

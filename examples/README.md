@@ -35,6 +35,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [commands.lks](commands.lks) | `%x"..."` commands, safe quoting, `process::command()` | |
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
 | [json.lks](json.lks) | `std/json`: parsing, writing, typed values with `.as()` | |
+| [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
 | [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases | |
 | [backup/backup.lks](backup/backup.lks) | A real script: arguments, a JSON config, a helper module, `tar`, rotating old backups | `lks examples/backup/backup.lks <folder> <backups folder>` |
 

@@ -73,6 +73,7 @@ fn system_examples() {
     assert!(run_ok(&["examples/commands.lks"]).contains("<a file; echo hacked>"));
     assert!(run_ok(&["examples/files.lks"]).contains("Cleaned up: true"));
     assert!(run_ok(&["examples/json.lks"]).contains("lakescript by folgue02, indent 4"));
+    assert_eq!(run_ok(&["examples/time.lks"]), "4999950000\ntimed it\n");
     assert!(run_ok(&["examples/modules/main.lks"]).contains("The Module System"));
 }
 

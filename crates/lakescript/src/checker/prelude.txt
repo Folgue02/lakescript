@@ -344,6 +344,9 @@ string stringify(any $value, ?number $indent = null);
 any read(string $path);
 void write(string $path, any $value, ?number $indent = 2);
 
+module std/time
+number now();
+
 type result<T, E>
 bool isOk();
 bool isError();

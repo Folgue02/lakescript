@@ -21,7 +21,7 @@ TYPES = {
     'regex': 'regex', 'range': 'range', 'command': 'command', 'list': 'list<T>', 'map': 'map<K, V>',
 }
 MODULES = {'general': 'general', 'fs': 'std/fs', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
-           'process': 'std/process', 'json': 'std/json'}
+           'process': 'std/process', 'json': 'std/json', 'time': 'std/time'}
 
 # Types described outside ideas/stdlib
 EXTRA = '''

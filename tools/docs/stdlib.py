@@ -13,7 +13,7 @@ repo = here.parent.parent
 root = repo / 'ideas' / 'stdlib'
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'target' / 'docs' / 'stdlib.html'
 TYPES = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'symbol', 'regex', 'command']
-MODULES = ['general', 'fs', 'path', 'env', 'io', 'process', 'json']
+MODULES = ['general', 'fs', 'path', 'env', 'io', 'process', 'json', 'time']
 PAGES = set(TYPES) | set(MODULES)
 MEMBER_HEADERS = ('Method', 'Function', 'Constant')
 
