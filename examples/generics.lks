@@ -1,0 +1,57 @@
+#!/usr/bin/lks
+// Generic classes and interfaces: the same code for values of any type.
+//
+//   lks examples/generics.lks
+
+// `T` is the type of what the stack holds. It's found out from how the
+// stack is used, or written when nothing says it *(i.e. an empty stack)*
+class Stack<T> {
+    list<T> @items = [];
+
+    pub void push(T $item) {
+        @items.push($item);
+    }
+
+    pub ?T pop() = @items.removeLast();
+    pub bool empty?() = @items.empty?();
+}
+
+const $todo = Stack<string>();
+$todo.push('write the tests');
+$todo.push('fix the bug');
+while (!$todo.empty?()) {
+    outln($todo.pop()?.upper());
+}
+
+class Pair<A, B> {
+    pub A @first;
+    pub B @second;
+
+    pub Pair<B, A> swapped() = Pair(@second, @first);
+}
+
+const $pair = Pair('port', 8080).swapped();
+outln(f"{$pair.first + 1} {$pair.second.upper()}");
+
+// A class can implement the same interface with different types. The type
+// of the argument picks the method that runs
+interface IMul<R, O> {
+    O mul(R $by);
+}
+
+class Vector {
+    pub number @x;
+    pub number @y;
+
+    implement IMul<number, Vector> {
+        Vector mul(number $n) = Vector(@x * $n, @y * $n);
+    }
+
+    implement IMul<Vector, number> {
+        number mul(Vector $other) = @x * $other.x + @y * $other.y;
+    }
+}
+
+const $v = Vector(1, 2);
+outln($v.mul(3));
+outln($v.mul(Vector(3, 4)));

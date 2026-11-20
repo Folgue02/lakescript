@@ -20,10 +20,14 @@ impl Checker<'_> {
         }
         let interface = decl.kind == ClassKind::Interface;
         let is_enum = decl.kind == ClassKind::Enum;
-        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, body: RefCell::new(ClassBody::default()) }));
+        if is_enum && !decl.generics.is_empty() {
+            return self.fail("an enum can't have type parameters", span);
+        }
+        let generics = decl.generics.iter().map(|g| Rc::from(g.as_str())).collect();
+        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, generics, body: RefCell::new(ClassBody::default()) }));
         let depth = self.returns.len();
         let scope = self.scopes.last_mut().unwrap();
-        scope.types.insert(decl.name.clone(), Ty::Object(class.clone()));
+        scope.types.insert(decl.name.clone(), Ty::Object(class.clone(), Vec::new()));
         scope.pending.insert(decl.name.clone());
         scope.depth = depth;
         Ok(class)
@@ -34,26 +38,29 @@ impl Checker<'_> {
         // In an interface's signatures, `Self` is the class that implements it
         let self_param = class.0.interface;
         self.this.push(This { class: class.clone(), self_param, is_static: false, constructor: false });
+        // Its type parameters are known in its signatures
+        self.push();
+        self.scopes.last_mut().unwrap().generics.extend(decl.generics.iter().cloned());
         let result = self.class_body_inner(decl, class, span);
+        self.pop();
         self.this.pop();
         result
     }
 
     fn class_body_inner(&mut self, decl: &ClassDecl, class: &ClassRef, span: Span) -> Check<()> {
-        if !decl.generics.is_empty() {
-            return self.fail("generic classes aren't ready yet", span);
-        }
+        let _ = span;
         let mut body = ClassBody::default();
         let interface = class.0.interface;
         // The interfaces it implements, or the ones an interface extends
         let implemented: Vec<&TypeExpr> = if interface { decl.extends.iter().collect() } else { decl.implements.iter().collect() };
         for ty in implemented {
             match self.ty(ty)? {
-                Ty::Object(i) if i.0.interface => {
+                Ty::Object(i, args) if i.0.interface => {
                     if i.is_a(class) {
                         return self.fail(format!("`{}` can't extend itself, directly or through other interfaces", decl.name), ty.span);
                     }
                     body.interfaces.push(i);
+                    body.interface_args.push(args);
                 }
                 other => {
                     let what = if interface { "extend" } else { "implement" };
@@ -64,22 +71,23 @@ impl Checker<'_> {
         if let (false, Some(parent)) = (interface, decl.extends.first()) {
             let t = self.ty(parent)?;
             match t {
-                Ty::Object(p) if p.0.interface => {
+                Ty::Object(p, _) if p.0.interface => {
                     return self.fail(
                         format!("`{}` is an interface: a class implements it with an `implement {} {{ ... }}` block, it doesn't extend it", p.0.name, p.0.name),
                         parent.span,
                     );
                 }
-                Ty::Object(p) => {
+                Ty::Object(p, args) => {
                     if p.is_a(class) {
                         return self.fail(format!("`{}` can't extend itself, directly or through other classes", decl.name), parent.span);
                     }
                     body.parent = Some(p);
+                    body.parent_args = args;
                 }
                 other => return self.fail(format!("a class can only extend another class, and {} isn't one", a(&other)), parent.span),
             }
         }
-        let inherited: Vec<FieldSig> = body.parent.as_ref().map(all_fields).unwrap_or_default();
+        let inherited: Vec<FieldSig> = body.parent.as_ref().map(|p| all_fields(p, &body.parent_args)).unwrap_or_default();
         for member in &decl.members {
             match &member.kind {
                 MemberKind::Field { constant, ty, name, value } => {
@@ -103,8 +111,16 @@ impl Checker<'_> {
                     let public = member.public || interface || matches!(member.origin, Origin::Implement(_));
                     let entry = MemberSig { ty: Rc::new(sig), public, has_body: *has_body };
                     let table = if member.is_static { &mut body.static_methods } else { &mut body.methods };
-                    if table.contains_key(&method.name) {
-                        return self.fail(format!("`{}` has two methods named `{}`", decl.name, method.name), member.span);
+                    if let Some(first) = table.get(&method.name).cloned() {
+                        // The same method of an interface implemented with other types *(i.e. `IMul<number>` and `IMul<Vector>`)*
+                        let other_block = decl.members.iter().any(|m| {
+                            matches!(&m.kind, MemberKind::Method { decl: d, .. } if d.name == method.name) && m.origin != member.origin
+                        });
+                        if !matches!(member.origin, Origin::Implement(_)) || !other_block {
+                            return self.fail(format!("`{}` has two methods named `{}`", decl.name, method.name), member.span);
+                        }
+                        body.overloads.entry(method.name.clone()).or_insert_with(|| vec![first]).push(entry);
+                        continue;
                     }
                     table.insert(method.name.clone(), entry);
                 }
@@ -133,7 +149,8 @@ impl Checker<'_> {
                         }
                     }
                 }
-                sig.ret = Ty::Object(class.clone());
+                sig.ret = class.this_type();
+                sig.generics = class.0.generics.clone();
                 sig
             }
             None => {
@@ -144,8 +161,8 @@ impl Checker<'_> {
                     names: every_field.iter().map(|f| f.name.clone()).collect(),
                     required,
                     variadic: false,
-                    ret: Ty::Object(class.clone()),
-                    generics: Vec::new(),
+                    ret: class.this_type(),
+                    generics: class.0.generics.clone(),
                 }
             }
         }));
@@ -156,15 +173,16 @@ impl Checker<'_> {
             return Ok(());
         }
         *class.0.body.borrow_mut() = body;
-        // Calling the class is calling its constructor
-        let scope = self.scopes.last_mut().unwrap();
-        scope.funcs.insert(decl.name.clone(), ctor_sig);
+        // Calling the class is calling its constructor. It goes in the class's
+        // block, below the scope of its type parameters
+        let n = self.scopes.len();
+        self.scopes[n - 2].funcs.insert(decl.name.clone(), ctor_sig);
         Ok(())
     }
 
     /// The values of an enum, and the methods every enum has.
     fn enum_members(&mut self, decl: &ClassDecl, class: &ClassRef, body: &mut ClassBody) -> Check<()> {
-        let this = Ty::Object(class.clone());
+        let this = class.this_type();
         for value in &decl.values {
             if body.values.contains(&value.name) {
                 return self.fail(format!("`{}` has two values named `{}`", decl.name, value.name), value.span);
@@ -204,10 +222,28 @@ impl Checker<'_> {
 
     /// The code of a class, where it's declared.
     pub(super) fn class(&mut self, decl: &ClassDecl, span: Span) -> Check<()> {
-        let Some(Ty::Object(class)) = self.scopes.last().unwrap().types.get(&decl.name).cloned() else {
+        let Some(Ty::Object(class, _)) = self.scopes.last().unwrap().types.get(&decl.name).cloned() else {
             return self.fail(format!("classes can only be declared at the start of a block's statements, and `{}` isn't", decl.name), span);
         };
         self.scopes.last_mut().unwrap().pending.remove(&decl.name);
+        // Its type parameters are known in its code
+        self.push();
+        self.scopes.last_mut().unwrap().generics.extend(decl.generics.iter().cloned());
+        let result = self.class_code(decl, &class, span);
+        self.pop();
+        result
+    }
+
+    /// A method's signature as its class sees it, with `Self` and its type parameters.
+    fn member_signature(&mut self, class: &ClassRef, method: &FunctionDecl, span: Span) -> Check<FnTy> {
+        self.this.push(This { class: class.clone(), self_param: class.0.interface, is_static: false, constructor: false });
+        let sig = self.method_signature(method, span);
+        self.this.pop();
+        sig
+    }
+
+    fn class_code(&mut self, decl: &ClassDecl, class: &ClassRef, span: Span) -> Check<()> {
+        let class = class.clone();
         if !class.0.interface {
             self.check_implements(decl, &class)?;
         }
@@ -257,14 +293,17 @@ impl Checker<'_> {
                         continue;
                     }
                     let table = if member.is_static { "static_methods" } else { "methods" };
-                    let mut sig = {
+                    let overloaded = class.0.body.borrow().overloads.contains_key(&method.name);
+                    let mut sig = if overloaded {
+                        Rc::new(self.member_signature(&class, method, member.span)?)
+                    } else {
                         let b = class.0.body.borrow();
                         let t = if table == "methods" { &b.methods } else { &b.static_methods };
                         t[&method.name].ty.clone()
                     };
                     if class.0.interface {
                         // A default is checked with `Self` as the interface: it works for any class that implements it
-                        let map = HashMap::from([(Rc::from("Self"), Ty::Object(class.clone()))]);
+                        let map = HashMap::from([(Rc::from("Self"), class.this_type())]);
                         if let Ty::Func(f) = Ty::Func(sig.clone()).substitute(&map) {
                             sig = f;
                         }
@@ -340,21 +379,25 @@ impl Checker<'_> {
     /// Each `implement` block has methods of its interface, with the same
     /// signatures, and the class has every method of its interfaces without a default.
     fn check_implements(&mut self, decl: &ClassDecl, class: &ClassRef) -> Check<()> {
-        let this = Ty::Object(class.clone());
-        let map = HashMap::from([(Rc::from("Self"), this)]);
         for member in &decl.members {
             let (Origin::Implement(ty), MemberKind::Method { decl: method, .. }) = (&member.origin, &member.kind) else {
                 continue;
             };
-            let Ty::Object(interface) = self.ty(ty)? else { continue };
+            let Ty::Object(interface, interface_args) = self.ty(ty)? else { continue };
+            // The interface's type parameters are the types of this block, and `Self` is the class
+            let mut map = interface.map(&interface_args);
+            map.insert(Rc::from("Self"), class.this_type());
             if member.is_static {
                 return self.fail("the methods of an `implement` block can't be `static`", member.span);
             }
             let Some((expected, owner)) = interface.find_method(&method.name) else {
                 return self.fail(format!("`{}` has no method `{}`, so it can't go in its `implement` block", interface.0.name, method.name), member.span);
             };
+            if owner != interface {
+                map.extend(interface.member_map(&interface_args, &owner));
+            }
             let Ty::Func(expected) = Ty::Func(expected.ty.clone()).substitute(&map) else { unreachable!() };
-            let found = class.0.body.borrow().methods[&method.name].ty.clone();
+            let found = self.member_signature(class, method, member.span)?;
             let same = expected.params.len() == found.params.len()
                 && expected.params.iter().zip(found.params.iter()).all(|(e, f)| e == f)
                 && self.assignable(&found.ret, &expected.ret);
@@ -425,13 +468,38 @@ impl Checker<'_> {
         Ok(())
     }
 
+    /// Which version of a method with several *(i.e. `mul` of `IMul<number>`
+    /// and of `IMul<Vector>`)* a call means: the first whose parameters take
+    /// the arguments.
+    pub(super) fn pick_overload(&mut self, all: &[MemberSig], receiver: &HashMap<Rc<str>, Ty>, args: &[Arg]) -> Check<MemberSig> {
+        let mut found = Vec::new();
+        for arg in args {
+            let t = self.expr(&arg.value, None)?;
+            found.push(self.resolve(&t));
+        }
+        for sig in all {
+            let params: Vec<Ty> = sig.ty.params.iter().map(|p| p.substitute(receiver)).collect();
+            let fits = params.len() == found.len()
+                && found.iter().zip(params.iter()).all(|(f, p)| match (f, p) {
+                    (Ty::Any | Ty::Var(_), _) | (_, Ty::Any) => true,
+                    (Ty::Object(a, _), Ty::Object(b, _)) => a.is_a(b),
+                    (f, p) => f == p,
+                });
+            if fits {
+                return Ok(sig.clone());
+            }
+        }
+        // None fits: the first one gives the error
+        Ok(all[0].clone())
+    }
+
     /// The class a name means here: `Self` is the class being checked.
     pub(super) fn class_named(&self, name: &str) -> Option<ClassRef> {
         if name == "Self" {
             return self.this.last().map(|t| t.class.clone());
         }
         match self.scopes.iter().rev().find_map(|s| s.types.get(name)) {
-            Some(Ty::Object(c)) => Some(c.clone()),
+            Some(Ty::Object(c, _)) => Some(c.clone()),
             _ => None,
         }
     }
@@ -448,7 +516,7 @@ impl Checker<'_> {
     pub(super) fn field(&mut self, target: &Expr, name: &str, span: Span) -> Check<Ty> {
         let t = self.expr(target, None)?;
         match self.shallow(&t) {
-            Ty::Object(class) => {
+            Ty::Object(class, args) => {
                 let Some((field, owner)) = class.find(|b| b.fields.iter().find(|f| f.name == name).cloned()) else {
                     if class.find(|b| b.methods.get(name).cloned()).is_some() {
                         return self.fail(format!("`{name}` is a method of `{}`: call it with `.{name}()`", class.0.name), span);
@@ -456,7 +524,7 @@ impl Checker<'_> {
                     return self.fail(format!("`{}` has no field named `{name}`", class.0.name), span);
                 };
                 self.check_access(field.public, &owner, &format!("the field `{name}`"), span)?;
-                Ok(field.ty)
+                Ok(field.ty.substitute(&class.member_map(&args, &owner)))
             }
             Ty::Any | Ty::Var(_) => Ok(Ty::Any),
             Ty::Nullable(_) => self.fail(format!("this can be `null`, so `.{name}` can't always be read. Check for `null` first"), target.span),
@@ -473,7 +541,7 @@ impl Checker<'_> {
             return self.fail(format!("there's no class named `{class}`"), span);
         };
         if !variable && c.0.body.borrow().values.iter().any(|v| v == name) {
-            return Ok(Ty::Object(c));
+            return Ok(Ty::Object(c, Vec::new()));
         }
         if variable {
             let field = c.0.body.borrow().statics.get(name).cloned();
@@ -501,10 +569,14 @@ impl Checker<'_> {
 }
 
 /// Every field of a class's objects, the superclasses' first.
-fn all_fields(class: &ClassRef) -> Vec<FieldSig> {
+/// Every field of a class's objects, the superclasses' first, with the types
+/// given to the class's type parameters.
+fn all_fields(class: &ClassRef, args: &[Ty]) -> Vec<FieldSig> {
     let body = class.0.body.borrow();
-    let mut fields = body.parent.as_ref().map(all_fields).unwrap_or_default();
-    fields.extend(body.fields.iter().cloned());
+    let map = class.map(args);
+    let parent_args: Vec<Ty> = body.parent_args.iter().map(|t| t.substitute(&map)).collect();
+    let mut fields = body.parent.as_ref().map(|p| all_fields(p, &parent_args)).unwrap_or_default();
+    fields.extend(body.fields.iter().map(|f| FieldSig { ty: f.ty.substitute(&map), ..f.clone() }));
     fields
 }
 

@@ -1136,23 +1136,58 @@ impl<'a> Compiler<'a> {
                 _ => {}
             }
         }
+        // Methods of several `implement` blocks with the same name *(i.e. `mul`
+        // of `IMul<number>` and `IMul<Vector>`)*: each one is a method of its
+        // own, and the method with that name picks one by the arguments' types
+        let mut methods: Vec<(&Member, FunctionDecl)> = Vec::new();
+        let mut versions: HashMap<String, Vec<(Vec<Option<TypeExpr>>, String)>> = HashMap::new();
         for member in &decl.members {
-            if let MemberKind::Method { decl: method, body } = &member.kind {
+            if let MemberKind::Method { decl: method, body: true } = &member.kind {
                 if member.is_static {
                     continue;
                 }
-                if !body {
-                    info.required.push(Rc::from(method.name.as_str()));
-                    continue;
+                let same = decl.members.iter().filter(|m| {
+                    !m.is_static && matches!(&m.kind, MemberKind::Method { decl: d, body: true } if d.name == method.name)
+                }).count();
+                let mut method = method.clone();
+                if same > 1 && matches!(member.origin, Origin::Implement(_)) {
+                    let list = versions.entry(method.name.clone()).or_default();
+                    let hidden = format!("{}#{}", method.name, list.len());
+                    list.push((method.params.iter().map(|p| p.ty.clone()).collect(), hidden.clone()));
+                    method.name = hidden;
                 }
+                methods.push((member, method));
+            }
+        }
+        let mut dispatchers: Vec<FunctionDecl> = Vec::new();
+        let mut names: Vec<&String> = versions.keys().collect();
+        names.sort();
+        for name in names {
+            dispatchers.push(dispatcher(name, &versions[name], &decl.name, &decl.generics, decl.span));
+        }
+        for member in &decl.members {
+            if let MemberKind::Method { decl: method, body: false } = &member.kind {
+                if !member.is_static {
+                    info.required.push(Rc::from(method.name.as_str()));
+                }
+            }
+        }
+        let synthetic: Vec<(Option<&Member>, FunctionDecl)> = methods
+            .into_iter()
+            .map(|(m, d)| (Some(m), d))
+            .chain(dispatchers.into_iter().map(|d| (None, d)))
+            .collect();
+        for (member, method) in &synthetic {
+            {
+                let span = member.map(|m| m.span).unwrap_or(decl.span);
                 if info.methods.iter().any(|m| **m == *method.name) {
                     self.fail(format!("`{}` has two methods named `{}`", decl.name, method.name));
                     continue;
                 }
-                self.span = member.span;
+                self.span = span;
                 let mut named = method.clone();
                 named.name = format!("{}.{}", decl.name, method.name);
-                if matches!(member.origin, Origin::Implement(_)) {
+                if member.is_some_and(|m| matches!(m.origin, Origin::Implement(_))) {
                     self_checks(&mut named, &decl.name);
                 }
                 let proto = self.method(&named)?;
@@ -1331,7 +1366,7 @@ impl<'a> Compiler<'a> {
                 let resolved = self.resolve(&format!("${name}"));
                 self.load(resolved);
             }
-            ExprKind::Function(name) => {
+            ExprKind::Function(name) | ExprKind::TypeArgs { name, .. } => {
                 let resolved = self.resolve(name);
                 self.load(resolved);
             }
@@ -1723,6 +1758,49 @@ impl<'a> Compiler<'a> {
     }
 }
 
+/// The method that picks a version of a method with several *(see `class`)*:
+/// the first one whose parameters' types match the arguments.
+fn dispatcher(name: &str, versions: &[(Vec<Option<TypeExpr>>, String)], class: &str, generics: &[String], span: Span) -> FunctionDecl {
+    let at = |kind| Expr { kind, span };
+    let count = versions.iter().map(|(p, _)| p.len()).max().unwrap_or(0);
+    let params: Vec<Param> = (0..count)
+        .map(|i| Param { name: format!("_arg{i}"), ty: None, default: None, variadic: false, field: false })
+        .collect();
+    let mut body = Vec::new();
+    for (types, hidden) in versions {
+        // Types that can be checked while the script runs: not the type parameters
+        let mut cond: Option<Expr> = None;
+        for (i, ty) in types.iter().enumerate() {
+            let Some(ty) = ty else { continue };
+            let mut ty = ty.clone();
+            if let TypeKind::Named { name, .. } = &mut ty.kind {
+                if name == "Self" {
+                    *name = class.to_string();
+                }
+                if generics.contains(name) {
+                    continue;
+                }
+            }
+            let check = at(ExprKind::TypeCheck { receiver: Box::new(at(ExprKind::Variable(format!("_arg{i}")))), ty, check: TypeCheckKind::Is, nullable: false });
+            cond = Some(match cond {
+                None => check,
+                Some(c) => at(ExprKind::Binary { op: BinaryOp::And, left: Box::new(c), right: Box::new(check) }),
+            });
+        }
+        let args = (0..types.len()).map(|i| Arg { name: None, value: at(ExprKind::Variable(format!("_arg{i}"))), spread: false }).collect();
+        let call = at(ExprKind::MethodCall { receiver: Box::new(at(ExprKind::This)), method: hidden.clone(), args, nullable: false });
+        let ret = Stmt { kind: StmtKind::Return(Some(call)), span };
+        body.push(match cond {
+            Some(c) => Stmt { kind: StmtKind::If { cond: c, then: Box::new(ret), otherwise: None }, span },
+            None => ret,
+        });
+    }
+    let message = at(ExprKind::Str(format!("no version of `{class}.{name}` takes these arguments")));
+    let error = at(ExprKind::Call { callee: Box::new(at(ExprKind::Function("TypeError".into()))), args: vec![Arg { name: None, value: message, spread: false }] });
+    body.push(Stmt { kind: StmtKind::Throw(error), span });
+    FunctionDecl { name: name.to_string(), generics: Vec::new(), params, ret: None, body: FunctionBody::Block(body) }
+}
+
 /// A method of an `implement` block can be called through the interface with
 /// an object of another class. Its `Self` parameters check that they got one
 /// of its own class, and throw a `TypeError` otherwise.
@@ -1902,7 +1980,7 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
                 out.insert(format!("${name}"));
             }
         }
-        ExprKind::Function(name) => {
+        ExprKind::Function(name) | ExprKind::TypeArgs { name, .. } => {
             if inside {
                 out.insert(name.clone());
             }

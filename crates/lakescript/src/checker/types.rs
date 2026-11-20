@@ -31,8 +31,8 @@ pub enum Ty {
     Var(usize),
     /// A type parameter of a generic function, inside its body *(i.e. `T`)*.
     Param(Rc<str>),
-    /// An object of a class.
-    Object(ClassRef),
+    /// An object of a class, with the types of its type parameters *(i.e. `Stack<string>`)*.
+    Object(ClassRef, Vec<Ty>),
 }
 
 /// A class as the checker sees it. Two are the same class only if they're the
@@ -53,6 +53,44 @@ impl fmt::Debug for ClassRef {
 }
 
 impl ClassRef {
+    /// Its type inside its own code: its type parameters stay as they are.
+    pub fn this_type(&self) -> Ty {
+        Ty::Object(self.clone(), self.0.generics.iter().map(|g| Ty::Param(g.clone())).collect())
+    }
+
+    /// What each type parameter is, for these types.
+    pub fn map(&self, args: &[Ty]) -> HashMap<Rc<str>, Ty> {
+        self.0.generics.iter().enumerate().map(|(i, g)| (g.clone(), args.get(i).cloned().unwrap_or(Ty::Any))).collect()
+    }
+
+    /// The types of `target`'s type parameters, for an object of this class
+    /// with these types, for every way it is a `target` *(i.e. `[number]` and
+    /// `[Vector]` for a class that implements `IMul<number>` and `IMul<Vector>`)*.
+    pub fn ancestor_args(&self, args: &[Ty], target: &ClassRef) -> Vec<Vec<Ty>> {
+        if self == target {
+            return vec![args.to_vec()];
+        }
+        let map = self.map(args);
+        let body = self.0.body.borrow();
+        let mut out = Vec::new();
+        if let Some(p) = &body.parent {
+            let pa: Vec<Ty> = body.parent_args.iter().map(|t| t.substitute(&map)).collect();
+            out.extend(p.ancestor_args(&pa, target));
+        }
+        for (i, iface) in body.interfaces.iter().enumerate() {
+            let ia: Vec<Ty> = body.interface_args.get(i).map(|a| a.iter().map(|t| t.substitute(&map)).collect()).unwrap_or_default();
+            out.extend(iface.ancestor_args(&ia, target));
+        }
+        out
+    }
+
+    /// The type parameters of `owner` (a class this one is) mapped to types,
+    /// for an object of this class with these types.
+    pub fn member_map(&self, args: &[Ty], owner: &ClassRef) -> HashMap<Rc<str>, Ty> {
+        let found = self.ancestor_args(args, owner).into_iter().next().unwrap_or_default();
+        owner.map(&found)
+    }
+
     /// `true` if it's this class, one of its superclasses, or an interface
     /// they implement (also through the interfaces those extend).
     pub fn is_a(&self, other: &ClassRef) -> bool {
@@ -124,6 +162,7 @@ pub struct ClassSig {
     pub name: Rc<str>,
     pub interface: bool,
     pub is_enum: bool,
+    pub generics: Vec<Rc<str>>,
     /// Filled once every class of the block has a name, so they can use each other.
     pub body: RefCell<ClassBody>,
 }
@@ -131,8 +170,15 @@ pub struct ClassSig {
 #[derive(Default)]
 pub struct ClassBody {
     pub parent: Option<ClassRef>,
+    /// The types given to the superclass's type parameters *(i.e. `number` in `extends Stack<number>`)*.
+    pub parent_args: Vec<Ty>,
     /// The interfaces it implements, or the ones an interface extends.
     pub interfaces: Vec<ClassRef>,
+    pub interface_args: Vec<Vec<Ty>>,
+    /// Methods with the same name in several `implement` blocks *(i.e. `mul`
+    /// of `IMul<number>` and of `IMul<Vector>`)*: every version. The one in
+    /// `methods` is the first.
+    pub overloads: HashMap<String, Vec<MemberSig>>,
     pub fields: Vec<FieldSig>,
     pub methods: HashMap<String, MemberSig>,
     pub statics: HashMap<String, FieldSig>,
@@ -200,6 +246,7 @@ impl Ty {
             Ty::List(a) => Ty::List(Box::new(a.substitute(map))),
             Ty::Map(a, b) => Ty::Map(Box::new(a.substitute(map)), Box::new(b.substitute(map))),
             Ty::Nullable(a) => Ty::Nullable(Box::new(a.substitute(map))),
+            Ty::Object(c, args) => Ty::Object(c.clone(), args.iter().map(|a| a.substitute(map)).collect()),
             Ty::Func(f) => Ty::Func(Rc::new(FnTy {
                 params: f.params.iter().map(|p| p.substitute(map)).collect(),
                 names: f.names.clone(),
@@ -235,7 +282,11 @@ impl fmt::Display for Ty {
                 _ => write!(f, "?{a}"),
             },
             Ty::Param(name) => write!(f, "{name}"),
-            Ty::Object(class) => write!(f, "{}", class.0.name),
+            Ty::Object(class, args) if args.is_empty() => write!(f, "{}", class.0.name),
+            Ty::Object(class, args) => {
+                let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+                write!(f, "{}<{}>", class.0.name, args.join(", "))
+            }
             Ty::Func(func) => {
                 let mut params: Vec<String> = func.params.iter().map(|p| p.to_string()).collect();
                 if func.variadic {

@@ -83,6 +83,8 @@ pub enum ExprKind {
     ModuleFunction { module: String, name: String },
     /// `paths::$defaultPath`: a constant of an imported module.
     ModuleConstant { module: String, name: String },
+    /// `Stack<string>`, called to create an object with these types.
+    TypeArgs { name: String, args: Vec<TypeExpr> },
     /// `@`: the object a method runs on.
     This,
     /// `@name` or `$point.x`: a field of an object.
@@ -546,6 +548,7 @@ impl fmt::Display for Expr {
             Throw(inner) => write!(f, "(throw {inner})"),
             ModuleFunction { module, name } => write!(f, "{module}::{name}"),
             ModuleConstant { module, name } => write!(f, "{module}::${name}"),
+            TypeArgs { name, args } => write!(f, "{name}<{}>", join(args, ", ")),
             This => write!(f, "@"),
             Field { target, name } => match &target.kind {
                 This => write!(f, "@{name}"),

@@ -69,7 +69,10 @@ pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Resu
                 }
                 "void" => Err("`void` isn't the type of any value".into()),
                 other => match classes.iter().find(|(n, _)| *n == other) {
-                    Some((_, Value::Class(class))) => no_args(matches!(value, Value::Object(o) if o.class.is_a(class))),
+                    Some((_, Value::Class(_))) if !args.is_empty() => Err(format!(
+                        "the types of a generic class can't be checked while the script runs, since types are removed before it runs. Use `.is({other})`"
+                    )),
+                    Some((_, Value::Class(class))) => Ok(matches!(value, Value::Object(o) if o.class.is_a(class))),
                     Some((_, Value::Null)) | None => Err(format!("unknown type `{other}`")),
                     Some(_) => Err(format!("`{other}` isn't a class")),
                 },

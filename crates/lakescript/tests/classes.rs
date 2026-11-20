@@ -376,3 +376,79 @@ fn the_checker_finds_mistakes_with_enums() {
     assert!(rejected("enum C { A; }\nenum D extends C {}").contains("can't extend"));
     assert!(fails(&format!("{e}C();")).contains("is an enum"));
 }
+
+const STACK: &str = "
+class Stack<T> {
+    list<T> @items = [];
+    pub void push(T $item) {
+        @items.push($item);
+    }
+    pub ?T pop() = @items.removeLast();
+    pub number size() = @items.length();
+}
+";
+
+#[test]
+fn generic_classes_keep_their_types() {
+    let script = format!(
+        "{STACK}
+        const $names = Stack<string>();
+        $names.push('ana');
+        outln($names.pop()?.upper());
+        const $numbers = Stack();
+        $numbers.push(2);
+        outln(($numbers.pop() ?? 0) + 1);
+        class Pair<A, B> {{
+            pub A @first;
+            pub B @second;
+            pub Pair<B, A> swapped() = Pair(@second, @first);
+        }}
+        const $q = Pair('x', 1).swapped();
+        outln([$q.first + 1, $q.second.upper()]);
+        class Counts extends Stack<number> {{
+            pub number total() {{
+                let $sum = 0;
+                while (@size() > 0) {{ $sum += @pop() ?? 0; }}
+                return $sum;
+            }}
+        }}
+        const $c = Counts();
+        $c.push(3);
+        $c.push(4);
+        outln($c.total());"
+    );
+    assert_eq!(run(&script), "ANA\n3\n[2, 'X']\n7\n");
+}
+
+#[test]
+fn an_interface_can_be_implemented_with_several_types() {
+    let script = "
+        interface IMul<R, O> { O mul(R $by); }
+        class Vector {
+            pub number @x;
+            pub number @y;
+            implement IMul<number, Vector> {
+                Vector mul(number $n) = Vector(@x * $n, @y * $n);
+            }
+            implement IMul<Vector, number> {
+                number mul(Vector $other) = @x * $other.x + @y * $other.y;
+            }
+        }
+        const $v = Vector(1, 2);
+        outln([$v.mul(3).y, $v.mul(Vector(3, 4)) + 1]);
+        IMul<number, Vector> $m = $v;
+        outln($m.mul(5));
+    ";
+    assert_eq!(run(script), "[6, 12]\nVector(x: 5, y: 10)\n");
+}
+
+#[test]
+fn the_checker_finds_mistakes_with_generics() {
+    assert!(rejected(&format!("{STACK}const $s = Stack<string>();\n$s.push(1);")).contains("must be a string, but this is a number"));
+    assert!(rejected(&format!("{STACK}Stack<string> $s = Stack<number>();")).contains("its value is a Stack<number>"));
+    assert!(rejected(&format!("{STACK}Stack<string, number> $s = Stack();")).contains("takes 1 type parameter"));
+    assert!(rejected(&format!("{STACK}const $s = Stack();\n$s.push(1);\n$s.push('a');")).contains("must be a number, but this is a string"));
+    assert!(rejected("class Box<T> { pub T @v; }\nclass Ints extends Box<number> {}\nInts('x');").contains("must be a number"));
+    assert!(rejected("interface IGet<T> { T get(); }\nclass C { implement IGet<number> { string get() = 'x'; } }").contains("must be `number get()`"));
+    assert!(fails("class Box<T> { pub T @v; }\noutln(Box(1).is(Box<number>));").contains("Use `.is(Box)`"));
+}

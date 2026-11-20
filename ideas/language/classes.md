@@ -104,6 +104,8 @@ $names.push('Ana');
 ```
 
 - Like everywhere else, the types are only checked before the script runs, so a `Stack<string>` and a `Stack<number>` are the same class when it runs.
+    - So `.is(Stack<string>)` is an error that says to use `.is(Stack)`.
+    - A generic class can extend a class or implement an interface with types *(i.e. `class Counts extends Stack<number>`)*.
 
 ## Static members
 
@@ -187,7 +189,7 @@ An object prints as its class and its fields, in the order of the constructor th
     - `IOrdered` has a single `number compare(Self $other)`, which gives `<`, `<=`, `>` and `>=`, and is what `sort()` uses. `!=` comes from `IEquals`.
     - `&&`, `||` and `??` stay built-in, since they skip their right side, and so do `=`, `.`, `..`, `.is()` and `.as()`.
     - The type of `$a + $b` is the return type of the method, so the checker still knows it.
-- Interfaces can be generic, with the same `<T>` as functions, and a class can implement the same interface several times with different types. When an operator is used on an object, the type of the right side picks which one runs:
+- Interfaces can be generic, with the same `<T>` as functions, and a class can implement the same interface several times with different types. The types of the arguments pick which method runs: the checker picks it before the script runs, and when it runs, the first version whose parameters' types match the arguments runs. With an operator, that's the type of the right side:
 
 ```
 class Vector {
@@ -243,13 +245,13 @@ Built in steps, each with tests and examples:
 1. Done: classes. Fields with and without values, `const` fields, the constructor that takes every field, `new` with `@field` parameters, methods, `@`, static fields and methods with `Self::`, `extends`, `override`, `@super(...)` and `@super.method()`, `.is()` and `.as()` with classes (also of another module, i.e. `shapes::Point`), and `pub class` in modules. The checker knows them, and private fields and methods can only be used by their own class. See `examples/classes.lks`.
 2. Done: interfaces. `implement` blocks, default methods, interfaces that extend others, `Self`, the `TypeError` for a `Self` parameter of another class, `.is()` and `.as()` with interfaces, and the checker's errors for missing or wrong methods. See `examples/interfaces.lks`.
 3. Done: enums. Values with fields through the constructor, methods, `implement` blocks, `name()`, `values()`, `from()`, `fromIgnoreCase()`, and the checker's error for a `switch` used as a value that misses a value. See `examples/enums.lks`.
-4. Operators through interfaces, and `==` with `IEquals`.
-5. Generic classes and interfaces.
+4. Done: generic classes and interfaces. `Stack<string>()`, types found out from the constructor's arguments, superclasses and interfaces with types *(i.e. `extends Stack<number>`)*, and a class that implements the same interface with different types. See `examples/generics.lks`.
+5. Operators through interfaces, and `==` with `IEquals`.
 6. Exceptions as classes.
 7. Importing a type from its own file, and circular imports.
 8. `command` and `subcommand`.
 
-Not working yet: two interfaces with a method of the same name in one class, which comes with generic interfaces in step 5.
+Not working yet: two different interfaces with a method of the same name in one class.
 
 Not checked yet: that `@` isn't read before `@super(...)`, and that `@super(...)` runs once on every path. The checker only checks that the constructor has one.
 

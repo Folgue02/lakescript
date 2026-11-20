@@ -171,6 +171,7 @@ impl<'a> Checker<'a> {
             Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
             Ty::Result(t, e) => Ty::Result(Box::new(self.resolve(t)), Box::new(self.resolve(e))),
             Ty::Nullable(t) => self.resolve(t).nullable(),
+            Ty::Object(c, args) => Ty::Object(c.clone(), args.iter().map(|a| self.resolve(a)).collect()),
             Ty::Func(f) => Ty::Func(Rc::new(FnTy {
                 params: f.params.iter().map(|p| self.resolve(p)).collect(),
                 names: f.names.clone(),
@@ -235,7 +236,13 @@ impl<'a> Checker<'a> {
                 self.assignable(&f.ret, &t.ret)
             }
             (Ty::Param(a), Ty::Param(b)) => a == b,
-            (Ty::Object(f), Ty::Object(t)) => f.is_a(t),
+            (Ty::Object(f, fa), Ty::Object(t, ta)) => {
+                let (f, fa, t, ta) = (f.clone(), fa.clone(), t.clone(), ta.clone());
+                // The types of the parameters must be the same, like in lists
+                f.ancestor_args(&fa, &t).iter().any(|args| {
+                    ta.is_empty() || args.len() == ta.len() && args.iter().zip(ta.iter()).all(|(x, y)| self.assignable(x, y) && self.assignable(y, x))
+                })
+            }
             (f, t) => f == t,
         }
     }
@@ -263,7 +270,7 @@ impl<'a> Checker<'a> {
                 };
                 self.join(x, &y).nullable()
             }
-            (Ty::Object(x), Ty::Object(y)) if x.is_a(y) || y.is_a(x) => {
+            (Ty::Object(x, _), Ty::Object(y, _)) if x.is_a(y) || y.is_a(x) => {
                 if x.is_a(y) { b.clone() } else { a.clone() }
             }
             (Ty::Exception(x), Ty::Exception(y)) => {
@@ -425,11 +432,19 @@ impl<'a> Checker<'a> {
                     }
                     "Self" => match self.this.last() {
                         Some(this) if this.self_param => Ty::Param(Rc::from("Self")),
-                        Some(this) => Ty::Object(this.class.clone()),
+                        Some(this) => this.class.this_type(),
                         None => return self.fail("`Self` can only be used inside a class", ty.span),
                     },
                     n => {
-                        if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
+                        if let Some(Ty::Object(class, _)) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
+                            let expected = class.0.generics.len();
+                            if !args.is_empty() && args.len() != expected {
+                                let s = if expected == 1 { "" } else { "s" };
+                                return self.fail(format!("`{n}` takes {expected} type parameter{s}"), ty.span);
+                            }
+                            let given = (0..expected).map(|i| arg(self, i)).collect::<Check<Vec<_>>>()?;
+                            Ty::Object(class, given)
+                        } else if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
                             alias
                         } else if self.scopes.iter().any(|s| s.generics.contains(n)) {
                             Ty::Param(Rc::from(n))
@@ -1052,8 +1067,26 @@ impl<'a> Checker<'a> {
         let span = e.span;
         self.guard(span)?;
         Ok(match &e.kind {
+            ExprKind::TypeArgs { name, args } => {
+                let Some(class) = self.class_named(name) else {
+                    return self.fail(format!("there's no class named `{name}`"), span);
+                };
+                let ctor = class.0.body.borrow().constructor.clone();
+                let Some(ctor) = ctor.filter(|_| !class.0.interface && !class.0.is_enum) else {
+                    return self.fail(format!("`{name}` doesn't create objects"), span);
+                };
+                if args.len() != class.0.generics.len() {
+                    let n = class.0.generics.len();
+                    return self.fail(format!("`{name}` takes {n} type parameter{}", if n == 1 { "" } else { "s" }), span);
+                }
+                let given = args.iter().map(|a| self.ty(a)).collect::<Check<Vec<_>>>()?;
+                Ty::Func(match Ty::Func(ctor).substitute(&class.map(&given)) {
+                    Ty::Func(f) => f,
+                    _ => unreachable!(),
+                })
+            }
             ExprKind::This => match self.this.last() {
-                Some(this) if !this.is_static => Ty::Object(this.class.clone()),
+                Some(this) if !this.is_static => this.class.this_type(),
                 Some(_) => return self.fail("a static method has no `@`: it belongs to the class, not to an object", span),
                 None => return self.fail("`@` can only be used in the methods and the constructor of a class", span),
             },
@@ -1068,8 +1101,10 @@ impl<'a> Checker<'a> {
                     return self.fail(format!("`{}` has no superclass for `@super(...)`", this.class.0.name), span);
                 };
                 let ctor = parent.0.body.borrow().constructor.clone();
+                let parent_args = this.class.0.body.borrow().parent_args.clone();
                 match ctor {
                     Some(sig) => {
+                        let Ty::Func(sig) = Ty::Func(sig).substitute(&parent.map(&parent_args)) else { unreachable!() };
                         self.call(&sig, &HashMap::new(), args, &parent.0.name, span)?;
                     }
                     None => self.args_loosely(args)?,
@@ -1084,10 +1119,13 @@ impl<'a> Checker<'a> {
                 let Some(parent) = parent else {
                     return self.fail(format!("`{}` has no superclass for `@super`", this.class.0.name), span);
                 };
-                let Some((m, _)) = parent.find(|b| b.methods.get(method).cloned()) else {
+                let Some((m, owner)) = parent.find_method(method) else {
                     return self.fail(format!("`{}` has no method `{method}`", parent.0.name), span);
                 };
-                self.call(&m.ty, &HashMap::new(), args, method, span)?
+                let parent_args = this.class.0.body.borrow().parent_args.clone();
+                let mut map = parent.member_map(&parent_args, &owner);
+                map.insert(Rc::from("Self"), this.class.this_type());
+                self.call(&m.ty, &map, args, method, span)?
             }
             ExprKind::Int(_) | ExprKind::Float(_) => Ty::Number,
             ExprKind::Str(_) => Ty::Str,
@@ -1253,7 +1291,10 @@ impl<'a> Checker<'a> {
                 match self.shallow(&callee_ty) {
                     Ty::Func(f) => {
                         let name = match &callee.kind {
-                            ExprKind::Function(n) | ExprKind::ModuleFunction { name: n, .. } | ExprKind::Static { name: n, .. } => n.clone(),
+                            ExprKind::Function(n)
+                            | ExprKind::ModuleFunction { name: n, .. }
+                            | ExprKind::Static { name: n, .. }
+                            | ExprKind::TypeArgs { name: n, .. } => n.clone(),
                             _ => "the function".into(),
                         };
                         self.call(&f, &HashMap::new(), args, &name, span)?
@@ -1325,7 +1366,7 @@ impl<'a> Checker<'a> {
         if bools(true) && bools(false) {
             return Ok(());
         }
-        let Ty::Object(class) = self.non_null(subject) else {
+        let Ty::Object(class, _) = self.non_null(subject) else {
             return self.fail("a `switch` used as a value must match every value: add a `default`", switch.subject.span);
         };
         if !class.0.is_enum {
@@ -1451,7 +1492,7 @@ impl<'a> Checker<'a> {
         }
         let params: Vec<Ty> = sig.params.iter().map(|p| p.substitute(&map)).collect();
         // The constructor that takes every field names them without `$`
-        let fields = matches!(&sig.ret, Ty::Object(c) if (*c.0.name == *name || c.0.body.borrow().values.iter().any(|v| v == name)) && !c.0.body.borrow().own_constructor);
+        let fields = matches!(&sig.ret, Ty::Object(c, _) if (*c.0.name == *name || c.0.body.borrow().values.iter().any(|v| v == name)) && !c.0.body.borrow().own_constructor);
         let show = |n: &String| if fields { format!("`{n}`") } else { format!("`${n}`") };
         let fixed = if sig.variadic { params.len() - 1 } else { params.len() };
         let mut given = vec![false; params.len()];
@@ -1530,12 +1571,18 @@ impl<'a> Checker<'a> {
             }
             r = self.shallow(inner);
         }
-        if let Ty::Object(class) = &r {
+        if let Ty::Object(class, class_args) = &r {
             if let Some((m, owner)) = class.find_method(method) {
                 self.check_access(m.public, &owner, &format!("`.{method}()`"), span)?;
-                // In an interface's methods, `Self` is the class of the object
-                let receiver = HashMap::from([(Rc::from("Self"), r.clone())]);
-                return self.call(&m.ty, &receiver, args, method, span);
+                // The class's type parameters, and in an interface's methods, `Self` is the class of the object
+                let mut receiver = class.member_map(class_args, &owner);
+                receiver.insert(Rc::from("Self"), r.clone());
+                let overloads = owner.0.body.borrow().overloads.get(method).cloned();
+                let chosen = match overloads {
+                    Some(all) => self.pick_overload(&all, &receiver, args)?,
+                    None => m,
+                };
+                return self.call(&chosen.ty, &receiver, args, method, span);
             }
             if !matches!(method, "toString" | "typeName" | "equals") {
                 return self.fail(format!("`{}` has no method `.{method}()`", class.0.name), span);
@@ -1850,7 +1897,7 @@ impl<'a> Checker<'a> {
     fn check_assignable_target(&mut self, target: &Expr) -> Check<()> {
         if let ExprKind::Field { target: object, name } = &target.kind {
             let t = self.expr(object, None)?;
-            if let Ty::Object(class) = self.shallow(&t) {
+            if let Ty::Object(class, _) = self.shallow(&t) {
                 if let Some((field, owner)) = class.find(|b| b.fields.iter().find(|f| f.name == *name).cloned()) {
                     let building = self.this.last().is_some_and(|t| t.constructor && t.class == owner) && matches!(object.kind, ExprKind::This);
                     if field.constant && !building {
@@ -1915,6 +1962,7 @@ fn forget_vars(ty: &Ty) -> Ty {
         Ty::Map(k, v) => Ty::Map(Box::new(forget_vars(k)), Box::new(forget_vars(v))),
         Ty::Nullable(t) => Ty::Nullable(Box::new(forget_vars(t))),
         Ty::Result(t, e) => Ty::Result(Box::new(forget_vars(t)), Box::new(forget_vars(e))),
+        Ty::Object(c, args) => Ty::Object(c.clone(), args.iter().map(forget_vars).collect()),
         other => other.clone(),
     }
 }

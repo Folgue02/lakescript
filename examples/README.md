@@ -28,6 +28,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
 | [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
 | [enums.lks](enums.lks) | Enums: values with fields, methods, a `switch` over every value, `values()`, `from()` and `fromIgnoreCase()` |
+| [generics.lks](generics.lks) | Generic classes, `Stack<string>()`, and an interface implemented with several types |
 
 ## Scripts that use the system
 

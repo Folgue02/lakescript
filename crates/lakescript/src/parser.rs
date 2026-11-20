@@ -1190,6 +1190,18 @@ impl Parser {
                     ExprKind::Field { target: Box::new(Expr { kind: ExprKind::This, span: start }), name }
                 }
             }
+            TokenKind::Ident(name) if is_type_name(&name) && self.peek_at(1) == &TokenKind::Lt => {
+                // `Stack<string>()`: the types of a generic class, before calling it
+                let checkpoint = self.checkpoint();
+                match self.parse_type() {
+                    Ok(TypeExpr { kind: TypeKind::Named { args, .. }, .. }) if self.check(&TokenKind::LParen) => ExprKind::TypeArgs { name, args },
+                    _ => {
+                        self.restore(checkpoint);
+                        self.advance();
+                        ExprKind::Function(name)
+                    }
+                }
+            }
             TokenKind::Ident(name) if is_type_name(&name) && self.peek_at(1) == &TokenKind::ColonColon => {
                 self.advance();
                 self.advance();
