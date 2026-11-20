@@ -440,7 +440,7 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
     // The methods that take a regex
     let regex_method = matches!(
         method,
-        "replaceMatches" | "replaceFirstMatch" | "replaceLastMatch" | "removeMatches" | "splitMatches" | "match" | "matchAll"
+        "replaceMatches" | "replaceFirstMatch" | "replaceLastMatch" | "removeMatches" | "splitMatches" | "match" | "matchAll" | "replaceMatchesWith"
     );
     if regex_method {
         let re = match a.get(0) {
@@ -454,6 +454,7 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
                     "replaceFirstMatch" => "replaceFirst",
                     "replaceLastMatch" => "replaceLast",
                     "removeMatches" => "remove",
+                    "replaceMatchesWith" => return a.fail_as(TYPE_ERROR, "`.replaceMatchesWith()` takes a regex *(i.e. `%r\"...\"`)*"),
                     _ => "split",
                 };
                 return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a regex. For a string, use `.{plain}()`"));
@@ -482,6 +483,22 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
             "removeMatches" => {
                 a.count(1, 1)?;
                 string(re.replace_all(s, ""))
+            }
+            "replaceMatchesWith" => {
+                // Each match is replaced by what the function returns for it
+                a.count(2, 2)?;
+                let f = a.func(1)?;
+                let mut out = String::new();
+                let mut last = 0;
+                for caps in re.captures_iter(s) {
+                    let whole = caps.get(0).unwrap();
+                    out.push_str(&s[last..whole.start()]);
+                    let replacement = call_fn(interp, &f, vec![captures_list(&caps)], a.span)?;
+                    out.push_str(&replacement.to_string());
+                    last = whole.end();
+                }
+                out.push_str(&s[last..]);
+                string(out)
             }
             "splitMatches" => {
                 a.count(1, 2)?;

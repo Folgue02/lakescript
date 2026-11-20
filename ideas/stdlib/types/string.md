@@ -79,6 +79,7 @@ All the `indexOf` methods return `null` when the text isn't found.
 | `replaceLast(string $find, string $with)` | `string` | Replaces only the last `$find` |
 | `remove(string $find)` | `string` | Removes every `$find` *(i.e. `'1,000,000'.remove(',')` is `'1000000'`)* |
 | `replaceMatches(regex $pattern, string $with)` | `string` | Replaces every match of `$pattern`. `$1`, `$2`... in `$with` are its groups *(i.e. `'Smith, John'.replaceMatches(%r"(\w+), (\w+)", '$2 $1')` is `'John Smith'`)* |
+| `replaceMatchesWith(regex $pattern, (list<string>) -> string $fn)` | `string` | Replaces every match with what `$fn` returns for it. `$fn` gets the match like `match()` does: the whole match, then each group *(i.e. `'a1 b22'.replaceMatchesWith(%r"\d+", ($m) -> f"<{$m[0].length()}>")` is `'a<1> b<2>'`)* |
 | `replaceFirstMatch(regex $pattern, string $with)` | `string` | Replaces only the first match |
 | `replaceLastMatch(regex $pattern, string $with)` | `string` | Replaces only the last match |
 | `removeMatches(regex $pattern)` | `string` | Removes every match *(i.e. `'a1b22'.removeMatches(%r"\d")` is `'ab'`)* |

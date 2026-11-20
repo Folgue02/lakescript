@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds `lks` and `ferry` for one target and packs them for a release:
 # `dist/lakescript-<version>-<target>.tar.gz` (`.zip` on Windows), with
-# its `.sha256` next to it.
+# its `.sha256` next to it, and the page of the standard library inside it
+# as `doc/stdlib.html` and next to it as `lakescript-<version>-stdlib.html`.
 #
 #   tools/release/package.sh <target> [version]
 #
@@ -29,6 +30,12 @@ for bin in lks ferry; do
     cp "target/$target/release/$bin$exe" "$stage/"
 done
 cp LICENSE NOTICE "$stage/"
+
+# The page of the standard library, built with an `lks` for this machine,
+# since the one just built may be for another system
+mkdir -p "$stage/doc"
+cargo run --quiet --release --locked -p lks -- tools/docs/stdlib.lks "$stage/doc/stdlib.html" >/dev/null
+cp "$stage/doc/stdlib.html" "dist/lakescript-$version-stdlib.html"
 
 cd dist
 case "$target" in

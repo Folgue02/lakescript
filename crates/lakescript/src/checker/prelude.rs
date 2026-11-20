@@ -1,5 +1,5 @@
 //! The signatures of the built-in methods and of the standard library, read
-//! from `prelude.txt` *(generated from `ideas/stdlib` by `tools/docs/prelude.py`)*.
+//! from `prelude.txt` *(generated from `ideas/stdlib` by `tools/docs/prelude.lks`)*.
 
 use std::collections::HashMap;
 use std::rc::Rc;

@@ -44,7 +44,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: dist/*
+          path: dist/*${{ matrix.target }}*
+      # The page of the standard library is the same for every system: one job posts it
+      - uses: actions/upload-artifact@v4
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        with:
+          name: stdlib-docs
+          path: dist/*-stdlib.html
 
   release:
     name: Post the release

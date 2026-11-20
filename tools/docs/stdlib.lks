@@ -1,0 +1,248 @@
+#!/usr/bin/lks
+// Builds the javadoc-style page of the standard library from the notes in
+// ideas/stdlib: the README, the types in types/*.md and the modules in *.md.
+//
+//   lks tools/docs/stdlib.lks                 // writes target/docs/stdlib.html
+//   lks tools/docs/stdlib.lks out.html        // writes out.html
+
+use std/fs;
+use std/json;
+use std/path;
+use std/process;
+
+const $here = path::parent(process::scriptPath() ?? '.') ?? '.';
+const $repo = path::parent(path::parent($here) ?? '.') ?? '.';
+const $root = path::join($repo, 'ideas', 'stdlib');
+const $args = process::args();
+const $target = $args.empty?() ? path::join($repo, 'target', 'docs', 'stdlib.html') : $args[0];
+const $types = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'symbol', 'regex', 'command'];
+const $modules = ['general', 'fs', 'path', 'env', 'io', 'process', 'json', 'time'];
+const $pages = $types.concat($modules);
+
+// Marks for `\|` while a line is cut at its other `|`
+const $bar = "\u{1}";
+const $hidden = "\u{0}";
+
+/// `<`, `>`, `&` and quotes as HTML entities.
+string escape(string $text) =
+    $text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;').replace("'", '&#x27;');
+
+/// The inline markdown of a line: `code`, [links](...), **bold** and *italics*.
+string inline(string $text) {
+    // Code spans are kept apart, since nothing inside them is markdown
+    const $marked = $text.replace(r"\|", $hidden).replaceMatchesWith(%r"`[^`]*`", ($m) -> "\u{2}" + $m[0] + "\u{2}");
+    const $result = <string>[];
+    for ($part in $marked.split("\u{2}")) {
+        if ($part.startsWith('`') && $part.endsWith('`') && $part.length() > 1) {
+            $result.push('<code>' + escape($part[1..-1]).replace($hidden, '|') + '</code>');
+            continue;
+        }
+        let $s = escape($part).replace($hidden, '|');
+        $s = $s.replaceMatchesWith(%r"\[([^\]]+)\]\(([^)]+)\)", ($m) {
+            const $name = path::stem($m[2].split('#')[0]);
+            return $name -in $pages ? f"<a href=\"#{$name}\">{$m[1]}</a>" : f"<span class=\"ref\">{$m[1]}</span>";
+        });
+        $s = $s.replaceMatches(%r"\*\*([^*]+)\*\*", '<strong>$1</strong>');
+        $s = $s.replaceMatches(%r"\*([^*]+)\*", '<em>$1</em>');
+        $result.push($s);
+    }
+    return $result.join('');
+}
+
+/// The cells of a table row, with `\|` kept for `inline`.
+list<string> cells(string $line) {
+    const $marked = $line.trim().replace(r"\|", $bar).trim('|');
+    return $marked.split('|').map(($c) -> $c.trim().replace($bar, r"\|"));
+}
+
+/// A small markdown renderer: headings, bullets, paragraphs, tables and code.
+string mdBlock(string $text) {
+    const $out = <string>[];
+    const $lines = $text.split("\n");
+    let $i = 0;
+    while ($i < $lines.length()) {
+        const $line = $lines[$i];
+        const $stripped = $line.trim();
+        if ($stripped.startsWith('```')) {
+            const $code = <string>[];
+            $i += 1;
+            while ($i < $lines.length() && !$lines[$i].trim().startsWith('```')) {
+                $code.push($lines[$i]);
+                $i += 1;
+            }
+            $out.push(f"<pre class=\"example\"><code>{escape($code.join("\n"))}</code></pre>");
+        } else if ($line.startsWith('#')) {
+            const $level = $line.length() - $line.trimStart('#').length();
+            $out.push(f"<h{$level + 1}>{inline($line.trimStart('# '))}</h{$level + 1}>");
+        } else if ($stripped.startsWith('- ')) {
+            const $items = <string>[];
+            while ($i < $lines.length() && $lines[$i].trim().startsWith('- ')) {
+                const $nested = $lines[$i].startsWith(' ') ? ' class="nested"' : '';
+                $items.push(f"<li{$nested}>{inline($lines[$i].trim()[2..])}</li>");
+                $i += 1;
+            }
+            $out.push('<ul>' + $items.join('') + '</ul>');
+            continue;
+        } else if ($stripped.startsWith('|')) {
+            const $rows = <list<string>>[];
+            while ($i < $lines.length() && $lines[$i].trim().startsWith('|')) {
+                $rows.push(cells($lines[$i]));
+                $i += 1;
+            }
+            const $head = $rows[0].map(($h) -> f"<th>{inline($h)}</th>").join('');
+            const $body = $rows[2..].map(($r) -> '<tr>' + $r.map(($c) -> f"<td>{inline($c)}</td>").join('') + '</tr>').join('');
+            $out.push(f"<div class=\"scroll\"><table class=\"summary\"><thead><tr>{$head}</tr></thead><tbody>{$body}</tbody></table></div>");
+            continue;
+        } else if (!$stripped.empty?()) {
+            $out.push(f"<p>{inline($stripped)}</p>");
+        }
+        $i += 1;
+    }
+    return $out.join("\n");
+}
+
+/// A `##` part of a page: its name, its text, and the rows of its member table.
+class Section {
+    pub string @name;
+    pub list<string> @text = [];
+    pub list<list<string>> @rows = [];
+}
+
+/// A page: its title, its intro (markdown), and its sections.
+class Doc {
+    pub string @name;
+    pub string @kind;
+    pub string @title;
+    pub string @intro;
+    pub list<Section> @sections;
+}
+
+Doc parseDoc(string $name, string $kind, string $file) {
+    const $lines = fs::read($file).lines();
+    const $title = $lines[0].trimStart('# ').trim();
+    const $intro = <string>[];
+    const $sections = <Section>[];
+    ?Section $current = null;
+    let $i = 1;
+    while ($i < $lines.length()) {
+        const $line = $lines[$i];
+        const $member = $line.trim().startsWith('|') && cells($line)[0] -in ['Method', 'Function', 'Constant'];
+        if ($line.startsWith('## ')) {
+            $current = Section($line[3..].trim());
+            $sections.push($current);
+        } else if ($member && $current != null) {
+            // The header and the `---` line
+            $i += 2;
+            while ($i < $lines.length() && $lines[$i].trim().startsWith('|')) {
+                $current.rows.push(cells($lines[$i]).take(3));
+                $i += 1;
+            }
+            continue;
+        } else if ($current != null) {
+            $current.text.push($line);
+        } else {
+            $intro.push($line);
+        }
+        $i += 1;
+    }
+    return Doc($name, $kind, $title, $intro.join("\n"), $sections);
+}
+
+/// The name of a member, and its signature in HTML.
+list<string> sig(string $member) {
+    const $m = $member.match(%r"^([\w?$]+)\((.*)\)$");
+    if ($m == null) {
+        return [$member, f"<span class=\"mname\">{escape($member)}</span>"];
+    }
+    const $params = escape($m[2].replace(r"\|", '|')).replaceMatches(%r"(\$\w+)", '<span class="param">$1</span>');
+    return [$m[1], f"<span class=\"mname\">{escape($m[1])}</span>(<span class=\"params\">{$params}</span>)"];
+}
+
+const $docs = <Doc>[];
+for ($name in $types) {
+    $docs.push(parseDoc($name, 'type', path::join($root, 'types', f"{$name}.md")));
+}
+for ($name in $modules) {
+    $docs.push(parseDoc($name, 'module', path::join($root, f"{$name}.md")));
+}
+
+const $overview = mdBlock((fs::read(path::join($root, 'README.md')).splitOnce("\n") ?? ['', ''])[1]);
+
+string navItems(string $kind) =
+    $docs.filter(($d) -> $d.kind == $kind).map(($d) -> f"<li><a href=\"#{$d.name}\" data-nav=\"{$d.name}\"><code>{escape($d.title)}</code></a></li>").join('');
+
+const $pagesHtml = <string>[];
+const $index = <map<string, string>>[];
+for ($doc in $docs) {
+    const $name = $doc.name;
+    const $members = $doc.sections.filter(($s) -> !$s.rows.empty?());
+    const $count = $doc.sections.map(($s) -> $s.rows.length()).sum();
+    const $noun = $doc.kind == 'type' ? 'methods' : 'functions';
+    let $tabs = f"<button class=\"tab active\" data-cat=\"all\" type=\"button\">All {$noun}</button>";
+    for ($i, $s in $members) {
+        $tabs += f"<button class=\"tab\" data-cat=\"{$i}\" type=\"button\">{escape($s.name)}</button>";
+    }
+    const $rows = <string>[];
+    const $details = <string>[];
+    const $notes = <string>[];
+    for ($i, $s in $members) {
+        const $text = mdBlock($s.text.join("\n"));
+        const $note = $text.empty?() ? '' : f"<div class=\"note\">{$text}</div>";
+        $rows.push(f"<tr class=\"group\" data-cat=\"{$i}\"><th colspan=\"2\">{escape($s.name)}{$note}</th></tr>");
+        for ([$member, $returns, $desc] in $s.rows) {
+            const [$mname, $signature] = sig($member.trim('`'));
+            const $anchor = f"{$name}-{$mname}".replace('?', 'Q').removeMatches(%r"[^A-Za-z0-9-]");
+            const $first = $desc.split(' *(')[0];
+            const $shown = $doc.kind == 'module' && $name != 'general' ? f"{$name}::{$mname}" : $mname;
+            $rows.push(
+                f"<tr data-cat=\"{$i}\"><td class=\"ret\"><code>{inline($returns)}</code></td>"
+                + f"<td><code class=\"sig\"><a href=\"#{$anchor}\">{$signature}</a></code><div class=\"desc\">{inline($first)}</div></td></tr>"
+            );
+            const $declared = escape($returns.trim('`').replace(r"\|", '|'));
+            $details.push(
+                f"<section class=\"detail\" id=\"{$anchor}\"><h4>{escape($shown)}</h4>"
+                + f"<pre class=\"decl\"><code>{$declared} {$signature}</code></pre>"
+                + f"<div class=\"block\">{inline($desc)}</div><p class=\"cat\">Group: {escape($s.name)}</p></section>"
+            );
+            $index.push({'t' => $doc.title, 'm' => $shown, 'a' => $anchor, 'd' => inline($first).removeMatches(%r"<[^>]+>")});
+        }
+    }
+    // Sections without members (mapping tables, notes) go after the summary
+    for ($s in $doc.sections) {
+        if ($s.rows.empty?() && !$s.text.empty?()) {
+            $notes.push(f"<h2 class=\"bar\">{escape($s.name)}</h2><div class=\"prose\">{mdBlock($s.text.join("\n"))}</div>");
+        }
+    }
+    let $heading = $doc.kind == 'type' ? f"Type <code>{escape($doc.title)}</code>" : f"Module <code>{escape($doc.title)}</code>";
+    if ($name == 'general') {
+        $heading = 'Global functions';
+    }
+    const $crumb = $doc.kind == 'type' ? 'lakescript.types' : 'lakescript.std';
+    const $label = $doc.kind == 'type' ? 'Method' : 'Function';
+    const $summary = $count == 0 ? '' : [
+        '',
+        f"  <h2 class=\"bar\">{$label} Summary <span class=\"count\">{$count} {$noun}</span></h2>",
+        f"  <div class=\"tabs\" role=\"tablist\">{$tabs}</div>",
+        '  <div class="scroll"><table class="summary methods">',
+        f"    <thead><tr><th>Returns</th><th>{$label} and description</th></tr></thead>",
+        f"    <tbody>{$rows.join('')}</tbody>",
+        '  </table></div>',
+    ].join("\n");
+    const $detail = $count == 0 ? '' : f"<h2 class=\"bar\">{$label} Detail</h2>{$details.join('')}";
+    $pagesHtml.push(
+        f"\n<article class=\"page\" data-page=\"{$name}\" hidden>\n  <div class=\"crumb\">{$crumb}</div>\n  <h1>{$heading}</h1>\n"
+        + f"  <div class=\"intro\">{mdBlock($doc.intro)}</div>{$summary}\n  {$notes.join('')}\n  {$detail}\n</article>"
+    );
+}
+
+const $template = fs::read(path::join($here, 'stdlib-template.html'));
+const $page = $template
+    .replace('{{NAV}}', navItems('type'))
+    .replace('{{NAV_MODULES}}', navItems('module'))
+    .replace('{{OVERVIEW}}', $overview)
+    .replace('{{PAGES}}', $pagesHtml.join(''))
+    .replace('{{INDEX}}', json::stringify($index))
+    .replace('{{TOTAL}}', $index.length().toString());
+fs::makeDir(path::parent($target) ?? '.');
+fs::write($target, $page);
+outln(f"{$target}: {$index.length()} entries");

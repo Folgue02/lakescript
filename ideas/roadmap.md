@@ -21,7 +21,7 @@ Lakescript's own versions follow [semver](https://semver.org), like its packages
 
 - Each finished phase is a new minor version with a git tag: phase 1 is `v0.1.0`, phase 5 is `v0.5.0`. Fixes between phases are patch versions *(i.e. `v0.5.1`)*.
 - The version in `Cargo.toml` is the one of the last tag, so `lks --version` says which phase it is.
-- Pushing a version tag runs `.github/workflows/release.yml`: it builds `lks` and `ferry` for Linux (x86_64 and arm64, static with musl), macOS (arm64 and x86_64) and Windows (x86_64), and posts them on the tag's GitHub release, each as an archive with its SHA-256. `tools/release/package.sh <target>` builds one of those archives by hand, in `dist/`.
+- Pushing a version tag runs `.github/workflows/release.yml`: it builds `lks` and `ferry` for Linux (x86_64 and arm64, static with musl), macOS (arm64 and x86_64) and Windows (x86_64), and posts them on the tag's GitHub release, each as an archive with its SHA-256. Every archive has the page of the standard library as `doc/stdlib.html`, and the release has it on its own too *(built by `tools/docs/stdlib.lks`)*. `tools/release/package.sh <target>` builds one of those archives by hand, in `dist/`.
     - Windows is a supported platform, like Linux and macOS. Commands run without a shell on every system *(see [builtin_types.md](language/builtin_types.md))*, and on Windows `ferry install` writes `.cmd` launchers. The tests don't run on Windows yet, since many of them run Unix programs like `printf` and `sort`.
 - While it's `0.x`, any version can change the language. `1.0.0` comes once the language is stable, and from then on only a new major version can break scripts.
 
