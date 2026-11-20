@@ -119,7 +119,7 @@ The author and name of a project are its real ones, as the repository has them *
 
 ## Installed commands
 
-`ferry install` type checks the project, and then writes a small launcher in `~/.ferry/bin` for every command in `bin/`. The launcher is a shell script that runs the command with `lks`, giving it the module path of its project *(`lks --module-path`)*:
+`ferry install` type checks the project, and then writes a small launcher in `~/.ferry/bin` for every command in `bin/`. The launcher is a shell script that runs the command with `lks`, giving it the module path of its project *(`lks --module-path`)*. On Windows, it's a `.cmd` file with the same line *(i.e. `~/.ferry/bin/backup.cmd`)*:
 
 - An installed package runs from where it was downloaded, in `~/.ferry/repository/`.
 - Installing the project in the current folder copies it to `~/.ferry/installed/<ID>/` first, so changing or deleting the folder doesn't break the installed commands.

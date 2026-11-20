@@ -302,7 +302,7 @@ fn environment_variables_stay_in_the_script() {
          env::set('LKS_TEST_VAR', 'yes');\n\
          outln(env::get('LKS_TEST_VAR'));\n\
          outln(env::has('LKS_TEST_VAR'));\n\
-         outln(%x\"echo $LKS_TEST_VAR\".output());\n\
+         outln(%x\"sh -c 'echo $LKS_TEST_VAR'\".output());\n\
          env::remove('LKS_TEST_VAR');\n\
          outln(env::get('LKS_TEST_VAR') ?? 'unset');\n\
          outln(env::all().is(map<string, string>));\n",
@@ -322,11 +322,11 @@ fn commands() {
          const $words = ['a b', 'c'];\n\
          outln(%x\"printf '%s|' {$words}\".output());\n\
          outln(%x\"printf 'x\\ny\\n'\".lines());\n\
-         outln(%x\"exit 3\".status());\n\
+         outln(%x\"sh -c 'exit 3'\".status());\n\
          outln(%x\"true\".succeeds?());\n\
          outln(%x\"false\".succeeds?());\n\
          outln(%x\"tr a-z A-Z\".input('shout').output());\n\
-         outln(%x\"echo $GREETING\".env('GREETING', 'hola').output());\n\
+         outln(%x\"sh -c 'echo $GREETING'\".env('GREETING', 'hola').output());\n\
          outln(%x\"echo {$file}\");\n\
          %x\"echo from run\".run();\n",
     );
@@ -337,10 +337,49 @@ fn commands() {
 }
 
 #[test]
+fn commands_run_without_a_shell() {
+    let out = run(
+        "const $text = 'a | b; $HOME *';\n\
+         outln(%x\"printf '[%s]' {$text}\".output());\n\
+         outln(%x\"printf '[%s]' a|b $HOME *\".output());\n\
+         outln(%x\"printf '[%s]' 'two words' \\\"and more\\\"\".output());\n\
+         const $name = 'out';\n\
+         outln(%x\"printf '[%s]' --file={$name}.txt\".output());\n\
+         outln(%x\"printf '[%s]' C:\\Users\".output());\n",
+    );
+    assert_eq!(out, "[a | b; $HOME *]\n[a|b][$HOME][*]\n[two words][and more]\n[--file=out.txt]\n[C:\\Users]\n");
+    assert!(error("%x\"printf 'unclosed\".run();").contains("a `'` in the command is never closed"));
+    assert!(error("const $l = ['a', 'b'];\n%x\"echo x{$l}\".run();").contains("can't be next to other text"));
+}
+
+#[test]
+fn commands_can_pipe_and_use_files() {
+    let dir = TempDir::new("pipes");
+    let file = format!("{}/out.txt", dir.path());
+    let script = "outln(%x\"printf 'b\\na\\nc\\n'\".pipe(%x\"sort\").lines());\n\
+         outln(%x\"printf 'x\\ny\\n'\".pipe(%x\"sort -r\").pipe(%x\"head -1\").output());\n\
+         %x\"printf 'one\\n'\".writeTo('FILE').run();\n\
+         %x\"printf 'two\\n'\".appendTo('FILE').run();\n\
+         outln(%x\"sort -r\".readFrom('FILE').lines());\n\
+         outln(%x\"printf a\".pipe(%x\"tr a-z A-Z\").writeTo('up.txt'));\n\
+         outln(%x\"false\".pipe(%x\"cat\").status());\n"
+        .replace("FILE", &file);
+    let out = run(&script);
+    assert_eq!(out, "['a', 'b', 'c']\ny\n['two', 'one']\nprintf a | tr a-z A-Z > up.txt\n1\n");
+    assert!(error("%x\"printf a\".writeTo('/tmp/lks-never.txt').output();").contains("so `.output()` has nothing to return"));
+}
+
+#[test]
+fn a_shell_is_used_only_when_asked() {
+    let out = run("use std/process;\noutln(process::shell('echo a; echo b | tr a-z A-Z').lines());\noutln(process::shell('exit 3').status());\n");
+    assert_eq!(out, "['a', 'B']\n3\n");
+}
+
+#[test]
 fn failing_commands_throw() {
-    let err = error("%x\"exit 4\".run();");
-    assert!(err.contains("CommandFailed: `exit 4` failed with exit code 4"), "{err}");
-    assert_eq!(run("outln((try %x\"exit 1\".output()).orElse('fallback'));"), "fallback\n");
+    let err = error("%x\"sh -c 'exit 4'\".run();");
+    assert!(err.contains("CommandFailed: `sh -c 'exit 4'` failed with exit code 4"), "{err}");
+    assert_eq!(run("outln((try %x\"false\".output()).orElse('fallback'));"), "fallback\n");
     let err = error("%x\"sleep 5\".timeout(0.1).run();");
     assert!(err.contains("didn't finish in 0.1 seconds"), "{err}");
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/lks
-// Running commands.
+// Running commands. `%x"..."` runs a program directly, without a shell, so a
+// command behaves the same on Linux, macOS and Windows.
 
 use std/process;
 
@@ -7,7 +8,10 @@ use std/process;
 const $kernel = %x"uname -s".output();
 outln(f"Running on {$kernel}");
 
-// Values are always quoted, so they're one argument and never run as code
+// Spaces separate the arguments, and quotes keep spaces in one
+outln(%x"printf '[%s]' 'two words' three".output());
+
+// A value is always whole arguments, so it never runs as code
 const $tricky = 'a file; echo hacked';
 outln(%x"printf '<%s>' {$tricky}".output());
 
@@ -15,28 +19,34 @@ outln(%x"printf '<%s>' {$tricky}".output());
 const $words = ['one', 'two words', 'three'];
 outln(%x"printf '[%s]' {$words}".output());
 
-// Pipes and redirects work, it runs through the shell
-outln(%x"printf 'b\na\nc\n' | sort".lines());
+// There's no shell, so `|`, `$` and `*` are plain text
+outln(%x"printf '[%s]' a|b $HOME *".output());
+
+// Pipes and files are methods
+outln(%x"printf 'b\na\nc\n'".pipe(%x"sort").lines());
+%x"printf 'saved\n'".writeTo('/tmp/lks-example.txt').run();
+%x"printf 'and more\n'".appendTo('/tmp/lks-example.txt').run();
+outln(%x"sort".readFrom('/tmp/lks-example.txt').lines());
 
 // Setting up a command before running it
 outln(%x"tr a-z A-Z".input('quiet please').output());
-outln(%x"echo $MOOD".env('MOOD', 'happy').output());
 outln(%x"pwd".cwd('/').output());
 
 // Exit codes
-outln(%x"exit 3".status());
-outln(%x"command -v sh".succeeds?());
+outln(%x"false".status());
+outln(%x"true".succeeds?());
 
 // A failing command throws a CommandFailed
 try {
-    %x"exit 5".run();
+    %x"ls /surely/not/here".quiet().run();
 } catch (CommandFailed $e) {
     outln($e.message());
 }
 outln((try %x"git describe --tags".quiet().output()).orElse('no tags here'));
 
-// Without a shell, every argument is passed as it is
-outln(process::command('echo', '$HOME', '*').output());
+// When a shell is really needed: `sh -c` on Linux and macOS, `cmd /C` on Windows
+outln(process::shell('echo $MOOD | tr a-z A-Z').env('MOOD', 'happy').output());
+
 if (process::which('git') != null)
     outln('git is installed');
 

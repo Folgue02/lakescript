@@ -21,6 +21,7 @@ Commands written with `%x"..."` run through the shell *(see Command in [builtin_
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `which(string $name)` | `?string` | The path of a program in `PATH`, or `null` *(i.e. `if (process::which('docker') == null) errln('Install Docker first');`)* |
+| `shell(string $script)` | `command` | A `command` that runs through a shell: `sh -c` on Linux and macOS, `cmd /C` on Windows *(i.e. `process::shell('ls *.txt \| wc -l').output()`)*. For what needs a real shell; the text is the shell's own, so it isn't portable |
 | `command(string $program, ...string $args)` | `command` | A `command` that runs the program directly, without a shell, with each argument passed as it is. No quoting is needed, and it works the same on every system *(i.e. `process::command('git', 'commit', '-m', $message).run()`)* |
 
 - `exit` needs no `use` *(see [general.md](general.md))*.

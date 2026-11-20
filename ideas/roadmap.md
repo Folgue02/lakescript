@@ -22,12 +22,12 @@ Lakescript's own versions follow [semver](https://semver.org), like its packages
 - Each finished phase is a new minor version with a git tag: phase 1 is `v0.1.0`, phase 5 is `v0.5.0`. Fixes between phases are patch versions *(i.e. `v0.5.1`)*.
 - The version in `Cargo.toml` is the one of the last tag, so `lks --version` says which phase it is.
 - Pushing a version tag runs `.github/workflows/release.yml`: it builds `lks` and `ferry` for Linux (x86_64 and arm64, static with musl), macOS (arm64 and x86_64) and Windows (x86_64), and posts them on the tag's GitHub release, each as an archive with its SHA-256. `tools/release/package.sh <target>` builds one of those archives by hand, in `dist/`.
-    - On Windows, `%x"..."` commands and the launchers of `ferry install` don't work yet, since they need `sh`. They must work before the next phase: Windows is a supported platform, like Linux and macOS. Commands won't use a shell on any system *(see [builtin_types.md](language/builtin_types.md))*, and on Windows `ferry install` will write `.cmd` launchers.
+    - Windows is a supported platform, like Linux and macOS. Commands run without a shell on every system *(see [builtin_types.md](language/builtin_types.md))*, and on Windows `ferry install` writes `.cmd` launchers. The tests don't run on Windows yet, since many of them run Unix programs like `printf` and `sort`.
 - While it's `0.x`, any version can change the language. `1.0.0` comes once the language is stable, and from then on only a new major version can break scripts.
 
 ## Status
 
-- Phases 1 to 7 are done, except commands written with `%x"..."` on Windows.
+- Phases 1 to 7 are done.
 - Phase 5 replaced the tree-walker with a bytecode compiler and a VM *(see [tooling/vm.md](tooling/vm.md))*. The per-user cache was moved to later, since starting a script already takes about 2 ms.
 - Phase 6 added `ferry` *(see [tooling/ferry.md](tooling/ferry.md))*: projects, dependencies from git repositories with exact versions, the lock file, and installed commands. `examples/sizes/` is a project.
 - Phase 7 added OOP, in steps *(see [language/classes.md](language/classes.md#status))*: classes, interfaces, enums, generics, operators through interfaces, custom exceptions, type modules, modules that use each other, and `command` for the arguments of a script *(see [language/cli.md](language/cli.md))*. Type aliases are gone, and `pub const` needs its type.

@@ -386,18 +386,21 @@ fn copy(from: &Path, to: &Path) -> Result<(), Fail> {
 
 /// The line that says which project a launcher belongs to.
 const OWNER: &str = "# ferry-project: ";
+/// The same line in a launcher for Windows, a `.cmd` file.
+const OWNER_CMD: &str = "rem ferry-project: ";
 
 fn write_launchers(home: &Home, project: &Project, dependencies: &[Dependency]) -> Result<ExitCode, Fail> {
     let bin = home.bin();
     std::fs::create_dir_all(&bin).map_err(|e| format!("can't create {}: {e}", bin.display()))?;
     let owner_of = |path: &Path| -> Option<String> {
         let text = std::fs::read_to_string(path).ok()?;
-        text.lines().find_map(|l| l.strip_prefix(OWNER)).map(String::from)
+        text.lines().find_map(|l| l.strip_prefix(OWNER).or_else(|| l.strip_prefix(OWNER_CMD))).map(String::from)
     };
     let commands = project.commands();
     // Every clash is found before anything is written
+    let windows = cfg!(windows);
     for command in &commands {
-        let path = bin.join(command);
+        let path = bin.join(launcher_name(command, windows));
         if path.exists() && owner_of(&path).as_deref() != Some(project.id.as_str()) {
             let by = owner_of(&path).map_or("something ferry didn't install".to_string(), |o| format!("the project {o}"));
             return Err(format!("{} is already installed by {by}, so {} can't install a command with that name", path.display(), project.id).into());
@@ -405,7 +408,8 @@ fn write_launchers(home: &Home, project: &Project, dependencies: &[Dependency]) 
     }
     // The commands this project doesn't have anymore
     for entry in std::fs::read_dir(&bin).into_iter().flatten().flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
+        let file = entry.file_name().to_string_lossy().into_owned();
+        let name = if windows { file.strip_suffix(".cmd").unwrap_or(&file).to_string() } else { file };
         if !commands.contains(&name) && owner_of(&entry.path()).as_deref() == Some(project.id.as_str()) {
             let _ = std::fs::remove_file(entry.path());
         }
@@ -414,16 +418,9 @@ fn write_launchers(home: &Home, project: &Project, dependencies: &[Dependency]) 
         .map_err(|_| "a folder of the module path has a `:` in its name, which `lks --module-path` can't take")?;
     let lks = lks_program();
     for command in &commands {
-        let launcher = format!(
-            "#!/bin/sh\n# Installed by ferry from {} {}. Don't edit it: `ferry install` writes it again.\n{OWNER}{}\nexec {} --no-type-check --module-path {} -- {} \"$@\"\n",
-            project.id,
-            project.manifest.project.version,
-            project.id,
-            quote(&lks.display().to_string()),
-            quote(&module_path.to_string_lossy()),
-            quote(&project.command_file(command).display().to_string()),
-        );
-        let path = bin.join(command);
+        let script = project.command_file(command).display().to_string();
+        let launcher = launcher_text(&project.id, &project.manifest.project.version, &lks.display().to_string(), &module_path.to_string_lossy(), &script, windows);
+        let path = bin.join(launcher_name(command, windows));
         std::fs::write(&path, launcher).map_err(|e| format!("can't write {}: {e}", path.display()))?;
         make_executable(&path)?;
     }
@@ -435,9 +432,36 @@ fn write_launchers(home: &Home, project: &Project, dependencies: &[Dependency]) 
     Ok(ExitCode::SUCCESS)
 }
 
+/// The file of an installed command: a shell script, or a `.cmd` file on Windows.
+fn launcher_name(command: &str, windows: bool) -> String {
+    if windows { format!("{command}.cmd") } else { command.to_string() }
+}
+
+/// What an installed command runs: `lks` with the project's module path.
+fn launcher_text(id: &str, version: &str, lks: &str, module_path: &str, script: &str, windows: bool) -> String {
+    if windows {
+        // `%` would start a variable in a `.cmd` file, so it's written twice
+        let q = |text: &str| format!("\"{}\"", text.replace('%', "%%"));
+        format!(
+            "@echo off\r\nrem Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\r\n{OWNER_CMD}{id}\r\n{} --no-type-check --module-path {} -- {} %*\r\n",
+            q(lks),
+            q(module_path),
+            q(script),
+        )
+    } else {
+        format!(
+            "#!/bin/sh\n# Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\n{OWNER}{id}\nexec {} --no-type-check --module-path {} -- {} \"$@\"\n",
+            quote(lks),
+            quote(module_path),
+            quote(script),
+        )
+    }
+}
+
 /// `lks` next to `ferry` when it's there, or the one on `PATH`.
 fn lks_program() -> PathBuf {
-    let next_to_ferry = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).map(|exe| exe.with_file_name("lks"));
+    let name = if cfg!(windows) { "lks.exe" } else { "lks" };
+    let next_to_ferry = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).map(|exe| exe.with_file_name(name));
     match next_to_ferry {
         Some(lks) if lks.is_file() => lks,
         _ => PathBuf::from("lks"),
@@ -462,7 +486,22 @@ fn make_executable(_: &Path) -> Result<(), Fail> {
 
 #[cfg(test)]
 mod tests {
-    use super::with_dependency;
+    use super::{launcher_name, launcher_text, with_dependency};
+
+    #[test]
+    fn launchers_for_each_system() {
+        let sh = launcher_text("a/b", "1.0.0", "/bin/lks", "/x/src", "/x/bin/go.lks", false);
+        assert!(sh.starts_with("#!/bin/sh\n"), "{sh}");
+        assert!(sh.contains("\n# ferry-project: a/b\n"), "{sh}");
+        assert!(sh.ends_with("exec '/bin/lks' --no-type-check --module-path '/x/src' -- '/x/bin/go.lks' \"$@\"\n"), "{sh}");
+        let cmd = launcher_text("a/b", "1.0.0", r"C:\lks\lks.exe", r"C:\x\src;C:\100%", r"C:\x\bin\go.lks", true);
+        assert!(cmd.starts_with("@echo off\r\n"), "{cmd}");
+        assert!(cmd.contains("\r\nrem ferry-project: a/b\r\n"), "{cmd}");
+        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;C:\100%%" -- "C:\x\bin\go.lks" %*"#;
+        assert!(cmd.ends_with(&format!("{last}\r\n")), "{cmd}");
+        assert_eq!(launcher_name("go", true), "go.cmd");
+        assert_eq!(launcher_name("go", false), "go");
+    }
 
     #[test]
     fn adding_a_dependency_keeps_the_file() {

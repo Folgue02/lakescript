@@ -90,7 +90,11 @@ fn language_examples() {
 
 #[test]
 fn system_examples() {
-    assert!(run_ok(&["examples/commands.lks"]).contains("<a file; echo hacked>"));
+    let commands = run_ok(&["examples/commands.lks"]);
+    assert!(commands.contains("<a file; echo hacked>"), "{commands}");
+    assert!(commands.contains("[a|b][$HOME][*]"), "{commands}");
+    assert!(commands.contains("['and more', 'saved']"), "{commands}");
+    assert!(commands.contains("HAPPY"), "{commands}");
     assert!(run_ok(&["examples/files.lks"]).contains("Cleaned up: true"));
     let json = run_ok(&["examples/json.lks"]);
     assert!(json.contains("lakescript by folgue02, indent 4"));

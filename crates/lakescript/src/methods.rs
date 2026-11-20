@@ -1624,15 +1624,17 @@ fn command_method(
             a.count(0, 0)?;
             run(interp, Mode::Succeeds)?
         }
+        // In a pipeline, these are for every command of it
         "cwd" => {
             a.count(1, 1)?;
-            command.borrow_mut().cwd = Some(a.str(0)?.to_string());
+            let cwd = a.str(0)?.to_string();
+            command.borrow_mut().each_mut(|stage| stage.cwd = Some(cwd.clone()));
             receiver.clone()
         }
         "env" => {
             a.count(2, 2)?;
             let (name, value) = (a.str(0)?.to_string(), a.str(1)?.to_string());
-            command.borrow_mut().env.push((name, value));
+            command.borrow_mut().each_mut(|stage| stage.env.push((name.clone(), value.clone())));
             receiver.clone()
         }
         "envs" => {
@@ -1641,8 +1643,29 @@ fn command_method(
                 let Value::Str(v) = v else {
                     return a.fail_as(TYPE_ERROR, "`.envs()` needs a map of strings to strings");
                 };
-                command.borrow_mut().env.push((k.to_value().to_string(), v.to_string()));
+                command.borrow_mut().each_mut(|stage| stage.env.push((k.to_value().to_string(), v.to_string())));
             }
+            receiver.clone()
+        }
+        "pipe" => {
+            a.count(1, 1)?;
+            let Value::Command(other) = a.value(0) else {
+                return a.fail_as(TYPE_ERROR, "`.pipe()` takes another command *(i.e. `.pipe(%x\"sort\")`)*");
+            };
+            let piped = command.borrow().piped_to(&other.borrow());
+            Value::Command(Rc::new(RefCell::new(piped)))
+        }
+        // The input of the first command, and the output of the last
+        "readFrom" => {
+            a.count(1, 1)?;
+            command.borrow_mut().read_from = Some(a.str(0)?.to_string());
+            receiver.clone()
+        }
+        "writeTo" | "appendTo" => {
+            a.count(1, 1)?;
+            let file = a.str(0)?.to_string();
+            let append = a.method == "appendTo";
+            command.borrow_mut().last_mut().write_to = Some((file, append));
             receiver.clone()
         }
         "input" => {
@@ -1652,7 +1675,7 @@ fn command_method(
         }
         "quiet" => {
             a.count(0, 0)?;
-            command.borrow_mut().quiet = true;
+            command.borrow_mut().each_mut(|stage| stage.quiet = true);
             receiver.clone()
         }
         "timeout" => {

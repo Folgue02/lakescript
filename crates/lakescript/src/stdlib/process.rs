@@ -61,6 +61,11 @@ pub fn register(m: &mut Exports) {
         let a = Args::new("process::which", values, 1, 1)?;
         Ok(which(&a.str(0)?, ctx.state.env_get("PATH")).map(|p| Value::string(&p.display().to_string())).unwrap_or(Value::Null))
     });
+    m.function("shell", |_, values| {
+        // The one way to use a shell: `sh -c` on Linux and macOS, `cmd /C` on Windows
+        let a = Args::new("process::shell", values, 1, 1)?;
+        Ok(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Shell(a.str(0)?.to_string()))))))
+    });
     m.function("command", |_, values| {
         let a = Args::new("process::command", values, 1, usize::MAX)?;
         let program = a.str(0)?;

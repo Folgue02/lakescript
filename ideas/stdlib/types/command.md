@@ -23,6 +23,10 @@ A program that can't be started *(i.e. it isn't installed)* throws a `CommandFai
 | `envs(map<string, string> $vars)` | `command` | Sets several environment variables only for this command |
 | `input(string $text)` | `command` | Sends `$text` to its stdin *(i.e. `%x"sort".input($names.join("\n")).output()`)* |
 | `quiet()` | `command` | Hides its stderr |
+| `pipe(command $next)` | `command` | A pipeline: its output goes to `$next`'s input *(i.e. `%x"git ls-files".pipe(%x"sort")`)*. It fails when any of its commands does |
+| `writeTo(string $path)` | `command` | Writes its output to a file instead of the terminal, like `>`. `output()` can't be used then |
+| `appendTo(string $path)` | `command` | Adds its output to the end of a file, like `>>` |
+| `readFrom(string $path)` | `command` | Reads its input from a file, like `<` |
 | `timeout(number $seconds)` | `command` | Stops it after `$seconds` and throws a `CommandFailed` |
 
 ## Information

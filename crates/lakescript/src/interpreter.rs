@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::bytecode::{ArgKind, Capture, Op, Proto, class_names, for_kind};
-use crate::command::{CommandKind, CommandValue, shell_quote};
+use crate::command::{CommandKind, CommandValue, split_command};
 use crate::compiler::Compiler;
 use crate::diagnostic::Diagnostic;
 use crate::engine::Outcome;
@@ -771,14 +771,15 @@ impl<'a> Interpreter<'a> {
                     self.stack.push(Value::string(&text));
                 }
                 Op::QuoteArgument => {
+                    // A value of `{...}` in a command: always whole arguments, never split
                     let v = self.pop();
-                    let quoted = command_argument(&v).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, span!()))?;
-                    self.stack.push(Value::string(&quoted));
+                    let args = command_arguments(&v).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, span!()))?;
+                    self.stack.push(Value::list(args.into_iter().map(|a| Value::string(&a)).collect()));
                 }
                 Op::Command(n) => {
                     let parts = self.stack.split_off(self.stack.len() - n as usize);
-                    let script: String = parts.iter().map(|p| p.to_string()).collect();
-                    self.stack.push(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Shell(script))))));
+                    let (program, args) = split_command(&parts).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span!()))?;
+                    self.stack.push(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Direct { program, args })))));
                 }
                 Op::Regex(r) => {
                     let (pattern, flags) = &proto.regexes[r as usize];
@@ -1935,13 +1936,17 @@ fn native_error(e: NativeError, span: Span) -> Flow {
 
 /// A value in `%x"..."`, quoted so it's always a single argument. A list
 /// becomes several arguments.
-fn command_argument(value: &Value) -> Result<String, String> {
+/// The arguments a value gives a command: one, or one per element of a list.
+fn command_arguments(value: &Value) -> Result<Vec<String>, String> {
     match value {
-        Value::Str(s) => Ok(shell_quote(s)),
-        Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Symbol(_) => Ok(shell_quote(&value.to_string())),
+        Value::Str(s) => Ok(vec![s.to_string()]),
+        Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Symbol(_) => Ok(vec![value.to_string()]),
         Value::List(items) => {
-            let parts: Result<Vec<String>, String> = items.borrow().iter().map(command_argument).collect();
-            Ok(parts?.join(" "))
+            let mut out = Vec::new();
+            for item in items.borrow().iter() {
+                out.extend(command_arguments(item)?);
+            }
+            Ok(out)
         }
         other => Err(format!("a {} can't be used in a command", other.type_name())),
     }

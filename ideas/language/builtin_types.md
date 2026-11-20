@@ -274,7 +274,7 @@ const $size = (try readFile($path)).map(($text) -> $text.length()).orNull();
 
 Type: `command`
 
-`%x"..."` creates a shell command, like Perl's backticks. It doesn't run when it's created: it runs when one of its methods is called, so it can be set up first.
+`%x"..."` creates a command, like Perl's backticks. It doesn't run when it's created: it runs when one of its methods is called, so it can be set up first. It runs the program directly, without a shell, so it behaves the same on Linux, macOS and Windows.
 
 ```
 const $branch = %x"git rev-parse --abbrev-ref HEAD".output();   // runs it and returns stdout
@@ -285,10 +285,10 @@ const $branch = %x"git rev-parse --abbrev-ref HEAD".output();   // runs it and r
     .env('PREFIX', '/usr/local')
     .run();
 
-const $count = %x"ls | wc -l".output().toNumber();    // pipes and redirects work
+const $count = %x"git ls-files".pipe(%x"wc -l").output().toNumber();   // pipes are a method
 ```
 
-- `{...}` interpolates like in `f""`, but every value is quoted as a single argument, so values can never run as shell code:
+- `{...}` interpolates like in `f""`, but every value is a whole argument, so values can never run as code:
 
 ```
 const $file = 'my notes; rm -rf ~.txt';
@@ -298,10 +298,12 @@ const $files = ['a.txt', 'b.txt'];
 %x"cp {$files} backup/".run();    // a list becomes several arguments
 ```
 
-- The rest of the text runs through the shell (`sh` on Linux and macOS), so `|`, `>`, `&&` and `*` work.
-- Decided, not built yet: commands won't use a shell, on any system. `lks` will split the text into the program and its arguments and run it directly, so a command behaves the same on Linux, macOS and Windows, and nothing in it can ever run as shell code.
-    - So `|`, `>`, `&&` and `*` won't work inside `%x"..."`. They come back as methods of `command` *(i.e. a `.pipe()` to send its output to another command, and a way to write its output to a file)*, and a script that needs a real shell runs it explicitly *(i.e. `sh::run('...')`)*. Their exact names are still to be decided.
-    - Until then, commands throw an error on Windows.
+- The text is split into the program and its arguments: spaces separate them, and `'...'` or `"..."` *(written `\"` inside `%x"..."`)* keep spaces in one *(i.e. `%x"git commit -m 'Fix the parser'"` has 4)*. A value next to text is part of the same argument *(i.e. `--file={$archive}`)*, and a list there is an error. Backslashes stay as they are, so Windows paths work *(i.e. `%x"dir C:\Users"`)*.
+- There's no shell, so `|`, `>`, `&&`, `$HOME` and `*` are plain text. They're methods instead:
+    - `.pipe(%x"sort")` sends the output to another command. Setup methods on a pipeline are for all its commands, `.input()` and `.readFrom()` for the first one, and `.writeTo()` and `.appendTo()` for the last one. Like `set -o pipefail`, it fails when any of its commands does.
+    - `.writeTo('log.txt')`, `.appendTo('log.txt')` and `.readFrom('names.txt')` are the redirects.
+    - `fs::glob('*.txt')` gives the files of a pattern, as a list of arguments *(i.e. `%x"rm {fs::glob('*.tmp')}"`)*, and `env::get('HOME')` a variable.
+    - When a shell is really needed, `process::shell('ls *.txt | wc -l')` runs one: `sh -c` on Linux and macOS, `cmd /C` on Windows. Its text is the shell's own, so it isn't portable.
 - A literal `{` or `}` is written twice, like in `f""` *(i.e. `%x"echo {{a,b}}"`)*.
 - Backslashes are passed to the shell as they are, like in regexes *(i.e. `%x"grep 'a\.b' notes.txt"`)*. Only `\"` is turned into `"`. A command can span several lines.
 - If the command fails (its exit code isn't 0), `run()` and `output()` throw a `CommandFailed`, like `set -e` in bash. With `try` you get a fallback: `(try %x"git describe".output()).orElse('dev')`. `status()` runs it without throwing.

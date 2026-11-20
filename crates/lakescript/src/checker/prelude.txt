@@ -155,6 +155,10 @@ command envs(map<string, string> $vars);
 command input(string $text);
 command quiet();
 command timeout(number $seconds);
+command pipe(command $next);
+command readFrom(string $path);
+command writeTo(string $path);
+command appendTo(string $path);
 string toString();
 
 type list<T>
@@ -340,6 +344,7 @@ symbol platform();
 void sleep(number $seconds);
 ?string which(string $name);
 command command(string $program, ...string $args);
+command shell(string $script);
 
 module std/json
 any parse(string $text);

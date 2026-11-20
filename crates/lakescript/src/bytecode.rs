@@ -103,9 +103,9 @@ pub enum Op {
     Map(u32),
     /// Joins the values into a string.
     Interpolate(u32),
-    /// Quotes the value on top for `sh`, for `%x"..."`.
+    /// Turns the value on top into the arguments it gives `%x"..."`: a list of strings.
     QuoteArgument,
-    /// Joins the parts into a command.
+    /// Splits the parts into a program and its arguments, for `%x"..."`.
     Command(u32),
     Regex(u32),
     /// Checks the value on top is a whole number, for the ends of a range.
