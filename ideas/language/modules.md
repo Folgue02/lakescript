@@ -42,6 +42,8 @@ use github_io/user/dependency/client;    // client.lks of the dependency
 
 - A dependency is only reachable through its ID: a module belongs to the dependency whose ID starts its path.
 - The project's own modules keep their short paths from `src/`. Only dependencies are written with their ID.
+- Versions follow [semver](https://semver.org): `MAJOR.MINOR.PATCH` *(i.e. `1.4.2`)*. A new major version may break code that uses the package, a minor one only adds, and a patch only fixes.
+    - A dependency asks for a range, written like Cargo's: `^1.4` is any `1.x.y` from `1.4.0` on, `~1.4` is any `1.4.y`, and `=1.4.2` is exactly that one.
 - `ferry` picks a single version of each package, so when two dependencies use the same package, they share it.
 - Every clash is found by `ferry` while resolving the dependencies, never by `lks` while the script runs:
     - Two dependencies that need versions of a package that don't work together. The error names both of them and both versions.

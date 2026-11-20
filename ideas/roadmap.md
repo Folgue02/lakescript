@@ -15,6 +15,14 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **7. OOP** | Classes | Classes, enums, custom exceptions as classes, `command` and `subcommand` for command-line arguments |
 | **Later** | | The rest of the standard library, the per-user bytecode cache, formatter, language server, concurrency |
 
+## Versions
+
+Lakescript's own versions follow [semver](https://semver.org), like its packages *(see [modules.md](language/modules.md#packages))*.
+
+- Each finished phase is a new minor version with a git tag: phase 1 is `v0.1.0`, phase 5 is `v0.5.0`. Fixes between phases are patch versions *(i.e. `v0.5.1`)*.
+- The version in `Cargo.toml` is the one of the last tag, so `lks --version` says which phase it is.
+- While it's `0.x`, any version can change the language. `1.0.0` comes once the language is stable, and from then on only a new major version can break scripts.
+
 ## Status
 
 - Phases 1 to 5 are done, except commands written with `%x"..."` on Windows.
