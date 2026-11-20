@@ -121,6 +121,9 @@ impl<'a> Checker<'a> {
         for name in host_functions {
             builtins.funcs.insert(name.clone(), FnTy::unknown());
         }
+        for (name, interface) in classes::operator_interfaces() {
+            builtins.types.insert(name, interface);
+        }
         let globals = std::mem::take(&mut state.globals);
         Checker {
             prelude,
@@ -1242,6 +1245,9 @@ impl<'a> Checker<'a> {
             ExprKind::Unary { op, operand } => {
                 let t = self.expr(operand, None)?;
                 let t = self.shallow(&t);
+                if let (Ty::Object(..), UnaryOp::Neg) = (&t, op) {
+                    return self.object_operator(&t, "INeg", "neg", "-", None, span);
+                }
                 let (want, ok) = match op {
                     UnaryOp::Not => ("a bool", matches!(t, Ty::Bool | Ty::Any | Ty::Var(_))),
                     _ => ("a number", matches!(t, Ty::Number | Ty::Any | Ty::Var(_))),
@@ -1584,7 +1590,7 @@ impl<'a> Checker<'a> {
                 };
                 return self.call(&chosen.ty, &receiver, args, method, span);
             }
-            if !matches!(method, "toString" | "typeName" | "equals") {
+            if !matches!(method, "toString" | "typeName" | "equals" | "same?") {
                 return self.fail(format!("`{}` has no method `.{method}()`", class.0.name), span);
             }
         }
@@ -1655,6 +1661,10 @@ impl<'a> Checker<'a> {
             }
             t = self.shallow(inner);
         }
+        if let Ty::Object(..) = &t {
+            let i = self.expr(index, None)?;
+            return self.object_operator(&t, "IIndex", "get", "[]", Some((&i, index.span)), target.span);
+        }
         let result = match &t {
             Ty::List(e) | Ty::Nullable(e) if matches!(t, Ty::List(_)) => {
                 let i = self.expr(index, None)?;
@@ -1712,6 +1722,20 @@ impl<'a> Checker<'a> {
         let expected = if matches!(op, Coalesce) { Some(self.non_null(&l)) } else { None };
         let r = self.expr(right, expected.as_ref())?;
         let (ls, rs) = (self.shallow(&l), self.shallow(&r));
+        // Objects get their operators from interfaces *(i.e. `IAdd`)*
+        if matches!(op, Eq | NotEq) && (matches!(ls, Ty::Object(..)) || matches!(rs, Ty::Object(..))) {
+            return Ok(Ty::Bool);
+        }
+        if let (Ty::Object(..), Some((interface, method))) = (&ls, crate::operators::for_binary(op)) {
+            if !matches!(op, In | NotIn) {
+                let result = self.object_operator(&ls, interface, method, op.symbol(), Some((&r, right.span)), span)?;
+                return Ok(if interface == "IOrdered" { Ty::Bool } else { result });
+            }
+        }
+        if let (Ty::Object(..), In | NotIn) = (&rs, op) {
+            self.object_operator(&rs, "IContains", "contains", "-in", Some((&l, left.span)), span)?;
+            return Ok(Ty::Bool);
+        }
         let unknown = |t: &Ty| matches!(t, Ty::Any | Ty::Var(_) | Ty::Param(_));
         let both = |c: &mut Self, t: &Ty| c.assignable(&l, t) && c.assignable(&r, t);
         Ok(match op {

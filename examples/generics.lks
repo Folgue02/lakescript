@@ -34,10 +34,8 @@ const $pair = Pair('port', 8080).swapped();
 outln(f"{$pair.first + 1} {$pair.second.upper()}");
 
 // A class can implement the same interface with different types. The type
-// of the argument picks the method that runs
-interface IMul<R, O> {
-    O mul(R $by);
-}
+// of the argument picks the method that runs. `IMul<R, O>` is the built-in
+// interface behind `*` *(see operators.lks)*: `R` is the right side, `O` the result
 
 class Vector {
     pub number @x;

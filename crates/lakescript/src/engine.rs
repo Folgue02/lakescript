@@ -172,7 +172,12 @@ impl Engine {
         if self.builtins_ready {
             self.host_functions.push(name.to_string());
         }
-        let function = Rc::new(Function::Native(NativeFunction { name: name.to_string(), params: Vec::new(), func: Box::new(func) }));
+        let function = Value::Function(Rc::new(Function::Native(NativeFunction { name: name.to_string(), params: Vec::new(), func: Box::new(func) })));
+        self.add_builtin(name, function);
+    }
+
+    /// A value every script can use without `use`.
+    fn add_builtin(&mut self, name: &str, function: Value) {
         // Replacing a built-in on purpose is allowed, so the host can override `outln`
         match self.host.builtin_names.get(name) {
             Some(&i) => self.host.builtins[i as usize] = function,
@@ -282,6 +287,23 @@ impl Engine {
             ctx.exit = Some(code);
             Ok(Value::Null)
         });
+        for (name, method, _) in crate::operators::INTERFACES {
+            let class = crate::value::Class {
+                name: Rc::from(*name),
+                interface: true,
+                is_enum: false,
+                values: std::cell::RefCell::new(Vec::new()),
+                parent: None,
+                interfaces: Vec::new(),
+                required: vec![Rc::from(*method)],
+                fields: Vec::new(),
+                methods: HashMap::new(),
+                statics: std::cell::RefCell::new(indexmap::IndexMap::new()),
+                constructor: None,
+                init: None,
+            };
+            self.add_builtin(name, Value::Class(Rc::new(class)));
+        }
         for (name, _) in crate::exceptions::TREE {
             self.register(name, move |_, args| match args.as_slice() {
                 [] => Ok(Value::Exception(crate::exceptions::new(name, "", Default::default()))),

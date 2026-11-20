@@ -450,20 +450,33 @@ impl<'a> Interpreter<'a> {
                     (Value::Float(a), Value::Float(b)) => $float(*a, *b),
                     _ => None,
                 };
-                *l = match fast {
-                    Some(v) => v,
-                    None => arithmetic($op, l, &r).map_err(|m| op_error(m, span!()))?,
-                };
+                match fast {
+                    Some(v) => *l = v,
+                    None if matches!(&*l, Value::Object(_)) => {
+                        // An object gives the operator through its interface *(i.e. `IAdd`)*
+                        let left = l.clone();
+                        self.frames[fi].ip = ip;
+                        let v = self.operator($op, left, r, span!())?;
+                        *self.top() = v;
+                    }
+                    None => *l = arithmetic($op, l, &r).map_err(|m| op_error(m, span!()))?,
+                }
             }};
         }
         macro_rules! compare_op {
             ($op:expr, $cmp:tt) => {{
                 let r = self.pop();
                 let l = self.top();
-                *l = match (&*l, &r) {
-                    (Value::Int(a), Value::Int(b)) => Value::Bool(a $cmp b),
-                    _ => compare($op, l, &r).map_err(|m| op_error(m, span!()))?,
-                };
+                match (&*l, &r) {
+                    (Value::Int(a), Value::Int(b)) => *l = Value::Bool(a $cmp b),
+                    (Value::Object(_), _) => {
+                        let left = l.clone();
+                        self.frames[fi].ip = ip;
+                        let v = self.operator($op, left, r, span!())?;
+                        *self.top() = v;
+                    }
+                    _ => *l = compare($op, l, &r).map_err(|m| op_error(m, span!()))?,
+                }
             }};
         }
 
@@ -560,8 +573,8 @@ impl<'a> Interpreter<'a> {
                     global.constant = constant;
                 }
                 Op::LoadBuiltin(b) => {
-                    let f = self.host.builtins[b as usize].clone();
-                    self.stack.push(Value::Function(f));
+                    let v = self.host.builtins[b as usize].clone();
+                    self.stack.push(v);
                 }
                 Op::SaveSp(s) => {
                     let height = self.stack.len() as i64;
@@ -583,15 +596,19 @@ impl<'a> Interpreter<'a> {
                     |a: i64, b: i64| if b == 0 { None } else { Some(Value::Int(a.wrapping_rem(b))) },
                     |a: f64, b: f64| if b == 0.0 { None } else { Some(Value::Float(a % b)) }
                 ),
-                Op::Eq => {
+                Op::Eq | Op::NotEq => {
                     let r = self.pop();
-                    let l = self.top();
-                    *l = Value::Bool(l.same(&r));
-                }
-                Op::NotEq => {
-                    let r = self.pop();
-                    let l = self.top();
-                    *l = Value::Bool(!l.same(&r));
+                    let l = self.pop();
+                    let mut equal = if let (Value::Object(_), Value::Object(_)) = (&l, &r) {
+                        self.frames[fi].ip = ip;
+                        self.objects_equal(l, r, span!())?
+                    } else {
+                        l.same(&r)
+                    };
+                    if op == Op::NotEq {
+                        equal = !equal;
+                    }
+                    self.stack.push(Value::Bool(equal));
                 }
                 Op::Lt => compare_op!(BinaryOp::Lt, <),
                 Op::Gt => compare_op!(BinaryOp::Gt, >),
@@ -600,12 +617,23 @@ impl<'a> Interpreter<'a> {
                 Op::Binary(op) => {
                     let r = self.pop();
                     let l = self.pop();
-                    let v = binary(op, l, r).map_err(|m| op_error(m, span!()))?;
+                    let object = matches!(&l, Value::Object(_)) || matches!((&r, op), (Value::Object(_), BinaryOp::In | BinaryOp::NotIn));
+                    let v = if object {
+                        self.frames[fi].ip = ip;
+                        self.operator(op, l, r, span!())?
+                    } else {
+                        binary(op, l, r).map_err(|m| op_error(m, span!()))?
+                    };
                     self.stack.push(v);
                 }
                 Op::Unary(op) => {
                     let v = self.pop();
-                    let v = unary(op, v, span!())?;
+                    let v = if let (Value::Object(_), UnaryOp::Neg) = (&v, op) {
+                        self.frames[fi].ip = ip;
+                        self.call_operator_method(&v, "neg", "INeg", "-", Vec::new(), span!())?
+                    } else {
+                        unary(op, v, span!())?
+                    };
                     self.stack.push(v);
                 }
                 Op::Pattern(op) => {
@@ -653,8 +681,17 @@ impl<'a> Interpreter<'a> {
                         (Value::Int(a), Value::Int(b), BinaryOp::Gt) => a > b,
                         (Value::Int(a), Value::Int(b), BinaryOp::LtEq) => a <= b,
                         (Value::Int(a), Value::Int(b), BinaryOp::GtEq) => a >= b,
+                        (Value::Object(_), Value::Object(_), BinaryOp::Eq | BinaryOp::NotEq) => {
+                            self.frames[fi].ip = ip;
+                            let equal = self.objects_equal(l, r, span!())?;
+                            if op == BinaryOp::Eq { equal } else { !equal }
+                        }
                         (_, _, BinaryOp::Eq) => l.same(&r),
                         (_, _, BinaryOp::NotEq) => !l.same(&r),
+                        (Value::Object(_), _, _) => {
+                            self.frames[fi].ip = ip;
+                            matches!(self.operator(op, l, r, span!())?, Value::Bool(true))
+                        }
                         _ => matches!(compare(op, &l, &r).map_err(|m| op_error(m, span!()))?, Value::Bool(true)),
                     };
                     if !holds {
@@ -755,7 +792,12 @@ impl<'a> Interpreter<'a> {
                 Op::Index => {
                     let index = self.pop();
                     let container = self.pop();
-                    let v = index_value(container, index, span!())?;
+                    let v = if let Value::Object(_) = &container {
+                        self.frames[fi].ip = ip;
+                        self.call_operator_method(&container, "get", "IIndex", "[]", vec![index], span!())?
+                    } else {
+                        index_value(container, index, span!())?
+                    };
                     self.stack.push(v);
                 }
                 Op::SliceFrom => {
@@ -1404,6 +1446,78 @@ impl Interpreter<'_> {
             }
         }
         Ok(())
+    }
+
+    /// An operator on an object, through the method of its interface *(i.e.
+    /// `$a + $b` is `$a.add($b)`, from `IAdd`)*.
+    fn operator(&mut self, op: BinaryOp, l: Value, r: Value, span: Span) -> Exec<Value> {
+        use BinaryOp::*;
+        let (method, interface) = match op {
+            Add => ("add", "IAdd"),
+            Sub => ("sub", "ISub"),
+            Mul => ("mul", "IMul"),
+            Div => ("div", "IDiv"),
+            Rem => ("mod", "IMod"),
+            Pow => ("pow", "IPow"),
+            Lt | Gt | LtEq | GtEq => {
+                let order = self.call_operator_method(&l, "compare", "IOrdered", op.symbol(), vec![r], span)?;
+                let Some(n) = order.as_f64() else {
+                    return error_as(exceptions::TYPE_ERROR, format!("`compare` must return a number, not a {}", order.type_label()), span);
+                };
+                return Ok(Value::Bool(match op {
+                    Lt => n < 0.0,
+                    Gt => n > 0.0,
+                    LtEq => n <= 0.0,
+                    _ => n >= 0.0,
+                }));
+            }
+            Eq | NotEq => {
+                let equal = self.objects_equal(l, r, span)?;
+                return Ok(Value::Bool(if op == Eq { equal } else { !equal }));
+            }
+            In | NotIn => {
+                let found = self.call_operator_method(&r, "contains", "IContains", "-in", vec![l], span)?;
+                let found = matches!(found, Value::Bool(true));
+                return Ok(Value::Bool(if op == In { found } else { !found }));
+            }
+            other => {
+                let message = format!("`{}` doesn't work on objects", other.symbol());
+                return error_as(exceptions::TYPE_ERROR, message, span);
+            }
+        };
+        self.call_operator_method(&l, method, interface, op.symbol(), vec![r], span)
+    }
+
+    /// Calls the method behind an operator, or says which interface gives it.
+    pub(crate) fn call_operator_method(&mut self, object: &Value, method: &str, interface: &str, symbol: &str, mut args: Vec<Value>, span: Span) -> Exec<Value> {
+        let Value::Object(o) = object else {
+            return error_as(exceptions::TYPE_ERROR, format!("`{symbol}` needs an object here, not a {}", object.type_label()), span);
+        };
+        let implements = self.host.builtin_interface(interface).is_some_and(|i| o.class.is_a(&i));
+        let found = o.class.methods.get(method).cloned().filter(|_| implements);
+        let Some(function) = found else {
+            let message = format!("`{}` has no `{symbol}`: implement `{interface}` to give it one", o.class.name);
+            return error_as(exceptions::TYPE_ERROR, message, span);
+        };
+        args.insert(0, object.clone());
+        self.call(&function, args, Vec::new(), span)
+    }
+
+    /// `==` on two objects: `equals?` when their class implements `IEquals`,
+    /// and otherwise, whether they're the same object. Objects of unrelated
+    /// classes are never equal.
+    fn objects_equal(&mut self, l: Value, r: Value, span: Span) -> Exec<bool> {
+        let (Value::Object(a), Value::Object(b)) = (&l, &r) else { return Ok(l.same(&r)) };
+        if Rc::ptr_eq(a, b) {
+            return Ok(true);
+        }
+        let related = a.class.is_a(&b.class) || b.class.is_a(&a.class);
+        let equals = self.host.builtin_interface("IEquals").is_some_and(|i| a.class.is_a(&i));
+        if !related || !equals {
+            return Ok(false);
+        }
+        let v = self.call_operator_method(&l, "equals?", "IEquals", "==", vec![r], span)?;
+        Ok(matches!(v, Value::Bool(true)))
     }
 
     /// `@super(...)`: the superclass's constructor, on the same object.

@@ -11,10 +11,10 @@ interface IShape {
     string describe() = f"a {@name()} of {@area().round(2)}";
 }
 
-// `Self` is the class that implements it: a `Circle` compares with a `Circle`
-interface IEquals {
-    bool equals?(Self $other);
-    bool notEquals?(Self $other) = !@equals?($other);
+// `Self` is the class that implements it: here, a `Circle` is compared with a `Circle`
+interface ICompare {
+    bool sameSize?(Self $other);
+    bool differentSize?(Self $other) = !@sameSize?($other);
 }
 
 // An interface can extend others, and implementing it implements those too
@@ -30,8 +30,8 @@ class Circle {
         string name() = 'circle';
     }
 
-    implement IEquals {
-        bool equals?(Self $other) = $other.radius == @radius;
+    implement ICompare {
+        bool sameSize?(Self $other) = $other.radius == @radius;
     }
 }
 
@@ -54,7 +54,7 @@ outln(f"Total area: {$shapes.map(($s) -> $s.area()).sum().round(2)}");
 
 // `.is()` knows the interfaces
 const $square = Square(2);
-outln([$square.is(ISolid), $square.is(IShape), $square.is(IEquals)]);
+outln([$square.is(ISolid), $square.is(IShape), $square.is(ICompare)]);
 outln($square.volume(10));
 
-outln([Circle(1).equals?(Circle(1)), Circle(1).notEquals?(Circle(2))]);
+outln([Circle(1).sameSize?(Circle(1)), Circle(1).differentSize?(Circle(2))]);

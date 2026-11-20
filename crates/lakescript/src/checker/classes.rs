@@ -493,6 +493,40 @@ impl Checker<'_> {
         Ok(all[0].clone())
     }
 
+    /// The type an operator gives on an object, from the interface behind it
+    /// *(i.e. `IAdd<R, O>` gives `O` for a right side of type `R`)*.
+    pub(super) fn object_operator(&mut self, object: &Ty, interface: &str, method: &str, symbol: &str, right: Option<(&Ty, Span)>, span: Span) -> Check<Ty> {
+        let Ty::Object(class, args) = object else { unreachable!("only for objects") };
+        let Some(Ty::Object(iface, _)) = self.scopes[0].types.get(interface).cloned() else { unreachable!("built in") };
+        let versions = class.ancestor_args(args, &iface);
+        if versions.is_empty() {
+            return self.fail(format!("`{}` has no `{symbol}`: implement `{interface}` to give it one", class.0.name), span);
+        }
+        let sig = iface.0.body.borrow().methods[method].ty.clone();
+        let right = right.map(|(t, s)| (self.resolve(t), s));
+        let mut accepted = Vec::new();
+        for version in &versions {
+            let mut map = iface.map(version);
+            map.insert(Rc::from("Self"), object.clone());
+            let params: Vec<Ty> = sig.params.iter().map(|p| p.substitute(&map)).collect();
+            let fits = match (&right, params.first()) {
+                (None, _) | (_, None) => true,
+                (Some((r, _)), Some(p)) => match (r, p) {
+                    (Ty::Any | Ty::Var(_), _) | (_, Ty::Any) => true,
+                    (Ty::Object(a, _), Ty::Object(b, _)) => a.is_a(b),
+                    (r, p) => r == p || matches!(p, Ty::Nullable(inner) if **inner == *r),
+                },
+            };
+            if fits {
+                return Ok(sig.ret.substitute(&map));
+            }
+            accepted.extend(params.first().cloned());
+        }
+        let (r, at) = right.unwrap();
+        let names: Vec<String> = accepted.iter().map(|t| a(t)).collect();
+        self.fail(format!("`{symbol}` on {} takes {}, not {}", a(object), names.join(" or "), a(&r)), at)
+    }
+
     /// The class a name means here: `Self` is the class being checked.
     pub(super) fn class_named(&self, name: &str) -> Option<ClassRef> {
         if name == "Self" {
@@ -588,4 +622,30 @@ fn calls_super(body: &FunctionBody) -> bool {
         FunctionBody::Expr(e) => has(e.to_string()),
         FunctionBody::Block(stmts) => stmts.iter().any(|s| has(s.to_string())),
     }
+}
+
+/// The interfaces behind the operators, as the checker sees them *(see `operators.rs`)*.
+pub(super) fn operator_interfaces() -> Vec<(String, Ty)> {
+    let mut out = Vec::new();
+    for (name, method, spec) in crate::operators::INTERFACES {
+        let ty = |word: &str| match word {
+            "bool" => Ty::Bool,
+            "number" => Ty::Number,
+            other => Ty::Param(Rc::from(other)),
+        };
+        let generics: Vec<Rc<str>> = spec.generics.iter().map(|g| Rc::from(*g)).collect();
+        let sig = FnTy {
+            params: spec.params.iter().map(|(_, t)| ty(t)).collect(),
+            names: spec.params.iter().map(|(n, _)| n.to_string()).collect(),
+            required: spec.params.len(),
+            variadic: false,
+            ret: ty(spec.ret),
+            generics: Vec::new(),
+        };
+        let mut body = ClassBody::default();
+        body.methods.insert(method.to_string(), MemberSig { ty: Rc::new(sig), public: true, has_body: false });
+        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(*name), interface: true, is_enum: false, generics, body: RefCell::new(body) }));
+        out.push((name.to_string(), Ty::Object(class, Vec::new())));
+    }
+    out
 }

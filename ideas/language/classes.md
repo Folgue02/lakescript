@@ -182,13 +182,29 @@ An object prints as its class and its fields, in the order of the constructor th
 
 ## Equality and operators
 
-- `==` on two objects calls `equals?` when their class implements `IEquals`. Otherwise it's true only for the same object.
-- `$a.same?($b)` is always true only for the same object.
+- `==` on two objects calls `equals?` when their class implements `IEquals`. Otherwise it's true only for the same object. Objects of classes that aren't related *(neither is the other's superclass)* are never equal, without calling `equals?`.
+- `$a.same?($b)` is always true only for the same object. Every value has it.
 - The other operators work the same way: on objects, each one calls the method of an interface the class implements. Numbers, strings, lists and maps keep working as they do now, without calling anything.
-    - Each operator has its own interface, so a class only gets the ones that make sense for it *(i.e. a `Path` with `/` but no `+`)*: `IAdd` (`+`), `ISub` (`-`), `IMul` (`*`), `IDiv` (`/`), `IMod` (`%`), `IPow` (`**`), `INeg` (`-$x`), `IIndex` (`$x[...]`) and `IContains` (`in`).
-    - `IOrdered` has a single `number compare(Self $other)`, which gives `<`, `<=`, `>` and `>=`, and is what `sort()` uses. `!=` comes from `IEquals`.
-    - `&&`, `||` and `??` stay built-in, since they skip their right side, and so do `=`, `.`, `..`, `.is()` and `.as()`.
-    - The type of `$a + $b` is the return type of the method, so the checker still knows it.
+- These interfaces are built in, so they're used without `use`. Each operator has its own, so a class only gets the ones that make sense for it *(i.e. a `Path` with `/` but no `+`)*:
+
+| Interface | Method | Gives |
+|---|---|---|
+| `IEquals` | `bool equals?(Self $other)` | `==` and `!=` |
+| `IOrdered` | `number compare(Self $other)`: negative, zero or positive | `<`, `<=`, `>`, `>=`, and `.sort()` |
+| `IAdd<R, O>` | `O add(R $other)` | `+` |
+| `ISub<R, O>` | `O sub(R $other)` | `-` |
+| `IMul<R, O>` | `O mul(R $other)` | `*` |
+| `IDiv<R, O>` | `O div(R $other)` | `/` |
+| `IMod<R, O>` | `O mod(R $other)` | `%` |
+| `IPow<R, O>` | `O pow(R $other)` | `**` |
+| `INeg<O>` | `O neg()` | `-$x` |
+| `IIndex<K, V>` | `V get(K $key)` | `$x[...]` |
+| `IContains<T>` | `bool contains(T $value)` | `-in` and `-notin` |
+
+- `R` is the type of the right side and `O` the type of the result, so `$vector * 2` and a dot product `$vector * $other` can both exist. The checker knows the type of `$a + $b` from the method.
+- The object goes on the left side: `$v * 2` works, `2 * $v` doesn't. For `-in`, the object is on the right *(i.e. `'x' -in $bag`)*.
+- `-` followed by a letter is a test operator *(i.e. `-f $path`)*, so the negative of an object is written `- Vector(1, 2)` or `-$v`.
+- `&&`, `||` and `??` stay built-in, since they skip their right side, and so do `=`, `.`, `..`, `.is()` and `.as()`. Setting an index *(i.e. `$x[0] = 1`)* doesn't work on objects yet.
 - Interfaces can be generic, with the same `<T>` as functions, and a class can implement the same interface several times with different types. The types of the arguments pick which method runs: the checker picks it before the script runs, and when it runs, the first version whose parameters' types match the arguments runs. With an operator, that's the type of the right side:
 
 ```
@@ -196,20 +212,18 @@ class Vector {
     pub const number @x;
     pub const number @y;
 
-    pub new(@x, @y) {}
-
-    implement IMul<number> {
+    implement IMul<number, Vector> {
         Vector mul(number $n) = Vector(@x * $n, @y * $n);
     }
 
-    implement IMul<Vector> {
+    implement IMul<Vector, number> {
         number mul(Vector $other) = @x * $other.x + @y * $other.y;
     }
 }
 
 const $v = Vector(1, 2);
 outln(($v * 3).x);                 // 3
-outln($v * Vector(3, 4));     // 11
+outln($v * Vector(3, 4));          // 11
 ```
 - A `Self` parameter called through a value whose type is the interface accepts any value of that interface. The method checks when it runs that it got its own class, and throws a `TypeError` if not.
 
@@ -246,7 +260,7 @@ Built in steps, each with tests and examples:
 2. Done: interfaces. `implement` blocks, default methods, interfaces that extend others, `Self`, the `TypeError` for a `Self` parameter of another class, `.is()` and `.as()` with interfaces, and the checker's errors for missing or wrong methods. See `examples/interfaces.lks`.
 3. Done: enums. Values with fields through the constructor, methods, `implement` blocks, `name()`, `values()`, `from()`, `fromIgnoreCase()`, and the checker's error for a `switch` used as a value that misses a value. See `examples/enums.lks`.
 4. Done: generic classes and interfaces. `Stack<string>()`, types found out from the constructor's arguments, superclasses and interfaces with types *(i.e. `extends Stack<number>`)*, and a class that implements the same interface with different types. See `examples/generics.lks`.
-5. Operators through interfaces, and `==` with `IEquals`.
+5. Done: operators. The built-in interfaces behind them, `==` with `IEquals`, `.sort()` with `IOrdered`, and `same?()`. See `examples/operators.lks`.
 6. Exceptions as classes.
 7. Importing a type from its own file, and circular imports.
 8. `command` and `subcommand`.

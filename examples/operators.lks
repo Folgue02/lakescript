@@ -1,0 +1,61 @@
+#!/usr/bin/lks
+// Operators on objects: a class gets each operator by implementing the
+// built-in interface behind it. They can be used without `use`.
+//
+//   lks examples/operators.lks
+
+// `IAdd<R, O>`: `+` with a right side of type `R`, which gives an `O`.
+// `IMul` is implemented twice: the type of the right side picks one
+class Money {
+    pub number @cents;
+    pub string @currency = 'EUR';
+
+    implement IAdd<Money, Money> {
+        Money add(Money $other) = Money(@cents + $other.cents, @currency);
+    }
+
+    implement IMul<number, Money> {
+        Money mul(number $times) = Money((@cents * $times).round(), @currency);
+    }
+
+    implement IMul<Money, number> {
+        number mul(Money $other) = @cents * $other.cents;
+    }
+
+    // `==` and `!=` use `equals?`. Without `IEquals`, an object is only equal to itself
+    implement IEquals {
+        bool equals?(Self $other) = @cents == $other.cents && @currency == $other.currency;
+    }
+
+    // `<`, `<=`, `>` and `>=` use `compare`, and so does `.sort()`
+    implement IOrdered {
+        number compare(Self $other) = @cents - $other.cents;
+    }
+
+    pub string show() = f"{(@cents / 100).round(2)} {@currency}";
+}
+
+const $price = Money(1250);
+const $total = $price + Money(399);
+outln($total.show());
+outln(($price * 3).show());
+outln([$price == Money(1250), $price != Money(1250), $price.same?(Money(1250))]);
+outln([$price < $total, $total >= Money(5000)]);
+outln([Money(500), Money(100), Money(300)].sorted().map(($m) -> $m.show()));
+
+// `[]` and `-in` come from `IIndex<K, V>` and `IContains<T>`, and `-$x` from `INeg<O>`
+class Playlist {
+    list<string> @songs;
+
+    implement IIndex<number, string> {
+        string get(number $position) = @songs[$position - 1];
+    }
+
+    implement IContains<string> {
+        bool contains(string $song) = @songs.contains($song);
+    }
+}
+
+const $playlist = Playlist(['intro', 'theme', 'outro']);
+outln($playlist[1]);
+outln(['theme' -in $playlist, 'bonus' -notin $playlist]);

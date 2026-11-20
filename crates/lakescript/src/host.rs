@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::modules::Loader;
-use crate::value::{Function, RegexValue};
+use crate::value::{RegexValue, Value};
 
 pub struct Host {
     pub output: Box<dyn Write>,
@@ -25,7 +25,7 @@ pub struct Host {
     pub state: ScriptState,
     pub loader: Loader,
     /// The built-in functions and the ones the host registered, by number, and their numbers by name.
-    pub builtins: Vec<Rc<Function>>,
+    pub builtins: Vec<Value>,
     pub builtin_names: HashMap<String, u32>,
     /// The state of the random number generator, for `random()` and `shuffle()`.
     pub rng: u64,
@@ -119,5 +119,15 @@ impl ScriptState {
 impl Default for ScriptState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Host {
+    /// One of the interfaces behind the operators *(i.e. `IAdd`)*.
+    pub fn builtin_interface(&self, name: &str) -> Option<Rc<crate::value::Class>> {
+        match self.builtins.get(*self.builtin_names.get(name)? as usize)? {
+            Value::Class(c) if c.interface => Some(c.clone()),
+            _ => None,
+        }
     }
 }

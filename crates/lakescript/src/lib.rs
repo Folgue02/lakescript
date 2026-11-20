@@ -19,6 +19,7 @@ mod interpreter;
 pub mod lexer;
 mod methods;
 mod modules;
+mod operators;
 pub mod parser;
 mod patterns;
 mod stack;

@@ -29,6 +29,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
 | [enums.lks](enums.lks) | Enums: values with fields, methods, a `switch` over every value, `values()`, `from()` and `fromIgnoreCase()` |
 | [generics.lks](generics.lks) | Generic classes, `Stack<string>()`, and an interface implemented with several types |
+| [operators.lks](operators.lks) | Operators on objects through `IAdd`, `IMul`, `IEquals`, `IOrdered`, `IIndex` and `IContains`, and sorting objects |
 
 ## Scripts that use the system
 

@@ -3,6 +3,7 @@
 type any
 string typeName();
 bool equals(any $other);
+bool same?(any $other);
 string toString();
 
 type string

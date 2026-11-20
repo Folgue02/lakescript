@@ -125,6 +125,10 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
             args.count(1, 1)?;
             return Ok(Value::Bool(receiver.equals(&args.value(0))));
         }
+        "same?" => {
+            args.count(1, 1)?;
+            return Ok(Value::Bool(receiver.same(&args.value(0))));
+        }
         "typeName" => {
             args.count(0, 0)?;
             if let Value::Exception(e) = &receiver {
@@ -179,7 +183,7 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
     };
     match result {
         Some(value) => Ok(value),
-        None => error_as(TYPE_ERROR, format!("a {} has no method `.{method}()`", receiver.type_name()), span),
+        None => error_as(TYPE_ERROR, format!("{} has no method `.{method}()`", describe_type(&receiver)), span),
     }
 }
 
@@ -249,9 +253,6 @@ fn sort_by_keys(items: &mut Vec<Value>, keys: Vec<Value>, span: Span) -> Exec<()
 /// sorts can panic when the order isn't consistent, and can't stop at the
 /// first error, so this one is written by hand.
 fn sort_with(interp: &mut Interpreter, items: Vec<Value>, f: &Rc<Function>, span: Span) -> Exec<Vec<Value>> {
-    if items.len() <= 1 {
-        return Ok(items);
-    }
     let compare = |a: &Value, b: &Value, interp: &mut Interpreter| -> Exec<bool> {
         // `true` if `b` must go before `a`
         match call_fn(interp, f, vec![a.clone(), b.clone()], span)? {
@@ -263,6 +264,36 @@ fn sort_with(interp: &mut Interpreter, items: Vec<Value>, f: &Rc<Function>, span
             ),
         }
     };
+    merge_sort(interp, items, compare)
+}
+
+/// Objects sorted with their `compare` method, from `IOrdered`, by keys.
+fn sort_objects(interp: &mut Interpreter, items: Vec<Value>, keys: Vec<Value>, span: Span) -> Exec<Vec<Value>> {
+    let pairs: Vec<Value> = keys.into_iter().zip(items).map(|(k, v)| Value::list(vec![k, v])).collect();
+    let compare = |a: &Value, b: &Value, interp: &mut Interpreter| -> Exec<bool> {
+        let (Value::List(a), Value::List(b)) = (a, b) else { unreachable!() };
+        let (ka, kb) = (a.borrow()[0].clone(), b.borrow()[0].clone());
+        if !matches!(ka, Value::Object(_)) {
+            return error(order(&ka, &kb).err().unwrap_or_else(|| "can't order objects with other values".into()), span);
+        }
+        let v = interp.call_operator_method(&ka, "compare", "IOrdered", "sort", vec![kb], span)?;
+        match v.as_f64() {
+            Some(n) => Ok(n > 0.0),
+            None => error(format!("`compare` must return a number, not a {}", v.type_label()), span),
+        }
+    };
+    let sorted = merge_sort(interp, pairs, compare)?;
+    Ok(sorted.into_iter().map(|p| match p {
+        Value::List(p) => p.borrow()[1].clone(),
+        _ => unreachable!(),
+    }).collect())
+}
+
+/// A stable merge sort. `compare` says whether `b` must go before `a`.
+fn merge_sort(interp: &mut Interpreter, items: Vec<Value>, compare: impl Fn(&Value, &Value, &mut Interpreter) -> Exec<bool>) -> Exec<Vec<Value>> {
+    if items.len() <= 1 {
+        return Ok(items);
+    }
     let mut src = items;
     let mut dst: Vec<Value> = Vec::with_capacity(src.len());
     let n = src.len();
@@ -1059,7 +1090,11 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
             } else {
                 values.clone()
             };
-            sort_by_keys(&mut values, keys, span)?;
+            if keys.iter().any(|k| matches!(k, Value::Object(_))) {
+                values = sort_objects(interp, values, keys, span)?;
+            } else {
+                sort_by_keys(&mut values, keys, span)?;
+            }
             if method.starts_with("sorted") {
                 Value::list(values)
             } else {
@@ -1750,4 +1785,12 @@ fn range_method(interp: &mut Interpreter, range: Range, a: &Args) -> Exec<Option
         }
         _ => return Ok(None),
     }))
+}
+
+/// "a string", or the class of an object *(i.e. "`Point`")*.
+fn describe_type(value: &Value) -> String {
+    match value {
+        Value::Object(o) => format!("`{}`", o.class.name),
+        other => format!("a {}", other.type_name()),
+    }
 }

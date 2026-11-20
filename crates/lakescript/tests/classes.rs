@@ -224,14 +224,14 @@ interface INamed {
 interface IPet extends INamed {
     string sound();
 }
-interface IEquals {
-    bool equals?(Self $other);
-    bool notEquals?(Self $other) = !@equals?($other);
+interface IMatch {
+    bool matches?(Self $other);
+    bool differs?(Self $other) = !@matches?($other);
 }
 class Dog {
     pub string @called;
-    implement IEquals {
-        bool equals?(Self $other) = $other.called == @called;
+    implement IMatch {
+        bool matches?(Self $other) = $other.called == @called;
     }
     implement IPet {
         string name() = @called;
@@ -239,8 +239,8 @@ class Dog {
     }
 }
 class Robot {
-    implement IEquals {
-        bool equals?(Self $other) = true;
+    implement IMatch {
+        bool matches?(Self $other) = true;
     }
     implement INamed {
         string name() = 'robot';
@@ -254,11 +254,11 @@ fn interfaces_give_methods_and_defaults() {
     let script = format!(
         "{SHAPES}
         const $rex = Dog('rex');
-        outln([$rex.equals?(Dog('rex')), $rex.notEquals?(Dog('max'))]);
+        outln([$rex.matches?(Dog('rex')), $rex.differs?(Dog('max'))]);
         outln([$rex.greeting(), Robot().greeting()]);
         const list<INamed> $all = [$rex, Robot()];
         outln($all.map(($n) -> $n.name()));
-        outln([$rex.is(IPet), $rex.is(INamed), $rex.is(IEquals), Robot().is(IPet), Robot().is(INamed)]);"
+        outln([$rex.is(IPet), $rex.is(INamed), $rex.is(IMatch), Robot().is(IPet), Robot().is(INamed)]);"
     );
     assert_eq!(run(&script), "[true, true]\n['Hello, rex', 'BEEP']\n['rex', 'robot']\n[true, true, true, false, true]\n");
 }
@@ -277,10 +277,10 @@ fn self_in_an_interface_is_the_class_that_implements_it() {
     // Through the interface, another class gets there, and the method says so
     let script = format!(
         "{SHAPES}
-        IEquals $e = Dog('rex');
-        try {{ $e.equals?(Robot()); }} catch (TypeError $x) {{ outln($x.message()); }}"
+        IMatch $e = Dog('rex');
+        try {{ $e.matches?(Robot()); }} catch (TypeError $x) {{ outln($x.message()); }}"
     );
-    assert_eq!(run(&script), "`Dog.equals?` needs a `Dog` for `$other`, not a Robot\n");
+    assert_eq!(run(&script), "`Dog.matches?` needs a `Dog` for `$other`, not a Robot\n");
 }
 
 #[test]
@@ -423,7 +423,6 @@ fn generic_classes_keep_their_types() {
 #[test]
 fn an_interface_can_be_implemented_with_several_types() {
     let script = "
-        interface IMul<R, O> { O mul(R $by); }
         class Vector {
             pub number @x;
             pub number @y;
@@ -451,4 +450,72 @@ fn the_checker_finds_mistakes_with_generics() {
     assert!(rejected("class Box<T> { pub T @v; }\nclass Ints extends Box<number> {}\nInts('x');").contains("must be a number"));
     assert!(rejected("interface IGet<T> { T get(); }\nclass C { implement IGet<number> { string get() = 'x'; } }").contains("must be `number get()`"));
     assert!(fails("class Box<T> { pub T @v; }\noutln(Box(1).is(Box<number>));").contains("Use `.is(Box)`"));
+}
+
+const VECTOR: &str = "
+class Vector {
+    pub number @x;
+    pub number @y;
+    implement IAdd<Vector, Vector> { Vector add(Vector $o) = Vector(@x + $o.x, @y + $o.y); }
+    implement IMul<number, Vector> { Vector mul(number $n) = Vector(@x * $n, @y * $n); }
+    implement IMul<Vector, number> { number mul(Vector $o) = @x * $o.x + @y * $o.y; }
+    implement INeg<Vector> { Vector neg() = Vector(-@x, -@y); }
+    implement IEquals { bool equals?(Self $other) = $other.x == @x && $other.y == @y; }
+}
+class Version {
+    pub number @major;
+    pub number @minor;
+    implement IOrdered {
+        number compare(Self $other) = @major != $other.major ? @major - $other.major : @minor - $other.minor;
+    }
+}
+class Bag {
+    list<string> @items;
+    implement IContains<string> { bool contains(string $v) = @items.contains($v); }
+    implement IIndex<number, string> { string get(number $i) = @items[$i]; }
+}
+";
+
+#[test]
+fn operators_on_objects_use_their_interfaces() {
+    let script = format!(
+        "{VECTOR}
+        const $a = Vector(1, 2);
+        outln([$a + Vector(10, 20), $a * 3, $a * Vector(3, 4) + 1]);
+        const $b = - $a;
+        outln($b);
+        outln([$a == Vector(1, 2), $a != Vector(1, 2), $a == Vector(0, 0), $a.same?(Vector(1, 2))]);
+        const $v = Version(1, 2);
+        outln([$v < Version(1, 3), $v >= Version(1, 2), $v > Version(2, 0)]);
+        outln([Version(2, 0), Version(1, 5), Version(1, 1)].sorted());
+        const $bag = Bag(['x', 'y']);
+        outln(['x' -in $bag, 'z' -in $bag, 'z' -notin $bag, $bag[1]]);"
+    );
+    assert_eq!(
+        run(&script),
+        "[Vector(x: 11, y: 22), Vector(x: 3, y: 6), 12]\nVector(x: -1, y: -2)\n[true, false, false, false]\n[true, true, false]\n[Version(major: 1, minor: 1), Version(major: 1, minor: 5), Version(major: 2, minor: 0)]\n[true, false, true, 'y']\n"
+    );
+}
+
+#[test]
+fn objects_without_iequals_are_equal_only_to_themselves() {
+    let script = "
+        class P { pub number @n; }
+        const $p = P(1);
+        outln([$p == P(1), $p == $p, $p != P(1)]);
+    ";
+    assert_eq!(run(script), "[false, true, true]\n");
+}
+
+#[test]
+fn the_checker_finds_mistakes_with_operators() {
+    assert!(rejected(&format!("{VECTOR}outln(Vector(1, 2) * 'a');")).contains("`*` on a Vector takes a number or a Vector, not a string"));
+    assert!(rejected(&format!("{VECTOR}string $s = Vector(1, 2) * Vector(1, 2);")).contains("its value is a number"));
+    assert!(rejected(&format!("{VECTOR}outln(Version(1, 0) + Version(1, 0));")).contains("`Version` has no `+`: implement `IAdd`"));
+    assert!(rejected(&format!("{VECTOR}outln(Version(1, 0) < 3);")).contains("takes a Version, not a number"));
+    assert!(rejected(&format!("{VECTOR}outln(Version(1, 0)[0]);")).contains("implement `IIndex`"));
+    assert!(rejected(&format!("{VECTOR}outln(3 -in Bag([]));")).contains("takes a string, not a number"));
+    assert!(rejected("class C { implement IAdd<number> { number add(number $n) = 1; } }").contains("takes 2 type parameters"));
+    assert!(fails("class P { pub number @n; }\noutln(P(1) + P(2));").contains("`P` has no `+`: implement `IAdd`"));
+    assert!(fails("class P { pub number @n; }\noutln([P(2), P(1)].sorted());").contains("implement `IOrdered`"));
 }
