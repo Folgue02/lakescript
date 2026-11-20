@@ -1057,10 +1057,6 @@ impl<'a> Compiler<'a> {
     /// A class declaration: its parts are pushed, `Op::Class` makes it, and
     /// then its static fields get their values.
     fn class(&mut self, decl: &ClassDecl) -> Compiled {
-        if decl.kind == ClassKind::Enum {
-            self.fail("enums aren't ready yet");
-            return Ok(());
-        }
         let interface = decl.kind == ClassKind::Interface;
         let span = self.span;
         let hoisted = self.f().hoisted.remove(&decl.name);
@@ -1075,6 +1071,7 @@ impl<'a> Compiler<'a> {
         let mut info = ClassInfo {
             name: Rc::from(decl.name.as_str()),
             interface,
+            is_enum: decl.kind == ClassKind::Enum,
             parent: false,
             interfaces: 0,
             required: Vec::new(),
@@ -1192,6 +1189,16 @@ impl<'a> Compiler<'a> {
                 }
                 _ => unreachable!("hoisted classes are locals"),
             },
+        }
+        // The values of an enum, created once, in order
+        for value in &decl.values {
+            self.span = value.span;
+            self.load_class(&decl.name);
+            let n = self.name(&value.name);
+            match self.args(&value.args)? {
+                None => self.emit(Op::EnumValue { name: n, argc: value.args.len() as u32 }),
+                Some(call) => self.emit(Op::EnumValueComplex { name: n, call }),
+            };
         }
         // Static fields, in order, so one can use the ones before it
         for member in &decl.members {

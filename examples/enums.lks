@@ -1,0 +1,48 @@
+#!/usr/bin/lks
+// Enums: a fixed set of values, which can have fields and methods.
+//
+//   lks examples/enums.lks
+
+enum Level {
+    DEBUG,
+    INFO,
+    WARNING,
+    ERROR;
+
+    // A `switch` with a case for every value doesn't need a `default`
+    pub string tag() =
+        switch (@) {
+            case Self::DEBUG -> '.';
+            case Self::INFO -> 'i';
+            case Self::WARNING -> '!';
+            case Self::ERROR -> 'x';
+        };
+}
+
+// Values can have fields, given where they're declared
+enum Planet {
+    MERCURY(0.39, 0.06),
+    EARTH(1, 1),
+    JUPITER(5.2, 318);
+
+    pub const number @distance;
+    pub const number @mass;
+
+    pub number yearInDays() = (365.25 * @distance ** 1.5).round();
+}
+
+outln(Level::WARNING);
+outln(Level::values().map(($l) -> f"{$l.tag()} {$l.name()}"));
+
+// Reading a value from text, like a flag or a JSON field
+const $level = Level::fromIgnoreCase('error');
+outln([$level == Level::ERROR, $level.is(Level)]);
+try {
+    Level::from('LOUD');
+} catch (ValueError $e) {
+    outln($e.message());
+}
+
+for ($planet in Planet::values()) {
+    outln(f"{$planet.name()}: a year is {$planet.yearInDays()} days, mass {$planet.mass}");
+}

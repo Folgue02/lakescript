@@ -123,6 +123,7 @@ impl ClassRef {
 pub struct ClassSig {
     pub name: Rc<str>,
     pub interface: bool,
+    pub is_enum: bool,
     /// Filled once every class of the block has a name, so they can use each other.
     pub body: RefCell<ClassBody>,
 }
@@ -140,6 +141,8 @@ pub struct ClassBody {
     pub constructor: Option<Rc<FnTy>>,
     /// Whether it has its own `new`.
     pub own_constructor: bool,
+    /// The values of an enum, in order.
+    pub values: Vec<String>,
 }
 
 #[derive(Clone)]

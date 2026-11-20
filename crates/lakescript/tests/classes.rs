@@ -309,3 +309,69 @@ fn the_checker_finds_mistakes_with_interfaces() {
     assert!(rejected("interface I {}\nclass C { implement I {} implement I {} }").contains("two `implement` blocks"));
     assert!(rejected("interface I { void m(); }\nclass A { implement I { void m() {} } }\nclass B { }\nI $i = B();").contains("its value is a B"));
 }
+
+const STATUS: &str = "
+enum Status {
+    AT_WORK(true),
+    UNEMPLOYED(false),
+    SICK(canWork: false);
+
+    pub const bool @canWork;
+
+    pub string label() =
+        switch (@) {
+            case Self::SICK -> 'sick';
+            case Self::UNEMPLOYED -> 'looking';
+            case Self::AT_WORK -> 'working';
+        };
+}
+";
+
+#[test]
+fn enums_have_a_fixed_set_of_values() {
+    let script = format!(
+        "{STATUS}
+        const $s = Status::SICK;
+        outln($s);
+        outln([$s.name(), $s.canWork, $s.label()]);
+        outln(Status::values());
+        outln([Status::from('UNEMPLOYED').label(), Status::fromIgnoreCase('at_work').name()]);
+        outln([$s == Status::SICK, $s == Status::AT_WORK, $s.is(Status)]);
+        try {{ Status::from('nope'); }} catch (ValueError $e) {{ outln($e.message()); }}"
+    );
+    assert_eq!(
+        run(&script),
+        "Status::SICK\n['SICK', false, 'sick']\n[Status::AT_WORK, Status::UNEMPLOYED, Status::SICK]\n['looking', 'AT_WORK']\n[true, false, true]\n`Status` has no value `nope`: it has AT_WORK, UNEMPLOYED, SICK\n"
+    );
+}
+
+#[test]
+fn enums_can_have_a_constructor_and_interfaces() {
+    let script = "
+        interface Labeled { string label(); }
+        enum Size {
+            SMALL(1), LARGE(10);
+            pub const number @weight;
+            pub new(number $kilos) {
+                @weight = $kilos * 1000;
+            }
+            implement Labeled { string label() = @name().lower(); }
+        }
+        outln([Size::LARGE.weight, Size::SMALL.label(), Size::SMALL.is(Labeled)]);
+    ";
+    assert_eq!(run(script), "[10000, 'small', true]\n");
+}
+
+#[test]
+fn the_checker_finds_mistakes_with_enums() {
+    let e = "enum C { RED, GREEN, BLUE; }\n";
+    assert!(rejected(&format!("{e}outln(switch (C::RED) {{ case C::RED -> 1; case C::GREEN -> 2; }});")).contains("no case for `C::BLUE`"));
+    assert!(rejected(&format!("{e}C();")).contains("is an enum"));
+    assert!(rejected(&format!("{e}outln(C::PURPLE);")).contains("`C` has no value `PURPLE`: it has RED, GREEN, BLUE"));
+    assert!(rejected(&format!("{e}string $s = C::RED;")).contains("its value is a C"));
+    assert!(rejected("enum C { red; }").contains("SCREAMING_CASE"));
+    assert!(rejected("enum S { A(1), B; pub number @n; }").contains("`B` needs a value for `n`"));
+    assert!(rejected("enum S { A; pub static void values() {} }").contains("every enum has `values()`"));
+    assert!(rejected("enum C { A; }\nenum D extends C {}").contains("can't extend"));
+    assert!(fails(&format!("{e}C();")).contains("is an enum"));
+}

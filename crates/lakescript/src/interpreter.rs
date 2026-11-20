@@ -860,6 +860,17 @@ impl<'a> Interpreter<'a> {
                     let (args, named) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
                     self.super_new(args, named, span!())?;
                 }
+                Op::EnumValue { name, argc } => {
+                    self.frames[fi].ip = ip;
+                    let args = self.stack.split_off(self.stack.len() - argc as usize);
+                    self.enum_value(&proto.names[name as usize], args, Vec::new(), span!())?;
+                }
+                Op::EnumValueComplex { name, call } => {
+                    self.frames[fi].ip = ip;
+                    let kinds = &proto.calls[call as usize];
+                    let (args, named) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
+                    self.enum_value(&proto.names[name as usize], args, named, span!())?;
+                }
                 Op::SuperMethod { name, argc } => {
                     self.frames[fi].ip = ip;
                     let mut args = self.stack.split_off(self.stack.len() - argc as usize);
@@ -1273,9 +1284,11 @@ impl Interpreter<'_> {
         for (name, f) in info.static_methods.iter().zip(statics.into_iter().rev()) {
             static_table.insert(name.clone(), StaticSlot { value: Value::Function(f), constant: true });
         }
-        Ok(Rc::new(Class {
+        let class = Rc::new(Class {
             name: info.name.clone(),
             interface: info.interface,
+            is_enum: info.is_enum,
+            values: RefCell::new(Vec::new()),
             parent,
             interfaces,
             required: info.required.clone(),
@@ -1284,7 +1297,29 @@ impl Interpreter<'_> {
             statics: RefCell::new(static_table),
             constructor,
             init,
-        }))
+        });
+        if info.is_enum {
+            enum_statics(&class);
+        }
+        Ok(class)
+    }
+
+    /// Creates a value of an enum, when the enum is declared.
+    fn enum_value(&mut self, name: &Rc<str>, args: Vec<Value>, named: Named, span: Span) -> Exec<()> {
+        let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the enum") };
+        let object = Rc::new(Object {
+            class: class.clone(),
+            enum_name: Some(name.clone()),
+            fields: RefCell::new(vec![Value::Null; class.fields.len()]),
+            building: std::cell::Cell::new(true),
+        });
+        let value = Value::Object(object.clone());
+        self.init_fields(&class, &value, span)?;
+        self.run_constructor(&class, &value, args, named, span)?;
+        object.building.set(false);
+        class.statics.borrow_mut().insert(name.clone(), StaticSlot { value: value.clone(), constant: true });
+        class.values.borrow_mut().push(value);
+        Ok(())
     }
 
     /// `Point(1, 2)`: a new object, with its fields' values, after its constructor.
@@ -1292,8 +1327,12 @@ impl Interpreter<'_> {
         if class.interface {
             return error_as(exceptions::TYPE_ERROR, format!("`{}` is an interface: it doesn't create objects, classes implement it", class.name), span);
         }
+        if class.is_enum {
+            return error_as(exceptions::TYPE_ERROR, format!("`{}` is an enum: its values are created where it's declared *(i.e. `{}::...`)*", class.name, class.name), span);
+        }
         let object = Rc::new(Object {
             class: class.clone(),
+            enum_name: None,
             fields: RefCell::new(vec![Value::Null; class.fields.len()]),
             building: std::cell::Cell::new(true),
         });
@@ -1377,6 +1416,49 @@ impl Interpreter<'_> {
         self.run_constructor(&parent, &this, args, named, span)?;
         self.stack.push(Value::Null);
         Ok(())
+    }
+}
+
+/// `values()`, `from()` and `fromIgnoreCase()`, which every enum has.
+fn enum_statics(class: &Rc<Class>) {
+    use crate::value::NativeFunction;
+    let weak = Rc::downgrade(class);
+    let mut statics = class.statics.borrow_mut();
+    let mut add = |name: &str, params: &[&str], f: Box<crate::value::NativeFn>| {
+        let function = NativeFunction { name: format!("{}::{name}", class.name), params: params.iter().map(|p| p.to_string()).collect(), func: f };
+        statics.entry(Rc::from(name)).or_insert(StaticSlot { value: Value::Function(Rc::new(Function::Native(function))), constant: true });
+    };
+    let w = weak.clone();
+    add("values", &[], Box::new(move |_, _| Ok(Value::list(w.upgrade().map(|c| c.values.borrow().clone()).unwrap_or_default()))));
+    for ignore_case in [false, true] {
+        let w = weak.clone();
+        let name = if ignore_case { "fromIgnoreCase" } else { "from" };
+        add(name, &["name"], Box::new(move |_, args| {
+            let Some(class) = w.upgrade() else { return Ok(Value::Null) };
+            let text = match args.first() {
+                Some(Value::Str(s)) => s.clone(),
+                Some(other) => return Err(NativeError::new(exceptions::TYPE_ERROR, format!("`{}::{name}` takes a string, not a {}", class.name, other.type_label()))),
+                None => return Err(NativeError::new(exceptions::TYPE_ERROR, format!("`{}::{name}` takes the name of a value", class.name))),
+            };
+            let values = class.values.borrow();
+            let found = values.iter().find(|v| match v {
+                Value::Object(o) => {
+                    let n = o.enum_name.as_deref().unwrap_or("");
+                    if ignore_case { n.eq_ignore_ascii_case(&text) } else { n == &*text }
+                }
+                _ => false,
+            });
+            match found {
+                Some(v) => Ok(v.clone()),
+                None => {
+                    let names: Vec<String> = values.iter().map(|v| match v {
+                        Value::Object(o) => o.enum_name.as_deref().unwrap_or("").to_string(),
+                        _ => String::new(),
+                    }).collect();
+                    Err(NativeError::new(exceptions::VALUE_ERROR, format!("`{}` has no value `{text}`: it has {}", class.name, names.join(", "))))
+                }
+            }
+        }));
     }
 }
 

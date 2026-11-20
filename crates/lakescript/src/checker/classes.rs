@@ -14,15 +14,13 @@ use crate::token::Span;
 impl Checker<'_> {
     /// Gives a class its name in the block, before any class of the block has a body.
     pub(super) fn declare_class(&mut self, decl: &ClassDecl, span: Span) -> Check<ClassRef> {
-        if decl.kind == ClassKind::Enum {
-            return self.fail("enums aren't ready yet", span);
-        }
         let scope = self.scopes.last().unwrap();
         if scope.types.contains_key(&decl.name) || scope.funcs.contains_key(&decl.name) {
             return self.fail(format!("`{}` already exists", decl.name), span);
         }
         let interface = decl.kind == ClassKind::Interface;
-        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, body: RefCell::new(ClassBody::default()) }));
+        let is_enum = decl.kind == ClassKind::Enum;
+        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, body: RefCell::new(ClassBody::default()) }));
         let depth = self.returns.len();
         let scope = self.scopes.last_mut().unwrap();
         scope.types.insert(decl.name.clone(), Ty::Object(class.clone()));
@@ -152,10 +150,47 @@ impl Checker<'_> {
             }
         }));
         let ctor_sig = body.constructor.clone().unwrap();
+        if class.0.is_enum {
+            self.enum_members(decl, class, &mut body)?;
+            *class.0.body.borrow_mut() = body;
+            return Ok(());
+        }
         *class.0.body.borrow_mut() = body;
         // Calling the class is calling its constructor
         let scope = self.scopes.last_mut().unwrap();
         scope.funcs.insert(decl.name.clone(), ctor_sig);
+        Ok(())
+    }
+
+    /// The values of an enum, and the methods every enum has.
+    fn enum_members(&mut self, decl: &ClassDecl, class: &ClassRef, body: &mut ClassBody) -> Check<()> {
+        let this = Ty::Object(class.clone());
+        for value in &decl.values {
+            if body.values.contains(&value.name) {
+                return self.fail(format!("`{}` has two values named `{}`", decl.name, value.name), value.span);
+            }
+            body.values.push(value.name.clone());
+        }
+        let method = |params: Vec<Ty>, names: Vec<&str>, ret: Ty| MemberSig {
+            ty: Rc::new(FnTy { required: params.len(), params, names: names.into_iter().map(String::from).collect(), variadic: false, ret, generics: Vec::new() }),
+            public: true,
+            has_body: true,
+        };
+        let builtins = [
+            ("values", method(Vec::new(), Vec::new(), Ty::List(Box::new(this.clone())))),
+            ("from", method(vec![Ty::Str], vec!["name"], this.clone())),
+            ("fromIgnoreCase", method(vec![Ty::Str], vec!["name"], this.clone())),
+        ];
+        for (name, sig) in builtins {
+            if body.static_methods.contains_key(name) || body.values.iter().any(|v| v == name) {
+                return self.fail(format!("every enum has `{name}()`, so `{}` can't declare it", decl.name), decl.span);
+            }
+            body.static_methods.insert(name.to_string(), sig);
+        }
+        if body.methods.contains_key("name") {
+            return self.fail(format!("every enum value has `name()`, so `{}` can't declare it", decl.name), decl.span);
+        }
+        body.methods.insert("name".into(), method(Vec::new(), Vec::new(), Ty::Str));
         Ok(())
     }
 
@@ -175,6 +210,16 @@ impl Checker<'_> {
         self.scopes.last_mut().unwrap().pending.remove(&decl.name);
         if !class.0.interface {
             self.check_implements(decl, &class)?;
+        }
+        if class.0.is_enum {
+            // Each value calls the enum's constructor
+            let ctor = class.0.body.borrow().constructor.clone().unwrap();
+            for value in &decl.values {
+                self.this.push(This { class: class.clone(), self_param: false, is_static: true, constructor: false });
+                let result = self.call(&ctor, &HashMap::new(), &value.args, &value.name, value.span);
+                self.this.pop();
+                result?;
+            }
         }
         let parent = class.0.body.borrow().parent.clone();
         // A constructor of its own is needed when the superclass has one
@@ -427,6 +472,9 @@ impl Checker<'_> {
             }
             return self.fail(format!("there's no class named `{class}`"), span);
         };
+        if !variable && c.0.body.borrow().values.iter().any(|v| v == name) {
+            return Ok(Ty::Object(c));
+        }
         if variable {
             let field = c.0.body.borrow().statics.get(name).cloned();
             let Some(field) = field else {
@@ -437,6 +485,10 @@ impl Checker<'_> {
         } else {
             let method = c.0.body.borrow().static_methods.get(name).cloned();
             let Some(method) = method else {
+                if c.0.is_enum && !name.chars().any(|ch| ch.is_ascii_lowercase()) {
+                    let values = c.0.body.borrow().values.join(", ");
+                    return self.fail(format!("`{}` has no value `{name}`: it has {values}", c.0.name), span);
+                }
                 if c.0.body.borrow().methods.contains_key(name) {
                     return self.fail(format!("`{name}` isn't static: it's called on an object of `{}`", c.0.name), span);
                 }

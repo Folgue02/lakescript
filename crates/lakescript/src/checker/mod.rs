@@ -1178,6 +1178,9 @@ impl<'a> Checker<'a> {
                 None if self.class_named(name).is_some_and(|c| c.0.interface) => {
                     return self.fail(format!("`{name}` is an interface: it doesn't create objects, classes implement it"), span);
                 }
+                None if self.class_named(name).is_some_and(|c| c.0.is_enum) => {
+                    return self.fail(format!("`{name}` is an enum: its values are created where it's declared *(i.e. `{name}::...`)*"), span);
+                }
                 None => return self.fail(format!("there's no function named `{name}`. Functions must be defined before they're used"), span),
             },
             ExprKind::ModuleFunction { module, name } => {
@@ -1315,6 +1318,36 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A `switch` used as a value without a `default` must have a case for
+    /// every value: both bools, or every value of an enum.
+    fn covers_every_value(&mut self, switch: &Switch, subject: &Ty) -> Check<()> {
+        let bools = |b: bool| switch.cases.iter().any(|c| c.patterns.iter().any(|p| matches!(p, Pattern::Value(Expr { kind: ExprKind::Bool(v), .. }) if *v == b)));
+        if bools(true) && bools(false) {
+            return Ok(());
+        }
+        let Ty::Object(class) = self.non_null(subject) else {
+            return self.fail("a `switch` used as a value must match every value: add a `default`", switch.subject.span);
+        };
+        if !class.0.is_enum {
+            return self.fail("a `switch` used as a value must match every value: add a `default`", switch.subject.span);
+        }
+        let mut missing: Vec<String> = class.0.body.borrow().values.clone();
+        for case in &switch.cases {
+            for pattern in &case.patterns {
+                if let Pattern::Value(Expr { kind: ExprKind::Static { class: c, name, variable: false }, .. }) = pattern {
+                    if self.class_named(c).is_some_and(|c| c == class) {
+                        missing.retain(|m| m != name);
+                    }
+                }
+            }
+        }
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let names: Vec<String> = missing.iter().map(|m| format!("`{}::{m}`", class.0.name)).collect();
+        self.fail(format!("this `switch` has no case for {}: add them, or a `default`", names.join(", ")), switch.subject.span)
+    }
+
     fn switch(&mut self, switch: &Switch, as_value: bool) -> Check<Ty> {
         let subject = self.expr(&switch.subject, None)?;
         let subject_var = match &switch.subject.kind {
@@ -1347,6 +1380,8 @@ impl<'a> Checker<'a> {
         }
         if let Some(d) = &switch.default {
             bodies.push((Vec::new(), d));
+        } else if as_value {
+            self.covers_every_value(switch, &subject)?;
         }
         for (facts, body) in bodies {
             let t = self.scoped(&facts, |c| match body {
@@ -1416,7 +1451,7 @@ impl<'a> Checker<'a> {
         }
         let params: Vec<Ty> = sig.params.iter().map(|p| p.substitute(&map)).collect();
         // The constructor that takes every field names them without `$`
-        let fields = matches!(&sig.ret, Ty::Object(c) if *c.0.name == *name && !c.0.body.borrow().own_constructor);
+        let fields = matches!(&sig.ret, Ty::Object(c) if (*c.0.name == *name || c.0.body.borrow().values.iter().any(|v| v == name)) && !c.0.body.borrow().own_constructor);
         let show = |n: &String| if fields { format!("`{n}`") } else { format!("`${n}`") };
         let fixed = if sig.variadic { params.len() - 1 } else { params.len() };
         let mut given = vec![false; params.len()];

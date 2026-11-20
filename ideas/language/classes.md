@@ -155,6 +155,10 @@ outln(PersonStatus::fromIgnoreCase('sick'));
 - Values are written in SCREAMING_CASE and reached with `::` *(i.e. `PersonStatus::SICK`)*. Inside the enum, `@` is the value itself.
 - A `switch` with a case for every value doesn't need a `default`.
 - Printing a value shows its enum and its name *(i.e. `PersonStatus::SICK`)*.
+- Values are created once, in order, when the enum is declared, and calling the enum is an error. Two values are `==` only if they're the same value.
+- `from()` and `fromIgnoreCase()` throw a `ValueError` that lists the values when there's no value with that name.
+- `values`, `from`, `fromIgnoreCase` and `name` belong to every enum, so an enum can't declare its own.
+- Without the checker, a `switch` used as a value with a case for every value is still accepted, and it throws when no case matches.
 - Like in Java, values can have fields, given when they're declared through the enum's constructor. It's the one that takes every field unless the enum writes a `new`, and it can't be called from anywhere else:
 
 ```
@@ -237,7 +241,7 @@ Built in steps, each with tests and examples:
 
 1. Done: classes. Fields with and without values, `const` fields, the constructor that takes every field, `new` with `@field` parameters, methods, `@`, static fields and methods with `Self::`, `extends`, `override`, `@super(...)` and `@super.method()`, `.is()` and `.as()` with classes (also of another module, i.e. `shapes::Point`), and `pub class` in modules. The checker knows them, and private fields and methods can only be used by their own class. See `examples/classes.lks`.
 2. Done: interfaces. `implement` blocks, default methods, interfaces that extend others, `Self`, the `TypeError` for a `Self` parameter of another class, `.is()` and `.as()` with interfaces, and the checker's errors for missing or wrong methods. See `examples/interfaces.lks`.
-3. Enums.
+3. Done: enums. Values with fields through the constructor, methods, `implement` blocks, `name()`, `values()`, `from()`, `fromIgnoreCase()`, and the checker's error for a `switch` used as a value that misses a value. See `examples/enums.lks`.
 4. Operators through interfaces, and `==` with `Equals`.
 5. Generic classes and interfaces.
 6. Exceptions as classes.

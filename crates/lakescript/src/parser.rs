@@ -456,6 +456,9 @@ impl Parser {
         let mut values = Vec::new();
         while let TokenKind::Ident(name) = self.peek().kind.clone() {
             let start = self.peek().span;
+            if !name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+                return self.error_here(format!("the values of an enum are written in SCREAMING_CASE *(i.e. `{}`)*, and end with `;`", name.to_ascii_uppercase()));
+            }
             self.advance();
             let args = if self.check(&TokenKind::LParen) { self.arguments()? } else { Vec::new() };
             values.push(EnumValue { name, args, span: self.span_from(start) });
@@ -1354,7 +1357,9 @@ impl Parser {
                 _ => return self.error_here(format!("expected `case`, `default` or `}}`, found {}", self.peek().kind)),
             }
         }
-        if as_value && default.is_none() && !covers_both_bools(&cases) {
+        // A `switch` on an enum can have a case for every value instead, which the checker sees
+        let enum_cases = cases.iter().all(|c| c.patterns.iter().all(|p| matches!(p, Pattern::Value(Expr { kind: ExprKind::Static { variable: false, .. }, .. }))));
+        if as_value && default.is_none() && !covers_both_bools(&cases) && !(enum_cases && !cases.is_empty()) {
             return Err(Diagnostic::new(
                 "a `switch` used as a value must match every value: add a `default`",
                 self.span_from(start),
@@ -1369,7 +1374,9 @@ impl Parser {
         if matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Question) {
             let checkpoint = self.checkpoint();
             if let Ok(ty) = self.parse_type() {
-                if matches!(self.peek().kind, TokenKind::Comma | TokenKind::Arrow) {
+                // `Color::RED` is a value of an enum, and `shapes::Point` a type of a module
+                let enum_value = matches!(&ty.kind, TypeKind::Named { name, .. } if name.split_once("::").is_some_and(|(left, _)| is_type_name(left)));
+                if !enum_value && matches!(self.peek().kind, TokenKind::Comma | TokenKind::Arrow) {
                     if matches!(ty.kind, TypeKind::Function { .. }) {
                         return Err(Diagnostic::new("function types can't be used in a `case`", ty.span));
                     }

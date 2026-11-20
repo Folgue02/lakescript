@@ -37,6 +37,9 @@ pub enum Value {
 pub struct Class {
     pub name: Rc<str>,
     pub interface: bool,
+    pub is_enum: bool,
+    /// The values of an enum, in order.
+    pub values: RefCell<Vec<Value>>,
     pub parent: Option<Rc<Class>>,
     /// Every interface it implements, also through its superclasses and the
     /// interfaces they extend. For an interface, the ones it extends.
@@ -71,6 +74,8 @@ pub struct StaticSlot {
 
 pub struct Object {
     pub class: Rc<Class>,
+    /// For a value of an enum: its name *(i.e. `SICK`)*.
+    pub enum_name: Option<Rc<str>>,
     pub fields: RefCell<Vec<Value>>,
     /// While its constructor runs, its `const` fields can still be set.
     pub building: std::cell::Cell<bool>,
@@ -465,6 +470,7 @@ impl fmt::Display for Value {
             },
             Value::Regex(r) => write!(f, "%r\"{}\"{}", r.pattern.replace('"', "\\\""), r.flags),
             Value::Class(c) => write!(f, "<{} {}>", if c.interface { "interface" } else { "class" }, c.name),
+            Value::Object(o) if o.enum_name.is_some() => write!(f, "{}::{}", o.class.name, o.enum_name.as_ref().unwrap()),
             Value::Object(o) => {
                 write!(f, "{}(", o.class.name)?;
                 for (i, (slot, value)) in o.class.fields.iter().zip(o.fields.borrow().iter()).enumerate() {

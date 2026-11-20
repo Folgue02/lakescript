@@ -148,6 +148,9 @@ pub enum Op {
     SuperNewComplex(u32),
     /// `@super.name(...)`: the class, `@` and the arguments are on the stack.
     SuperMethod { name: u32, argc: u32 },
+    /// Creates a value of an enum: the enum and the arguments are on the stack.
+    EnumValue { name: u32, argc: u32 },
+    EnumValueComplex { name: u32, call: u32 },
 
     // ---- Functions ----
     Closure(u32),
@@ -242,6 +245,7 @@ pub struct Param {
 pub struct ClassInfo {
     pub name: Rc<str>,
     pub interface: bool,
+    pub is_enum: bool,
     pub parent: bool,
     /// How many interfaces it implements (or extends, for an interface), pushed after the superclass.
     pub interfaces: u32,
@@ -335,7 +339,9 @@ impl Proto {
                 | Op::Static { name, .. }
                 | Op::SetStatic(name)
                 | Op::DefineStatic { name, .. }
-                | Op::SuperMethod { name, .. } => {
+                | Op::SuperMethod { name, .. }
+                | Op::EnumValue { name, .. }
+                | Op::EnumValueComplex { name, .. } => {
                     format!("  {}", self.names[*name as usize])
                 }
                 _ => String::new(),

@@ -135,6 +135,11 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
             }
             return Ok(Value::string(receiver.type_name()));
         }
+        "name" if matches!(&receiver, Value::Object(o) if o.enum_name.is_some()) => {
+            args.count(0, 0)?;
+            let Value::Object(o) = &receiver else { unreachable!() };
+            return Ok(Value::Str(o.enum_name.clone().unwrap()));
+        }
         _ => {}
     }
 
