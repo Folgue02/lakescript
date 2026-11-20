@@ -32,7 +32,11 @@ impl World {
     }
 
     fn ferry(&self, cwd: &Path, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_ferry")).args(args).current_dir(cwd).env("FERRY_HOME", self.home()).output().unwrap()
+        Command::new(env!("CARGO_BIN_EXE_ferry")).args(args).current_dir(cwd)
+            .env("FERRY_HOME", self.home())
+            .env_remove("CLICOLOR_FORCE")
+            .output()
+            .unwrap()
     }
 
     /// Runs ferry and expects it to work.
@@ -275,4 +279,18 @@ fn the_example_project_works() {
     assert_eq!(w.ok(&example, &["run", "human", "1536", "1048576"]), "1.5 KB\n1 MB\n");
     assert_eq!(w.ok(&example, &["run", "bytes", "1.5 KB", "2 mb"]), "1536\n2097152\n");
     assert!(w.fails(&example, &["run", "bytes", "1 XB"]).contains("unknown unit 'XB'"));
+}
+
+#[test]
+fn colors_only_when_asked() {
+    let w = World::new();
+    let dir = w.project("app", &app(""), &[("bin/app.lks", "outln(1);")]);
+    let out = w.ferry(&dir, &["--color", "always", "check"]);
+    assert!(stderr(&out).contains("\x1b[1;32m     Checked\x1b[0m me/app"), "{:?}", stderr(&out));
+    let out = w.ferry(&dir, &["--color", "never", "add", "nowhere:a/b@1.0.0"]);
+    assert!(stderr(&out).starts_with("error: there's no repository"), "{}", stderr(&out));
+    let out = w.ferry(&dir, &["--color", "always", "add", "nowhere:a/b@1.0.0"]);
+    assert!(stderr(&out).starts_with("\x1b[1;31merror:\x1b[0m there's no repository"));
+    assert!(!stderr(&w.ferry(&dir, &["check"])).contains('\x1b'));
+    assert_eq!(w.ferry(&dir, &["--color", "nope", "check"]).status.code(), Some(2));
 }

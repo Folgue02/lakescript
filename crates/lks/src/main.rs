@@ -1,6 +1,9 @@
+use std::io::IsTerminal;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::process::ExitCode;
 
+use lakescript::terminal::{Paint, When};
 use lakescript::{Engine, lexer, parser};
 
 /// The interpreter walks the syntax tree with Rust's own stack, so scripts
@@ -19,6 +22,8 @@ Options:
   --module-path <folders>
                    More folders where `use` looks for modules,
                    separated by `:`
+  --color <when>   When to use colors: auto (on a terminal, the default),
+                   always or never. NO_COLOR also turns them off
   --no-type-check  Run the script without checking its types first,
                    for scripts that were already checked
   -h, --help       Show this help
@@ -37,7 +42,7 @@ fn main() -> ExitCode {
     match runner.map(|handle| handle.join()) {
         Ok(Ok(code)) => code,
         _ => {
-            eprintln!("lks: the interpreter crashed. This is a bug in lks, not in your script");
+            eprintln!("{} the interpreter crashed. This is a bug in lks, not in your script", paint().error("lks:"));
             ExitCode::from(70)
         }
     }
@@ -50,12 +55,20 @@ struct Options {
     show_ast: bool,
     show_bytecode: bool,
     module_path: Vec<std::path::PathBuf>,
+    color: When,
+}
+
+/// The colors for stderr, decided once the options are read.
+static PAINT: OnceLock<Paint> = OnceLock::new();
+
+fn paint() -> Paint {
+    *PAINT.get_or_init(|| Paint(When::Auto.colors(std::io::stderr().is_terminal())))
 }
 
 /// What the command line asks for.
 enum Request {
     Run { options: Options, script: String, args: Vec<String> },
-    Help,
+    Help(When),
     Version,
 }
 
@@ -72,11 +85,15 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
             "--tokens" => options.show_tokens = true,
             "--ast" => options.show_ast = true,
             "--bytecode" => options.show_bytecode = true,
+            "--color" => match args.next().as_deref().and_then(When::parse) {
+                Some(when) => options.color = when,
+                None => return Err("`--color` needs `auto`, `always` or `never` after it".into()),
+            },
             "--module-path" => match args.next() {
                 Some(folders) => options.module_path.extend(std::env::split_paths(&folders)),
                 None => return Err("`--module-path` needs the folders after it".into()),
             },
-            "-h" | "--help" => return Ok(Request::Help),
+            "-h" | "--help" => return Ok(Request::Help(options.color)),
             "-V" | "--version" => return Ok(Request::Version),
             "--" => match args.next() {
                 Some(script) => break script,
@@ -94,8 +111,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
 fn run() -> ExitCode {
     let (mut options, script, args) = match parse_args(std::env::args().skip(1)) {
         Ok(Request::Run { options, script, args }) => (options, script, args),
-        Ok(Request::Help) => {
-            print!("{USAGE}");
+        Ok(Request::Help(when)) => {
+            print!("{}", Paint(when.colors(std::io::stdout().is_terminal())).help(USAGE));
             return ExitCode::SUCCESS;
         }
         Ok(Request::Version) => {
@@ -103,17 +120,19 @@ fn run() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Err(message) => {
-            eprintln!("lks: {message}");
-            eprintln!("Usage: lks [options] <script> [arguments for the script...]. See `lks --help`");
+            let paint = paint();
+            eprintln!("{} {message}", paint.error("lks:"));
+            eprintln!("{} lks [options] <script> [arguments for the script...]. See `lks --help`", paint.good("Usage:"));
             return ExitCode::from(2);
         }
     };
 
+    let _ = PAINT.set(Paint(options.color.colors(std::io::stderr().is_terminal())));
     if options.show_tokens || options.show_ast || options.show_bytecode {
         let source = match std::fs::read_to_string(&script) {
             Ok(source) => source,
             Err(err) => {
-                eprintln!("error: can't read {script}: {err}");
+                eprintln!("{} can't read {script}: {err}", paint().error("error:"));
                 return ExitCode::FAILURE;
             }
         };
@@ -145,8 +164,8 @@ fn run() -> ExitCode {
 fn show(diagnostic: &lakescript::Diagnostic, script: &str) -> String {
     let file = diagnostic.file.as_deref().unwrap_or(script);
     match std::fs::read_to_string(file) {
-        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source(script, &source),
-        _ => diagnostic.render(script),
+        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(script, &source, paint()),
+        _ => diagnostic.render_painted(script, paint()),
     }
 }
 

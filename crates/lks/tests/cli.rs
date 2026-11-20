@@ -84,3 +84,29 @@ fn module_path_adds_folders_for_use() {
     assert_eq!(lks(&["--module-path"]).status.code(), Some(2));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn errors_have_colors_when_asked() {
+    let dir = std::env::temp_dir().join(format!("lks-colors-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("bad.lks");
+    std::fs::write(&script, "number $a = 1;\n$a = 'x';").unwrap();
+    let script = script.to_str().unwrap();
+    let run = |args: &[&str], env: &[(&str, &str)]| {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_lks"));
+        command.args(args).env_remove("NO_COLOR").env_remove("CLICOLOR_FORCE");
+        for (k, v) in env {
+            command.env(k, v);
+        }
+        stderr(&command.output().unwrap())
+    };
+    // stderr isn't a terminal here, so there are none unless asked for
+    assert!(!run(&[script], &[]).contains('\x1b'));
+    assert!(run(&["--color", "always", script], &[]).contains("\x1b[1;31merror:"));
+    assert!(!run(&["--color", "never", script], &[("CLICOLOR_FORCE", "1")]).contains('\x1b'));
+    assert!(run(&[script], &[("CLICOLOR_FORCE", "1")]).contains('\x1b'));
+    assert!(!run(&[script], &[("CLICOLOR_FORCE", "1"), ("NO_COLOR", "1")]).contains('\x1b'));
+    assert!(run(&["--color", "sometimes", script], &[]).contains("`--color` needs `auto`, `always` or `never`"));
+    assert!(stdout(&lks(&["--color", "always", "--help"])).contains("\x1b[1;32mOptions:"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

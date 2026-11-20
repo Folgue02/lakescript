@@ -15,6 +15,7 @@ lks [options] <script> [arguments for the script...]
 | Option | Meaning |
 |--------|---------|
 | `--module-path <folders>` | More folders where `use` looks for modules, separated by `:`, after the script's folder and before `LKS_PATH`. It's what the commands installed by [ferry](ferry.md) use |
+| `--color <when>` | When errors and the help have colors: `auto` (on a terminal, the default), `always` or `never` *(see [diagnostics.md](diagnostics.md#colors))* |
 | `--no-type-check` | Runs the script without checking its types first, for scripts that were already checked. Since types never change what the code does, it behaves the same |
 | `-h`, `--help` | Shows the help |
 | `-V`, `--version` | Shows the version |
@@ -26,4 +27,5 @@ lks [options] <script> [arguments for the script...]
 
 | Variable | Meaning |
 |----------|---------|
+| `NO_COLOR`, `CLICOLOR_FORCE` | Turn colors off, or on when the output isn't a terminal, with `--color auto` |
 | `LKS_PATH` | Extra folders where `use` looks for modules, separated by `:` *(see the module path in [modules.md](../language/modules.md))* |

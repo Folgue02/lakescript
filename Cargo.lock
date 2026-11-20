@@ -19,7 +19,7 @@ checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "ferry"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "lakescript",
  "serde",
@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "lakescript"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "indexmap",
  "libc",
@@ -59,7 +59,7 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "lks"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "lakescript",
 ]

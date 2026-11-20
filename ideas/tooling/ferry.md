@@ -82,6 +82,20 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 | `ferry add <repository:author/name@version>` | Adds a dependency to `ferry.toml` and downloads it *(i.e. `ferry add github:acme/http@1.4.2`)* |
 | `ferry install [repository:author/name@version]` | Installs the commands of an application into `~/.ferry/bin`: the project in the current folder, or one downloaded from a repository |
 
+## What ferry says
+
+Like cargo, `ferry` says what it does on stderr, one line for each step, with the verb in green and lined up on the right. Errors start with `error:` in red, hints with `note:` in cyan, and errors in scripts look like `lks`'s *(see [diagnostics.md](diagnostics.md#colors))*:
+
+```
+ Downloading github:acme/http 1.4.2
+       Added github:acme/http 1.4.2
+     Checked folgue02/backup: no errors
+error: github:acme/http has no version 1.5.0: there's no tag v1.5.0 in https://github.com/acme/http.git
+```
+
+- `--color auto|always|never` goes before the command *(i.e. `ferry --color never check`)*, so it never mixes with the arguments of a script in `ferry run`.
+- `ferry run` adds nothing to what the script prints.
+
 ## Configuring repositories
 
 `github` is built in. Others go in `~/.ferry/config.toml`, each one with the URL of its packages, where `{author}` and `{name}` are replaced:

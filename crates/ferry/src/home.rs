@@ -86,7 +86,7 @@ impl Home {
             return Ok((dir, commit.trim().to_string()));
         }
         let url = self.url(package)?;
-        eprintln!("  Downloading {package} {version}");
+        crate::status("Downloading", &format!("{package} {version}"));
         let parent = dir.parent().expect("the folder has parents");
         std::fs::create_dir_all(parent).map_err(|e| format!("can't create {}: {e}", parent.display()))?;
         let temporary = parent.join(format!(".{version}.download-{}", std::process::id()));

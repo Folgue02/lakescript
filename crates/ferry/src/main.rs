@@ -5,9 +5,12 @@ mod home;
 mod project;
 mod resolve;
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::process::ExitCode;
 
+use lakescript::terminal::{Paint, When};
 use lakescript::{Diagnostic, Engine};
 
 use home::Home;
@@ -34,11 +37,31 @@ Commands:
                               the project in this folder, or one from a repository
 
 Options:
+  --color <when>              When to use colors: auto (on a terminal, the default),
+                              always or never. NO_COLOR also turns them off.
+                              It goes before the command
   -h, --help                  Show this help
   -V, --version               Show the version of ferry
 
 FERRY_HOME replaces ~/.ferry, where ferry keeps what it downloads and installs.
 ";
+
+/// The colors for stderr, where ferry says what it does.
+static PAINT: OnceLock<Paint> = OnceLock::new();
+
+pub fn paint() -> Paint {
+    *PAINT.get_or_init(|| Paint(When::Auto.colors(std::io::stderr().is_terminal())))
+}
+
+/// A line about what ferry is doing, like cargo's: the verb in green, lined up on the right.
+pub fn status(verb: &str, text: &str) {
+    eprintln!("{} {text}", paint().good(&format!("{verb:>12}")));
+}
+
+/// A hint, in cyan.
+fn note(text: &str) {
+    eprintln!("{} {text}", paint().note("note:"));
+}
 
 /// Why ferry stopped. The message is already what the user sees.
 #[derive(Debug)]
@@ -67,21 +90,30 @@ fn main() -> ExitCode {
     match runner.map(|handle| handle.join()) {
         Ok(Ok(code)) => code,
         _ => {
-            eprintln!("ferry: it crashed. This is a bug in ferry");
+            eprintln!("{} ferry crashed. This is a bug in ferry", paint().error("error:"));
             ExitCode::from(70)
         }
     }
 }
 
 fn start() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let mut color = When::Auto;
+    while args.first().is_some_and(|a| a == "--color") {
+        match args.get(1).and_then(|w| When::parse(w)) {
+            Some(when) => color = when,
+            None => return usage_error("`--color` needs `auto`, `always` or `never` after it"),
+        }
+        args.drain(..2);
+    }
+    let _ = PAINT.set(Paint(color.colors(std::io::stderr().is_terminal())));
     let Some(command) = args.first() else {
         return usage_error("no command given");
     };
     let rest = &args[1..];
     let result = match command.as_str() {
         "-h" | "--help" | "help" => {
-            print!("{USAGE}");
+            print!("{}", Paint(color.colors(std::io::stdout().is_terminal())).help(USAGE));
             return ExitCode::SUCCESS;
         }
         "-V" | "--version" => {
@@ -112,15 +144,16 @@ fn start() -> ExitCode {
     match result {
         Ok(code) => code,
         Err(Fail(message)) => {
-            eprintln!("ferry: {message}");
+            eprintln!("{} {message}", paint().error("error:"));
             ExitCode::FAILURE
         }
     }
 }
 
 fn usage_error(message: &str) -> ExitCode {
-    eprintln!("ferry: {message}");
-    eprintln!("Usage: ferry <command> [arguments...]. See `ferry --help`");
+    let paint = paint();
+    eprintln!("{} {message}", paint.error("error:"));
+    eprintln!("{} ferry <command> [arguments...]. See `ferry --help`", paint.good("Usage:"));
     ExitCode::from(2)
 }
 
@@ -156,7 +189,7 @@ fn new(spec: &str, library: bool) -> Result<ExitCode, Fail> {
             ),
         )?;
     }
-    eprintln!("  Created the {kind} {id} in {}", dir.display());
+    status("Created", &format!("the {kind} {id} in {}", dir.display()));
     Ok(ExitCode::SUCCESS)
 }
 
@@ -211,7 +244,7 @@ fn check() -> Result<ExitCode, Fail> {
     if errors > 0 {
         return Err(format!("{} has {errors} {}", project.id, if errors == 1 { "error" } else { "errors" }).into());
     }
-    eprintln!("  Checked {}: no errors", project.id);
+    status("Checked", &format!("{}: no errors", project.id));
     Ok(ExitCode::SUCCESS)
 }
 
@@ -248,8 +281,8 @@ fn show(diagnostic: &Diagnostic, script: &Path) -> String {
     let name = script.display().to_string();
     let file = diagnostic.file.clone().unwrap_or_else(|| name.clone());
     match std::fs::read_to_string(&file) {
-        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source(&name, &source),
-        _ => diagnostic.render(&name),
+        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(&name, &source, paint()),
+        _ => diagnostic.render_painted(&name, paint()),
     }
 }
 
@@ -267,7 +300,7 @@ fn add(spec: &str) -> Result<ExitCode, Fail> {
     let text = with_dependency(&text, &package.to_string(), &version);
     std::fs::write(&file, &text).map_err(|e| format!("can't write {}: {e}", file.display()))?;
     lock.write(&project.dir)?;
-    eprintln!("  Added {package} {version}");
+    status("Added", &format!("{package} {version}"));
     Ok(ExitCode::SUCCESS)
 }
 
@@ -394,10 +427,10 @@ fn write_launchers(home: &Home, project: &Project, dependencies: &[Dependency]) 
         std::fs::write(&path, launcher).map_err(|e| format!("can't write {}: {e}", path.display()))?;
         make_executable(&path)?;
     }
-    eprintln!("  Installed {} {}: {}", project.id, project.manifest.project.version, commands.join(", "));
+    status("Installed", &format!("{} {}: {}", project.id, project.manifest.project.version, commands.join(", ")));
     let on_path = std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == bin));
     if !on_path {
-        eprintln!("  Add {} to PATH to run them from anywhere", bin.display());
+        note(&format!("add {} to PATH to run them from anywhere", bin.display()));
     }
     Ok(ExitCode::SUCCESS)
 }

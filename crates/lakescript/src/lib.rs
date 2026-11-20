@@ -23,6 +23,7 @@ pub mod parser;
 mod patterns;
 mod stack;
 mod stdlib;
+pub mod terminal;
 pub mod token;
 mod types;
 pub mod value;
