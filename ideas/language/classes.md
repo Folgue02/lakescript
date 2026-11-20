@@ -128,6 +128,7 @@ $names.push('Ana');
 - The methods of an interface, and of the blocks that implement it, are always public, so they don't take `pub`.
 - An interface has no fields and no constructor, and calling it is an error. It can have static methods.
 - A class with a superclass keeps its interfaces. A method of an interface goes in its `implement` block, never with the class's own methods.
+- Like in Java, when two interfaces have a method with the same name and the same signature, one method is the method of both: it's written once, in either block, and the other block leaves it out. Writing it in both blocks is an error, and so are two interfaces whose methods have the same name and other signatures, since a class can't implement both.
 - An interface can extend other interfaces *(i.e. `interface IOrdered extends IEquals { ... }`)*. A class that implements it also implements the ones it extends, so `.is()` is true for all of them.
 
 ## Enums
@@ -199,12 +200,13 @@ An object prints as its class and its fields, in the order of the constructor th
 | `IPow<R, O>` | `O pow(R $other)` | `**` |
 | `INeg<O>` | `O neg()` | `-$x` |
 | `IIndex<K, V>` | `V get(K $key)` | `$x[...]` |
+| `ISetIndex<K, V>` | `void set(K $key, V $value)` | `$x[...] = v`, and with `IIndex`, `$x[...] += v` and `$x[...]++` |
 | `IContains<T>` | `bool contains(T $value)` | `-in` and `-notin` |
 
 - `R` is the type of the right side and `O` the type of the result, so `$vector * 2` and a dot product `$vector * $other` can both exist. The checker knows the type of `$a + $b` from the method.
 - The object goes on the left side: `$v * 2` works, `2 * $v` doesn't. For `-in`, the object is on the right *(i.e. `'x' -in $bag`)*.
 - `-` followed by a letter is a test operator *(i.e. `-f $path`)*, so the negative of an object is written `- Vector(1, 2)` or `-$v`.
-- `&&`, `||` and `??` stay built-in, since they skip their right side, and so do `=`, `.`, `..`, `.is()` and `.as()`. Setting an index *(i.e. `$x[0] = 1`)* doesn't work on objects yet.
+- `&&`, `||` and `??` stay built-in, since they skip their right side, and so do `=`, `.`, `..`, `.is()` and `.as()`.
 - Interfaces can be generic, with the same `<T>` as functions, and a class can implement the same interface several times with different types. The types of the arguments pick which method runs: the checker picks it before the script runs, and when it runs, the first version whose parameters' types match the arguments runs. With an operator, that's the type of the right side:
 
 ```
@@ -264,8 +266,6 @@ Built in steps, each with tests and examples:
 6. Done: exceptions as classes. A class extends a built-in exception, gets the field `message`, and is thrown and caught like one *(see [errors.md](errors.md))*. See `examples/errors.lks`.
 7. Done: importing a type from its own file *(i.e. `use people/Person;`)* with its rules, and modules that use each other. See `examples/shop/`.
 8. Done: `command` and `subcommand` *(see [cli.md](cli.md))*. See `examples/todo.lks`.
-
-Not working yet: two different interfaces with a method of the same name in one class.
 
 Not checked yet: that `@` isn't read before `@super(...)`, and that `@super(...)` runs once on every path. The checker only checks that the constructor has one.
 

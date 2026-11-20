@@ -824,19 +824,41 @@ impl<'a> Interpreter<'a> {
                     let value = self.pop();
                     let index = self.pop();
                     let container = self.pop();
-                    set_index(&container, index, value.clone(), span!())?;
+                    if let Value::Object(_) = &container {
+                        // `$x[k] = v` on an object is its `set`, from `ISetIndex`
+                        self.frames[fi].ip = ip;
+                        self.call_operator_method(&container, "set", "ISetIndex", "[] =", vec![index, value.clone()], span!())?;
+                    } else {
+                        set_index(&container, index, value.clone(), span!())?;
+                    }
                     self.stack.push(value);
                 }
                 Op::UpdateIndex { op, mode } => {
                     let rhs = self.pop();
                     let index = self.pop();
                     let container = self.pop();
-                    let old = index_value(container.clone(), index.clone(), span!())?;
+                    let object = matches!(container, Value::Object(_));
+                    if object {
+                        self.frames[fi].ip = ip;
+                    }
+                    let old = if object {
+                        self.call_operator_method(&container, "get", "IIndex", "[]", vec![index.clone()], span!())?
+                    } else {
+                        index_value(container.clone(), index.clone(), span!())?
+                    };
                     if mode > 0 && old.as_f64().is_none() {
                         return error(format!("`++` and `--` only work on numbers, and this is a {}", old.type_name()), span!());
                     }
-                    let new = binary(op, old.clone(), rhs).map_err(|m| op_error(m, span!()))?;
-                    set_index(&container, index, new.clone(), span!())?;
+                    let new = if matches!(old, Value::Object(_)) {
+                        self.operator(op, old.clone(), rhs, span!())?
+                    } else {
+                        binary(op, old.clone(), rhs).map_err(|m| op_error(m, span!()))?
+                    };
+                    if object {
+                        self.call_operator_method(&container, "set", "ISetIndex", "[] =", vec![index, new.clone()], span!())?;
+                    } else {
+                        set_index(&container, index, new.clone(), span!())?;
+                    }
                     self.stack.push(if mode == 2 { old } else { new });
                 }
                 Op::Destructure { names, rest } => {

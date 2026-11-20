@@ -145,15 +145,35 @@ impl Checker<'_> {
                     let entry = MemberSig { ty: Rc::new(sig), public, has_body: *has_body };
                     let table = if member.is_static { &mut body.static_methods } else { &mut body.methods };
                     if let Some(first) = table.get(&method.name).cloned() {
-                        // The same method of an interface implemented with other types *(i.e. `IMul<number>` and `IMul<Vector>`)*
-                        let other_block = decl.members.iter().any(|m| {
-                            matches!(&m.kind, MemberKind::Method { decl: d, .. } if d.name == method.name) && m.origin != member.origin
-                        });
-                        if !matches!(member.origin, Origin::Implement(_)) || !other_block {
+                        let earlier = decl
+                            .members
+                            .iter()
+                            .find(|m| matches!(&m.kind, MemberKind::Method { decl: d, .. } if d.name == method.name) && m.origin != member.origin);
+                        let interface_of = |origin: &Origin| match origin {
+                            Origin::Implement(TypeExpr { kind: TypeKind::Named { name, .. }, .. }) => Some(name.clone()),
+                            _ => None,
+                        };
+                        let (now, before) = (interface_of(&member.origin), earlier.and_then(|m| interface_of(&m.origin)));
+                        let (Some(now), Some(before)) = (now, before) else {
                             return self.fail(format!("`{}` has two methods named `{}`", decl.name, method.name), member.span);
+                        };
+                        let same_params = first.ty.params == entry.ty.params;
+                        if now == before && !same_params {
+                            // The same interface with other types *(i.e. `IMul<number>` and `IMul<Vector>`)*
+                            body.overloads.entry(method.name.clone()).or_insert_with(|| vec![first]).push(entry);
+                            continue;
                         }
-                        body.overloads.entry(method.name.clone()).or_insert_with(|| vec![first]).push(entry);
-                        continue;
+                        if same_params {
+                            // Like in Java: one method is the method of both interfaces
+                            return self.fail(
+                                format!("`{}` is already in `implement {before}`, and it counts for `{now}` too: write it once", method.name),
+                                member.span,
+                            );
+                        }
+                        return self.fail(
+                            format!("`{before}` and `{now}` both have a method `{}`, with other parameters, so a class can't implement both", method.name),
+                            member.span,
+                        );
                     }
                     table.insert(method.name.clone(), entry);
                 }
@@ -559,9 +579,26 @@ impl Checker<'_> {
             for i in all {
                 let required: Vec<String> = i.0.body.borrow().methods.iter().filter(|(_, m)| !m.has_body).map(|(n, _)| n.clone()).collect();
                 for name in required {
-                    let implemented = class.find(|b| b.methods.get(&name).filter(|m| m.has_body).cloned()).is_some();
-                    if !implemented {
+                    let found = class.find(|b| b.methods.get(&name).filter(|m| m.has_body).cloned());
+                    let Some((found, _)) = found else {
                         return self.fail(format!("`{}` implements `{}`, but it has no method `{name}`", decl.name, i.0.name), decl.span);
+                    };
+                    // Written in another interface's block, it must fit this one too
+                    if class.0.body.borrow().overloads.contains_key(&name) {
+                        continue;
+                    }
+                    let args = class.ancestor_args(&class.0.generics.iter().map(|g| Ty::Param(g.clone())).collect::<Vec<_>>(), &i);
+                    let mut map = i.map(args.first().map(|a| a.as_slice()).unwrap_or(&[]));
+                    map.insert(Rc::from("Self"), class.this_type());
+                    let expected = i.0.body.borrow().methods[&name].ty.clone();
+                    let Ty::Func(expected) = Ty::Func(expected).substitute(&map) else { unreachable!() };
+                    let same = expected.params == found.ty.params && self.assignable(&found.ty.ret, &expected.ret);
+                    if !same {
+                        let params: Vec<String> = expected.params.iter().map(|p| p.to_string()).collect();
+                        return self.fail(
+                            format!("`{name}` is the method of `{}` too, so it must be `{} {name}({})`", i.0.name, expected.ret, params.join(", ")),
+                            decl.span,
+                        );
                     }
                 }
             }
@@ -667,6 +704,28 @@ impl Checker<'_> {
         let (r, at) = right.unwrap();
         let names: Vec<String> = accepted.iter().map(|t| a(t)).collect();
         self.fail(format!("`{symbol}` on {} takes {}, not {}", a(object), names.join(" or "), a(&r)), at)
+    }
+
+    /// The type of the value `$x[k] = v` takes on an object, from its `ISetIndex<K, V>`.
+    pub(super) fn set_index_type(&mut self, object: &Ty, key: &Ty, key_span: Span, span: Span) -> Check<Ty> {
+        let Ty::Object(class, args) = object else { unreachable!("only for objects") };
+        let Some(Ty::Object(iface, _)) = self.scopes[0].types.get("ISetIndex").cloned() else { unreachable!("built in") };
+        let versions = class.ancestor_args(args, &iface);
+        if versions.is_empty() {
+            return self.fail(format!("`{}` has no `[] =`: implement `ISetIndex` to give it one", class.0.name), span);
+        }
+        let key = self.resolve(key);
+        for version in &versions {
+            let fits = match (&key, version.first()) {
+                (Ty::Any | Ty::Var(_), _) | (_, Some(Ty::Any)) | (_, None) => true,
+                (k, Some(p)) => k == p,
+            };
+            if fits {
+                return Ok(version.get(1).cloned().unwrap_or(Ty::Any));
+            }
+        }
+        let names: Vec<String> = versions.iter().filter_map(|v| v.first()).map(a).collect();
+        self.fail(format!("the keys of `[] =` on {} are {}, not {}", a(object), names.join(" or "), a(&key)), key_span)
     }
 
     /// The class a name means here: `Self` is the class being checked.
@@ -781,6 +840,7 @@ pub(super) fn operator_interfaces() -> Vec<(String, Ty)> {
         let ty = |word: &str| match word {
             "bool" => Ty::Bool,
             "number" => Ty::Number,
+            "void" => Ty::Void,
             other => Ty::Param(Rc::from(other)),
         };
         let generics: Vec<Rc<str>> = spec.generics.iter().map(|g| Rc::from(*g)).collect();

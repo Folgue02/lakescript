@@ -27,6 +27,7 @@ pub const INTERFACES: &[(&str, &str, Spec)] = &[
     ("IPow", "pow", binary("**")),
     ("INeg", "neg", Spec { generics: &["O"], params: &[], ret: "O" }),
     ("IIndex", "get", Spec { generics: &["K", "V"], params: &[("key", "K")], ret: "V" }),
+    ("ISetIndex", "set", Spec { generics: &["K", "V"], params: &[("key", "K"), ("value", "V")], ret: "void" }),
     ("IContains", "contains", Spec { generics: &["T"], params: &[("value", "T")], ret: "bool" }),
 ];
 

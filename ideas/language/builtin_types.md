@@ -299,7 +299,9 @@ const $files = ['a.txt', 'b.txt'];
 ```
 
 - The rest of the text runs through the shell (`sh` on Linux and macOS), so `|`, `>`, `&&` and `*` work.
-- On Windows, commands will run through `cmd`. Until that's implemented, they throw an error there.
+- Decided, not built yet: commands won't use a shell, on any system. `lks` will split the text into the program and its arguments and run it directly, so a command behaves the same on Linux, macOS and Windows, and nothing in it can ever run as shell code.
+    - So `|`, `>`, `&&` and `*` won't work inside `%x"..."`. They come back as methods of `command` *(i.e. a `.pipe()` to send its output to another command, and a way to write its output to a file)*, and a script that needs a real shell runs it explicitly *(i.e. `sh::run('...')`)*. Their exact names are still to be decided.
+    - Until then, commands throw an error on Windows.
 - A literal `{` or `}` is written twice, like in `f""` *(i.e. `%x"echo {{a,b}}"`)*.
 - Backslashes are passed to the shell as they are, like in regexes *(i.e. `%x"grep 'a\.b' notes.txt"`)*. Only `\"` is turned into `"`. A command can span several lines.
 - If the command fails (its exit code isn't 0), `run()` and `output()` throw a `CommandFailed`, like `set -e` in bash. With `try` you get a fallback: `(try %x"git describe".output()).orElse('dev')`. `status()` runs it without throwing.

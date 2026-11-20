@@ -2078,6 +2078,11 @@ impl<'a> Checker<'a> {
             ExprKind::Index { target: container, index, .. } => {
                 let c = self.expr(container, None)?;
                 match self.shallow(&c) {
+                    // `$x[k] = v` on an object: `V` of the `ISetIndex<K, V>` it implements for `K`
+                    object @ Ty::Object(..) => {
+                        let k = self.expr(index, None)?;
+                        self.set_index_type(&object, &k, index.span, target.span)?
+                    }
                     Ty::List(e) => {
                         self.expr(index, Some(&Ty::Number))?;
                         *e

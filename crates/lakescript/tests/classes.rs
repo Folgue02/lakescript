@@ -576,3 +576,36 @@ fn the_checker_finds_mistakes_with_exceptions() {
     assert!(rejected(&format!("{ERRORS}IOError $v = ConfigError('x', file: 'f');")).contains("its value is a ConfigError"));
     assert!(rejected(&format!("{ERRORS}const $e = ConfigError('a', file: 'f');\n$e.message = 'b';")).contains("`const` field"));
 }
+
+#[test]
+fn objects_can_set_an_index() {
+    let script = "
+        class Grid {
+            map<string, number> @cells = {};
+            implement IIndex<string, number> { number get(string $at) = @cells[$at] ?? 0; }
+            implement ISetIndex<string, number> { void set(string $at, number $value) { @cells[$at] = $value; } }
+        }
+        const $g = Grid();
+        $g['a1'] = 5;
+        $g['a1'] += 2;
+        $g['b2']++;
+        outln([$g['a1'], $g['b2'], $g['zz']]);
+    ";
+    assert_eq!(run(script), "[7, 1, 0]\n");
+    let g = "class G { implement ISetIndex<string, number> { void set(string $k, number $v) {} } }\n";
+    assert!(rejected(&format!("{g}G()[1] = 2;")).contains("the keys of `[] =` on a G are a string, not a number"));
+    assert!(rejected(&format!("{g}G()['a'] = 'x';")).contains("can't hold a string"));
+    assert!(rejected("class G {}\nG()['a'] = 1;").contains("implement `ISetIndex`"));
+}
+
+#[test]
+fn one_method_can_be_the_method_of_two_interfaces() {
+    let i = "interface IA { string label(); }\ninterface IB { string label(); string other() = 'o'; }\n";
+    let script = format!("{i}class C {{ implement IA {{ string label() = 'c'; }} implement IB {{ }} }}\noutln([C().label(), C().is(IA), C().is(IB), C().other()]);");
+    assert_eq!(run(&script), "['c', true, true, 'o']\n");
+    assert!(rejected(&format!("{i}class C {{ implement IA {{ string label() = 'c'; }} implement IB {{ string label() = 'd'; }} }}")).contains("write it once"));
+    assert!(rejected("interface IA { string label(); }\ninterface IB { number label(); }\nclass C { implement IA { string label() = 'c'; } implement IB { } }")
+        .contains("it must be `number label()`"));
+    assert!(rejected("interface IA { string label(); }\ninterface IB { string label(number $n); }\nclass C { implement IA { string label() = 'c'; } implement IB { string label(number $n) = 'x'; } }")
+        .contains("so a class can't implement both"));
+}
