@@ -30,8 +30,7 @@ fn closures_see_later_changes_and_make_them() {
         bump();
         bump();
         outln($count);
-        type Counter = () -> number;
-        Counter counter() {
+        (() -> number) counter() {
             let $n = 0;
             return () -> ++$n;
         }
@@ -60,8 +59,7 @@ fn every_pass_of_a_loop_has_its_own_variables() {
 #[test]
 fn closures_use_parameters_and_functions_around_them() {
     let script = "
-        type Adder = (number) -> number;
-        Adder adder(number $n) = ($x) -> $x + $n;
+        ((number) -> number) adder(number $n) = ($x) -> $x + $n;
         outln(adder(10)(5));
         void outer() {
             number fact(number $n) = if ($n < 2) 1 else $n * fact($n - 1);

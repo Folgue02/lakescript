@@ -31,7 +31,6 @@ pub enum StringPart {
 pub enum Keyword {
     Let,
     Const,
-    Type,
     Use,
     Pub,
     If,
@@ -61,7 +60,6 @@ impl Keyword {
         Some(match word {
             "let" => Let,
             "const" => Const,
-            "type" => Type,
             "use" => Use,
             "pub" => Pub,
             "if" => If,
@@ -92,7 +90,6 @@ impl Keyword {
         match self {
             Let => "let",
             Const => "const",
-            Type => "type",
             Use => "use",
             Pub => "pub",
             If => "if",

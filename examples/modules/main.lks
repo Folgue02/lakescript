@@ -6,7 +6,6 @@
 use std/path;                          // the standard library
 use math;                              // math.lks, next to this script
 use math::{clamp, $golden as $phi};    // some names, without the prefix
-use math::Stat;                        // a `pub type`
 use text/format as fmt;                // text/format.lks, with another name
 
 outln(math::average([2, 4, 9]));
@@ -16,9 +15,9 @@ outln(fmt::title('the module system'));
 outln(fmt::table({'name' => 'lakescript', 'kind' => 'scripting language'}));
 outln(path::name(fmt::$source));
 
-// Imported types work with or without the prefix
-const Stat $biggest = ($values) -> $values.max() ?? 0;
-const math::Stat $mean = math::average;
+// A function type, written out
+const (list<number>) -> number $biggest = ($values) -> $values.max() ?? 0;
+const $mean = math::average;
 outln(f"{$biggest([3, 8, 1])} {$mean([3, 8, 1]).round(2)}");
 outln(f"math::average ran {math::averagesSoFar()} times");
 

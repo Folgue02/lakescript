@@ -32,7 +32,7 @@
 
 | Group           | Words |
 |-----------------|-------|
-| Declarations    | `let` `const` `type` |
+| Declarations    | `let` `const` `class` `interface` `enum` |
 | Modules         | `use` `pub` |
 | Control flow    | `if` `else` `for` `in` `while` `switch` `case` `default` `break` `continue` `return` `yield` |
 | Errors          | `try` `catch` `finally` `throw` |

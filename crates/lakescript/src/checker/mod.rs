@@ -42,7 +42,8 @@ struct Scope {
     modules: HashMap<String, ModuleSig>,
     /// Types narrowed by a condition *(i.e. not `null` after `$x != null`)*.
     narrowed: HashMap<String, Ty>,
-    aliases: HashMap<String, Ty>,
+    /// Types imported with `use m::{T}`.
+    types: HashMap<String, Ty>,
     generics: HashSet<String>,
     /// Functions of this block whose declaration hasn't been reached yet.
     /// Other functions can call them, but the block's own statements can't.
@@ -403,7 +404,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     n => {
-                        if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.aliases.get(n).cloned()) {
+                        if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
                             alias
                         } else if self.scopes.iter().any(|s| s.generics.contains(n)) {
                             Ty::Param(Rc::from(n))
@@ -429,7 +430,7 @@ impl<'a> Checker<'a> {
                 _ => stmt,
             };
             match &inner.kind {
-                StmtKind::Use(_) | StmtKind::TypeAlias { .. } => {
+                StmtKind::Use(_) => {
                     self.stmt(stmt)?;
                     early.insert(i);
                 }
@@ -509,10 +510,6 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Function(decl) => self.function(decl, span)?,
-            StmtKind::TypeAlias { name, ty } => {
-                let t = self.ty(ty)?;
-                self.scopes.last_mut().unwrap().aliases.insert(name.clone(), t);
-            }
             StmtKind::If { cond, then, otherwise } => {
                 let (yes, no) = self.condition(cond)?;
                 self.scoped_stmt(then, &yes)?;
@@ -796,7 +793,7 @@ impl<'a> Checker<'a> {
                         if let Some(f) = module.functions.get(&item.name) {
                             self.scopes.last_mut().unwrap().funcs.insert(local, f.clone());
                         } else if let Some(t) = module.types.get(&item.name) {
-                            self.scopes.last_mut().unwrap().aliases.insert(local, t.clone());
+                            self.scopes.last_mut().unwrap().types.insert(local, t.clone());
                         } else {
                             return self.fail(format!("`{}` has no `pub` function or type named `{}`", module.path, item.name), span);
                         }
@@ -853,13 +850,11 @@ impl<'a> Checker<'a> {
         checker.file = Some(shown.clone());
         let mut public_fns = Vec::new();
         let mut public_consts = Vec::new();
-        let mut public_types = Vec::new();
         for stmt in &program {
             if let StmtKind::Pub(inner) = &stmt.kind {
                 match &inner.kind {
                     StmtKind::Function(d) => public_fns.push(d.name.clone()),
                     StmtKind::Let { name, .. } => public_consts.push(name.clone()),
-                    StmtKind::TypeAlias { name, .. } => public_types.push(name.clone()),
                     _ => {}
                 }
             }
@@ -871,7 +866,7 @@ impl<'a> Checker<'a> {
             };
             let declaration = matches!(
                 inner.kind,
-                StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { .. }
+                StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::Let { .. }
             );
             if !declaration {
                 return Err(located(Diagnostic::new(
@@ -886,12 +881,6 @@ impl<'a> Checker<'a> {
         for name in public_fns {
             if let Some(f) = globals.funcs.get(&name) {
                 sig.functions.insert(name, f.clone());
-            }
-        }
-        for name in public_types {
-            if let Some(t) = globals.aliases.get(&name) {
-                let ty = checker.resolve(t);
-                sig.types.insert(name, forget_vars(&ty));
             }
         }
         for name in public_consts {

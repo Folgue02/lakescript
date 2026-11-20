@@ -117,9 +117,6 @@ pub struct Compiler<'a> {
     module: bool,
     /// What a module makes available with `pub`.
     pub public: HashSet<String>,
-    /// Type aliases, replaced by what they stand for in `.is()`, `.as()`
-    /// and `catch`, since types are removed before the script runs.
-    aliases: HashMap<String, TypeExpr>,
     span: Span,
     stack_base: usize,
     stack_budget: usize,
@@ -134,7 +131,6 @@ impl<'a> Compiler<'a> {
             declared: HashSet::new(),
             module: false,
             public: HashSet::new(),
-            aliases: HashMap::new(),
             span: Span::default(),
             stack_base: stack_position(),
             stack_budget,
@@ -166,7 +162,7 @@ impl<'a> Compiler<'a> {
                 };
                 let declaration = matches!(
                     inner.kind,
-                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { .. }
+                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::Let { .. }
                 );
                 if !declaration {
                     self.span = stmt.span;
@@ -252,27 +248,12 @@ impl<'a> Compiler<'a> {
     }
 
     fn ty(&mut self, ty: &TypeExpr) -> u32 {
-        let ty = self.expand(ty, 0);
+        let ty = ty.clone();
         let types = &mut self.f().proto.types;
         types.push(ty);
         types.len() as u32 - 1
     }
 
-    /// A type with its aliases replaced. An alias from another module stays
-    /// as it is, and checking it fails when it runs.
-    fn expand(&self, ty: &TypeExpr, depth: usize) -> TypeExpr {
-        let kind = match &ty.kind {
-            TypeKind::Named { name, args } if args.is_empty() && depth < 64 && self.aliases.contains_key(name) => {
-                return self.expand(&self.aliases[name], depth + 1);
-            }
-            TypeKind::Named { name, args } => {
-                TypeKind::Named { name: name.clone(), args: args.iter().map(|a| self.expand(a, depth + 1)).collect() }
-            }
-            TypeKind::Nullable(inner) => TypeKind::Nullable(Box::new(self.expand(inner, depth + 1))),
-            other => other.clone(),
-        };
-        TypeExpr { kind, span: ty.span }
-    }
 
     /// An error thrown when this point of the code runs.
     fn fail(&mut self, message: impl AsRef<str>) {
@@ -501,7 +482,6 @@ impl<'a> Compiler<'a> {
                     self.define(target);
                 }
             }
-            StmtKind::TypeAlias { .. } => {}
             StmtKind::Pub(inner) => {
                 match &inner.kind {
                     StmtKind::Function(decl) => {
@@ -509,10 +489,6 @@ impl<'a> Compiler<'a> {
                     }
                     StmtKind::Let { name, .. } => {
                         self.public.insert(format!("${name}"));
-                    }
-                    // Types are removed before running: this only lets `use m::{Type}` find it
-                    StmtKind::TypeAlias { name, .. } => {
-                        self.public.insert(format!("type {name}"));
                     }
                     _ => {}
                 }
@@ -604,16 +580,6 @@ impl<'a> Compiler<'a> {
     /// so functions declared further down can be called from the ones above.
     /// Only for locals: globals are already found when they're used.
     fn hoist(&mut self, stmts: &[Stmt]) {
-        // Aliases too, like the checker does
-        for stmt in stmts {
-            let inner = match &stmt.kind {
-                StmtKind::Pub(inner) => &**inner,
-                _ => stmt,
-            };
-            if let StmtKind::TypeAlias { name, ty } = &inner.kind {
-                self.aliases.insert(name.clone(), ty.clone());
-            }
-        }
         if self.at_global_scope() {
             return;
         }
@@ -1439,7 +1405,7 @@ fn collect_stmt(stmt: &Stmt, inside: bool, out: &mut HashSet<String>) {
             }
             collect_function(decl, true, out);
         }
-        StmtKind::TypeAlias { .. } | StmtKind::Break | StmtKind::Continue | StmtKind::Use(_) => {}
+        StmtKind::Break | StmtKind::Continue | StmtKind::Use(_) => {}
         StmtKind::If { cond, then, otherwise } => {
             collect_expr(cond, inside, out);
             collect_stmt(then, inside, out);

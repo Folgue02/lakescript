@@ -33,6 +33,7 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
     - [errors.md](language/errors.md): exceptions, `try`/`catch`/`finally`, `throw` and `try` as an expression.
     - [cli.md](language/cli.md): the command-line arguments of a script, `command`, `subcommand` and flags.
     - [modules.md](language/modules.md): `use`, `pub` and how modules match folders.
+    - [classes.md](language/classes.md): classes, interfaces and enums *(phase 7, being designed)*.
 - [stdlib/](stdlib): the standard library.
 - [tooling/](tooling): the interpreter and the tools around it.
     - [lks.md](tooling/lks.md): the command line of the interpreter.

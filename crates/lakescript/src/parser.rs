@@ -259,13 +259,8 @@ impl Parser {
                 let name = self.expect_variable("after `const`")?;
                 self.declaration_value(true, name, ty)?
             }
-            TokenKind::Keyword(Keyword::Type) => {
-                self.advance();
-                let name = self.expect_ident("for the type alias")?;
-                self.expect(&TokenKind::Eq, "after the name of the type alias")?;
-                let ty = self.parse_type()?;
-                self.expect(&TokenKind::Semicolon, "after the type alias")?;
-                StmtKind::TypeAlias { name, ty }
+            TokenKind::Ident(word) if word == "type" && matches!(self.peek_at(1), TokenKind::Ident(_)) && self.peek_at(2) == &TokenKind::Eq => {
+                return self.error_here("there are no type aliases: write the type where it's used, or declare an interface");
             }
             TokenKind::Keyword(Keyword::If) => self.if_statement()?,
             TokenKind::Keyword(Keyword::While) => {
@@ -318,10 +313,16 @@ impl Parser {
                 let inner = self.statement()?;
                 let allowed = matches!(
                     inner.kind,
-                    StmtKind::Function(_) | StmtKind::Let { constant: true, .. } | StmtKind::TypeAlias { .. }
+                    StmtKind::Function(_) | StmtKind::Let { constant: true, .. }
                 );
                 if !allowed {
-                    return Err(Diagnostic::new("`pub` goes before functions, constants declared with `const` and type aliases", inner.span));
+                    return Err(Diagnostic::new("`pub` goes before functions and constants declared with `const`", inner.span));
+                }
+                if let StmtKind::Let { name, ty: None, .. } = &inner.kind {
+                    return Err(Diagnostic::new(
+                        format!("`pub const ${name}` needs its type written, like a function's return type: `pub const string ${name} = ...;`"),
+                        inner.span,
+                    ));
                 }
                 StmtKind::Pub(Box::new(inner))
             }
@@ -1448,12 +1449,13 @@ mod tests {
 
     #[test]
     fn types() {
-        assert_eq!(stmts("type Predicate = (string) -> bool;"), "(type Predicate (string) -> bool)");
-        assert_eq!(stmts("type F = (number) -> (number) -> number;"), "(type F (number) -> (number) -> number)");
-        assert_eq!(stmts("type V = (...string) -> string;"), "(type V (...string) -> string)");
-        assert_eq!(stmts("type N = ?((number) -> number);"), "(type N ?((number) -> number))");
-        assert_eq!(stmts("type R = (number) -> ?number;"), "(type R (number) -> ?number)");
-        assert!(error("type B = ?(number) -> number;").contains("ambiguous"));
+        assert_eq!(stmts("void f((string) -> bool $p) {}"), "(fn void f (((string) -> bool $p)) {})");
+        assert_eq!(stmts("void f((number) -> (number) -> number $p) {}"), "(fn void f (((number) -> (number) -> number $p)) {})");
+        assert_eq!(stmts("void f((...string) -> string $p) {}"), "(fn void f (((...string) -> string $p)) {})");
+        assert_eq!(stmts("void f(?((number) -> number) $p) {}"), "(fn void f ((?((number) -> number) $p)) {})");
+        assert_eq!(stmts("void f((number) -> ?number $p) {}"), "(fn void f (((number) -> ?number $p)) {})");
+        assert!(error("void f(?(number) -> number $p) {}").contains("ambiguous"));
+        assert!(error("type Predicate = (string) -> bool;").contains("no type aliases"));
     }
 
     #[test]

@@ -169,8 +169,9 @@ fn standard_library_modules() {
 fn types_written_in_the_code() {
     assert!(rejected("Thing $t = 1;").contains("unknown type `Thing`"));
     assert!(rejected("outln(1.is(Nope));").contains("unknown type `Nope`"));
-    assert_eq!(ok("type Names = list<string>;\nNames $n = ['a'];\noutln($n);"), "['a']\n");
-    assert!(rejected("type Check = (string) -> bool;\nCheck $c = ($x) -> $x.length();").contains("its value is a (string) -> number"));
+    assert_eq!(ok("list<string> $n = ['a'];\noutln($n);"), "['a']\n");
+    assert!(rejected("(string) -> bool $c = ($x) -> $x.length();").contains("its value is a (string) -> number"));
+    assert!(rejected("type Names = list<string>;").contains("no type aliases"));
 }
 
 #[test]
@@ -228,8 +229,3 @@ fn functions_can_call_each_other_in_any_order() {
     assert!(rejected("void f() {}\nvoid f() {}").contains("a function named `f` already exists"));
 }
 
-#[test]
-fn aliases_work_in_is_and_as() {
-    let script = "type Pair = list<number>;\ntype Num = number;\nconst $x = <any>[1, 2];\noutln([$x.is(Pair), (5).is(Num), (5).is(?Pair)]);\noutln($x.as(Pair).length());";
-    assert_eq!(ok(script), "[true, true, false]\n2\n");
-}

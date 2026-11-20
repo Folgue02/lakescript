@@ -206,7 +206,6 @@ pub enum StmtKind {
     LetList { constant: bool, names: Vec<String>, rest: Option<String>, value: Expr },
     Function(FunctionDecl),
     /// `type Name = ...;`
-    TypeAlias { name: String, ty: TypeExpr },
     If { cond: Expr, then: Box<Stmt>, otherwise: Option<Box<Stmt>> },
     While { cond: Expr, body: Box<Stmt> },
     For { pattern: ForPattern, iterable: Expr, body: Box<Stmt> },
@@ -595,7 +594,6 @@ impl fmt::Display for Stmt {
                 write!(f, ")")
             }
             Switch(switch) => write!(f, "{switch}"),
-            TypeAlias { name, ty } => write!(f, "(type {name} {ty})"),
             If { cond, then, otherwise } => match otherwise {
                 Some(o) => write!(f, "(if {cond} {then} {o})"),
                 None => write!(f, "(if {cond} {then})"),

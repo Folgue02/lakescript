@@ -1,6 +1,7 @@
-// Imported modules only have declarations: functions, `const`, `let` and `type`.
+// Imported modules only have declarations: functions, `const` and `let`.
+// What's `pub` always has its type written, like `number` below.
 
-pub const $golden = (1 + 5 ** 0.5) / 2;
+pub const number $golden = (1 + 5 ** 0.5) / 2;
 
 // A `let` is the module's own state: only its functions can change it
 let $averages = 0;
@@ -11,9 +12,6 @@ pub number average(list<number> $values) {
 }
 
 pub number averagesSoFar() = $averages;
-
-// Type aliases can be shared too
-pub type Stat = (list<number>) -> number;
 
 pub number clamp(number $n, number $low, number $high) = $n.clamp($low, $high);
 

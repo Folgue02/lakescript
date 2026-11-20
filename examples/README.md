@@ -24,7 +24,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [collections.lks](collections.lks) | List and map methods: grouping, sorting (also with a comparison function), folding, counting |
 | [patterns.lks](patterns.lks) | `-like`, regexes with `-match` and `.match()`, path tests |
 | [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result` |
-| [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, type aliases |
+| [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, function types |
 
 ## Scripts that use the system
 
@@ -36,7 +36,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
 | [json.lks](json.lks) | `std/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
 | [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
-| [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, a shared `pub type` and a module's private `let` | |
+| [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, typed `pub const`s and a module's private `let` | |
 | [backup/backup.lks](backup/backup.lks) | A real script: arguments, a JSON config, a helper module, `tar`, rotating old backups | `lks examples/backup/backup.lks <folder> <backups folder>` |
 
 ## A project

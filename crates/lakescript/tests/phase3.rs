@@ -84,7 +84,7 @@ fn modules_next_to_the_script() {
     let dir = TempDir::new("modules");
     dir.file(
         "helpers.lks",
-        "pub const $greeting = 'Hello';\n\
+        "pub const string $greeting = 'Hello';\n\
          pub string greet(string $name) = f\"{$greeting} {$name}\";\n\
          string secret() = 'hidden';\n",
     );
@@ -112,38 +112,9 @@ fn only_pub_things_can_be_used() {
 }
 
 #[test]
-fn pub_types_can_be_imported() {
-    let dir = TempDir::new("pubtypes");
-    dir.file(
-        "filters.lks",
-        "pub type Filter = (any) -> list<any>;\n\
-         pub Filter identity() = ($v) -> [$v];\n",
-    );
-    let script = "use filters;\n\
-                  use filters::{Filter, identity};\n\
-                  list<any> apply(Filter $f, any $v) = $f($v);\n\
-                  const filters::Filter $same = identity();\n\
-                  outln(apply($same, 1));\n";
-    // Without the checker, the VM skips the imported type
-    assert_eq!(run_in(&dir, script), "[1]\n");
-    // With the checker, both `Filter` and `filters::Filter` are known types
-    let path = dir.file("main.lks", script);
-    let output = CapturedOutput::new();
-    let mut engine = Engine::with_output(output.clone());
-    if let Err(e) = engine.run_file(&path) {
-        panic!("{}", e.render("main.lks"));
-    }
-    assert_eq!(output.text(), "[1]\n");
-    let mut engine = Engine::with_output(CapturedOutput::new());
-    let bad = dir.file("bad.lks", "use filters;\nconst filters::Missing $x = 1;\n");
-    let message = engine.run_file(&bad).unwrap_err().render("bad.lks");
-    assert!(message.contains("has no `pub` type named `Missing`"), "{message}");
-}
-
-#[test]
 fn modules_load_once_and_only_when_used() {
     let dir = TempDir::new("once");
-    dir.file("counter.lks", "pub const $value = tick();\n");
+    dir.file("counter.lks", "pub const number $value = tick();\n");
     dir.file("other.lks", "use counter;\npub number read() = counter::$value;\n");
     let script = dir.file(
         "main.lks",
@@ -184,8 +155,8 @@ fn errors_in_modules_name_their_file() {
 #[test]
 fn circular_imports_are_an_error() {
     let dir = TempDir::new("cycle");
-    dir.file("a.lks", "use b;\npub const $x = b::$y;\n");
-    dir.file("b.lks", "use a;\npub const $y = a::$x;\n");
+    dir.file("a.lks", "use b;\npub const number $x = b::$y;\n");
+    dir.file("b.lks", "use a;\npub const number $y = a::$x;\n");
     assert!(error_in(&dir, "use a;\noutln(a::$x);").contains("circular import"));
 }
 
@@ -521,5 +492,9 @@ fn modules_can_keep_private_variables() {
     dir.file("public.lks", "pub let $x = 1;\n");
     let bad = dir.file("bad2.lks", "use public;\n");
     let message = Engine::with_output(CapturedOutput::new()).run_file(&bad).unwrap_err().message;
-    assert!(message.contains("`pub` goes before functions, constants"), "{message}");
+    assert!(message.contains("`pub` goes before functions and constants"), "{message}");
+    dir.file("untyped.lks", "pub const $x = 1;\n");
+    let bad = dir.file("bad3.lks", "use untyped;\n");
+    let message = Engine::with_output(CapturedOutput::new()).run_file(&bad).unwrap_err().message;
+    assert!(message.contains("`pub const $x` needs its type written"), "{message}");
 }

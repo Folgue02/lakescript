@@ -50,8 +50,7 @@ string describe(any $value) = switch ($value) {
 outln(describe(7));
 outln(describe('HI'));
 
-// Type aliases give long types a name
-type Check = (string) -> bool;
+// Function types are written like the function: parameters, `->`, the result
 const $long = ($s) -> $s.length() > 2;
-Check $test = $long;
+(string) -> bool $test = $long;
 outln($names.filter($test));

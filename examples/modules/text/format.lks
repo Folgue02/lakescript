@@ -2,7 +2,7 @@
 
 use std/process;
 
-pub const $source = process::scriptPath() ?? 'unknown';
+pub const string $source = process::scriptPath() ?? 'unknown';
 
 pub string title(string $text) = $text.capitalizeWords();
 

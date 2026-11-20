@@ -9,7 +9,7 @@
 - Should allow generics. The type parameters go after the name *(i.e. `T first<T>(list<T> $items) = $items[0];`)*. They're inferred when calling, so they're never written in a call: `first($names)`.
 - Functions can call each other in any order: a function can call any function declared in the same block or around it, even one further down, so recursive functions that call each other work *(i.e. a parser with `expr()` and `term()`)*. A function can call itself.
     - The statements of the block itself can only call a function after its declaration, since it doesn't exist before that line runs *(i.e. `f();` above `void f() { ... }` is an error)*. The checker says so before anything runs.
-    - The signatures of a block's functions, and its `type` aliases, are known from the start of the block, so calls to functions further down are checked like any other.
+    - The signatures of a block's functions are known from the start of the block, so calls to functions further down are checked like any other.
 
 ```
 bool even(number $n) = if ($n == 0) true else odd($n - 1);
@@ -93,23 +93,12 @@ list<(string) -> bool>          // inside generics
 - If nullable types are written with a `?` prefix, `?(number) -> number` is ambiguous. Use parentheses: `?((number) -> number)` is a nullable function, `(number) -> ?number` is a function that returns a nullable number.
 - There are no C-style casts like `(number) $x`, since they would clash with this syntax. Conversions are done with methods *(i.e. `$x.toNumber()`)*.
 
-### Type aliases
+### No type aliases
 
-Long types can be given a name with `type`:
+There is no `type` to give a type another name. A name for a type always means a real type: a built-in one, a class, an interface or an enum *(see [classes.md](classes.md))*.
 
-```
-type Predicate = (string) -> bool;
-type Adder = (number) -> number;
-
-list<string> filter(list<string> $items, Predicate $check) {
-    // ...
-}
-
-Adder makeAdder(number $n) = ...;
-```
-
-- Aliases also work in `.is()`, `.as()` and `catch` *(i.e. `$value.is(Pair)`)*: they're replaced by the type they stand for when the script is compiled.
-    - For now, this only works for aliases of the same file. An alias imported from another module *(i.e. `core::Filter`)* can be used in every other place, but `.is()`, `.as()` and `catch` give an error that says to write the type it stands for, since types are removed before the script runs and the other module's aliases aren't known then.
+- A type with a name can be told apart at runtime by `.is()`, `.as()` and `catch`, in any module. An alias would be replaced by what it stands for, which makes `$value.is(core::Filter)` impossible to check across modules and lets two aliases refer to each other forever.
+- A long function type is written out *(i.e. `(any) -> list<any>`)*. An interface with a single method can name it when that's clearer.
 
 ## Names ending in `?`
 

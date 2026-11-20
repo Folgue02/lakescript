@@ -2,6 +2,8 @@
 
 Modules work like Java's packages: they're namespaces, and they match the folder structure. Every file is a module, and its path is the path of the file from one of the roots of the [module path](#module-path), without the extension *(i.e. `src/company/utils/strings.lks` is `company/utils/strings`)*.
 
+Modules and folders are named in lowercase, with words separated by `_` *(i.e. `text_utils.lks`)*. A file that holds a single class, interface or enum is named like it, in PascalCase *(i.e. `ChildClass.lks`, see [classes.md](classes.md))*.
+
 Paths are never relative: a module is always imported with the same path, no matter which file imports it. There is no `./` or `../`:
 
 ```
@@ -101,35 +103,23 @@ Only what's marked with `pub` can be used from other modules. Everything else is
 
 ```
 // src/config/paths.lks
-pub const $defaultPath = 'config.json';
+pub const string $defaultPath = 'config.json';
 
 pub string load(string $path) = _read($path).trim();
 
 string _read(string $path) = readFile($path);   // only usable in this file
 ```
 
-- `pub` goes before functions, constants declared with `const` and type aliases *(i.e. `pub type Predicate = (string) -> bool;`)*.
+- `pub` goes before functions, constants declared with `const`, classes, interfaces and enums.
+- A `pub const` always has its type written *(i.e. `pub const string $defaultPath = 'config.json';`)*, like a function always has its return type. So everything another module can use has its type in its declaration, and the checker can read it without checking the code around it *(see [classes.md](classes.md#circular-imports))*.
 - `let` variables can't be `pub`, so another module can never change them. A module that wants to share changing state does it through functions.
 - Importing something that isn't `pub` is an error *(i.e. `use config/paths::_read;`)*.
-- `pub` type aliases are imported like functions, and can also be reached with `::` wherever a type goes:
-
-```
-// src/filters/core.lks
-pub type Filter = (any) -> list<any>;
-
-// Another file
-use filters/core;
-use filters/core::Filter;
-
-list<any> apply(Filter $f, any $v) = $f($v);
-const core::Filter $same = ($v) -> [$v];
-```
 
 ## Loading
 
 - Every module is loaded once, like PHP's `require_once` or C's `#pragma once`. All the files that `use` it share the same module, and its constants are only computed once.
 - A module is loaded the first time something in it is used, not when the `use` line is read.
-- An imported module can only have declarations at its top level: functions, `const`, `let` and `type`. Importing it never prints, runs commands or touches files.
+- An imported module can only have declarations at its top level: functions, `const`, `let`, classes, interfaces and enums. Importing it never prints, runs commands or touches files.
     - A `let` at the top level of a module is its own state *(i.e. the position of a parser, or a cache)*. It can't be `pub`: other modules can't read or change it, only the module's functions. To share it, a `pub` function returns it.
     - A `const` can still call a function *(i.e. `const $config = loadConfig();`)*. It runs once, when the module is loaded, only to compute the value.
     - Anything else at the top level of an imported module is an error *(i.e. `outln('loaded');`)*. Only the script being run can have statements at its top level.
@@ -139,4 +129,4 @@ const core::Filter $same = ($v) -> [$v];
 
 - `::` is a single token, so it's never confused with a symbol *(`:name`)*.
 - The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*.
-- Circular imports are an error: if `a` uses `b`, `b` can't use `a`, directly or through other modules. This keeps the rule that a module is complete before another one uses it, so modules can still be loaded one after the other.
+- Modules can import each other, directly or through other modules *(i.e. `Order` and `Customer`, each in its own file)*. This works because a module's top level only has declarations, and everything `pub` has its type written. How it works is in [classes.md](classes.md#circular-imports). From phase 7: until then, circular imports are an error.

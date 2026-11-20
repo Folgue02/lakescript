@@ -22,7 +22,7 @@ pub struct ModuleSig {
     pub path: String,
     pub functions: HashMap<String, Rc<FnTy>>,
     pub constants: HashMap<String, Ty>,
-    /// `pub type` aliases.
+    /// `pub` classes, interfaces and enums *(phase 7)*.
     pub types: HashMap<String, Ty>,
 }
 

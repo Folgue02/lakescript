@@ -1,6 +1,6 @@
 // Sizes in bytes, shared by both commands in bin/.
 
-pub const $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+pub const list<string> $units = ['B', 'KB', 'MB', 'GB', 'TB'];
 
 // 1536 -> "1.5 KB"
 pub string human(number $bytes) {
