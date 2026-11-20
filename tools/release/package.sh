@@ -31,10 +31,10 @@ for bin in lks ferry; do
 done
 cp LICENSE NOTICE "$stage/"
 
-# The page of the standard library, built with an `lks` for this machine,
-# since the one just built may be for another system
+# The page of the standard library *(see tools/docs)*
 mkdir -p "$stage/doc"
-cargo run --quiet --release --locked -p lks -- tools/docs/stdlib.lks "$stage/doc/stdlib.html" >/dev/null
+python="$(command -v python3 || command -v python)"
+"$python" tools/docs/stdlib.py "$stage/doc/stdlib.html" >/dev/null
 cp "$stage/doc/stdlib.html" "dist/lakescript-$version-stdlib.html"
 
 cd dist

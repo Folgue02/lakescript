@@ -26,7 +26,7 @@ $ages['Daniel'] = 24;       // $ages is a map<string, number>
 
 - It reads the script once, from top to bottom, keeping the type of every variable and function. Modules imported with `use` are checked too, once each.
 - It's conservative: when it can't be sure of a type, it uses `any`, so it never rejects a script that would run without errors because of types.
-- The types of the built-in methods and of the standard library come from the tables in `ideas/stdlib`, so the docs and the checker always agree *(`tools/docs/prelude.lks` turns them into `crates/lakescript/src/checker/prelude.txt`)*.
+- The types of the built-in methods and of the standard library come from the tables in `ideas/stdlib`, so the docs and the checker always agree *(`tools/docs/prelude.py` turns them into `crates/lakescript/src/checker/prelude.txt`)*.
 - Lists are invariant: a `list<string>` can't be passed where a `list<?string>` is expected, since the function could add a `null` to it. `any` is accepted everywhere.
 - Functions declared with a return type other than `void` must end with a `return` or a `throw` on every path.
 - A function registered by a program that embeds Lakescript is `any`: it takes any arguments and returns `any`.

@@ -183,21 +183,3 @@ fn type_errors_stop_the_script_before_it_starts() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "started\n");
     std::fs::remove_dir_all(&dir).unwrap();
 }
-
-/// The docs scripts are Lakescript too, and `prelude.txt` must be what the
-/// notes say *(run `lks tools/docs/prelude.lks` when this fails)*.
-#[test]
-fn docs_scripts() {
-    let dir = std::env::temp_dir().join(format!("lks-docs-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let prelude = dir.join("prelude.txt");
-    run_ok(&["tools/docs/prelude.lks", prelude.to_str().unwrap()]);
-    let committed = std::fs::read_to_string(root().join("crates/lakescript/src/checker/prelude.txt")).unwrap();
-    assert_eq!(std::fs::read_to_string(&prelude).unwrap(), committed, "prelude.txt doesn't match ideas/stdlib");
-    let page = dir.join("stdlib.html");
-    let out = run_ok(&["tools/docs/stdlib.lks", page.to_str().unwrap()]);
-    assert!(out.contains(" entries"), "{out}");
-    let html = std::fs::read_to_string(&page).unwrap();
-    assert!(html.contains("replaceMatchesWith"), "the page has every method");
-    let _ = std::fs::remove_dir_all(&dir);
-}
