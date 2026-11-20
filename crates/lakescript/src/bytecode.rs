@@ -143,6 +143,8 @@ pub enum Op {
     SetStatic(u32),
     /// Gives a class a static field: pops the value and the class.
     DefineStatic { name: u32, constant: bool },
+    /// Gives a command its subcommand *(i.e. `Git::Commit`)*: pops it and the command.
+    DefineMember(u32),
     /// `@super(...)`: the class whose superclass's constructor runs, `@` and the arguments are on the stack.
     SuperNew(u32),
     SuperNewComplex(u32),
@@ -257,6 +259,45 @@ pub struct ClassInfo {
     pub fields: Vec<(Rc<str>, bool, bool, bool)>,
     pub methods: Vec<Rc<str>>,
     pub static_methods: Vec<Rc<str>>,
+    /// For a command: its arguments. The enums of its fields are pushed after the interfaces.
+    pub command: Option<Rc<CommandInfo>>,
+}
+
+/// What `Git::parse()` and `Git::help()` need *(see `ideas/language/cli.md`)*.
+#[derive(Debug, Clone)]
+pub struct CommandInfo {
+    pub doc: Option<String>,
+    pub args: Vec<ArgInfo>,
+    /// The name of each subcommand in its command *(i.e. `Commit`)*, and its `///` comment.
+    pub subcommands: Vec<(Rc<str>, Option<String>)>,
+    pub optional_subcommand: bool,
+    /// How many enums the fields use, pushed in order.
+    pub enums: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArgInfo {
+    pub name: Rc<str>,
+    pub doc: Option<String>,
+    /// Given by name *(i.e. `--keep 3`)*, instead of by position.
+    pub flag: bool,
+    pub short: Option<char>,
+    pub count: bool,
+    pub variadic: bool,
+    pub kind: ArgType,
+    pub nullable: bool,
+    pub has_value: bool,
+    /// The default, as it's written, for the help.
+    pub default: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ArgType {
+    Str,
+    Number,
+    Bool,
+    /// One of the values of the enum with this number *(see `CommandInfo::enums`)*.
+    Enum(u32),
 }
 
 /// The names of the classes a type uses, in order and without repeating them
@@ -339,6 +380,7 @@ impl Proto {
                 | Op::Static { name, .. }
                 | Op::SetStatic(name)
                 | Op::DefineStatic { name, .. }
+                | Op::DefineMember(name)
                 | Op::SuperMethod { name, .. }
                 | Op::EnumValue { name, .. }
                 | Op::EnumValueComplex { name, .. } => {

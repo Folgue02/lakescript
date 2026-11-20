@@ -162,6 +162,8 @@ pub struct ClassSig {
     pub name: Rc<str>,
     pub interface: bool,
     pub is_enum: bool,
+    /// A command or a subcommand, whose objects only come from `parse()`.
+    pub command: bool,
     pub generics: Vec<Rc<str>>,
     /// Filled once every class of the block has a name, so they can use each other.
     pub body: RefCell<ClassBody>,
@@ -191,6 +193,8 @@ pub struct ClassBody {
     pub own_constructor: bool,
     /// The values of an enum, in order.
     pub values: Vec<String>,
+    /// For the type of a command's `subcommand` field: the subcommands it can be.
+    pub subcommands: Vec<ClassRef>,
 }
 
 #[derive(Clone)]

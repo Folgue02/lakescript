@@ -263,7 +263,7 @@ Built in steps, each with tests and examples:
 5. Done: operators. The built-in interfaces behind them, `==` with `IEquals`, `.sort()` with `IOrdered`, and `same?()`. See `examples/operators.lks`.
 6. Done: exceptions as classes. A class extends a built-in exception, gets the field `message`, and is thrown and caught like one *(see [errors.md](errors.md))*. See `examples/errors.lks`.
 7. Done: importing a type from its own file *(i.e. `use people/Person;`)* with its rules, and modules that use each other. See `examples/shop/`.
-8. `command` and `subcommand`.
+8. Done: `command` and `subcommand` *(see [cli.md](cli.md))*. See `examples/todo.lks`.
 
 Not working yet: two different interfaces with a method of the same name in one class.
 

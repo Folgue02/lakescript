@@ -106,7 +106,7 @@ struct Checkpoint {
 
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
-        let eof = Token { kind: TokenKind::Eof, span: Span::default() };
+        let eof = Token { kind: TokenKind::Eof, span: Span::default(), doc: None };
         Parser { tokens, pos: 0, split: 0, split_token: eof, last_span: Span::default(), stack_base: crate::stack::position(), stack_budget: crate::stack::DEFAULT_BUDGET, in_case_pattern: false }
     }
 
@@ -191,7 +191,7 @@ impl Parser {
         let mut span = real.span;
         span.start += self.split as usize;
         span.column += self.split as u32;
-        self.split_token = Token { kind, span };
+        self.split_token = Token { kind, span, doc: None };
     }
 
     fn span_from(&self, start: Span) -> Span {
@@ -269,6 +269,15 @@ impl Parser {
                     _ => ClassKind::Enum,
                 };
                 StmtKind::Class(Rc::new(self.class_decl(kind, start)?))
+            }
+            // `command Git { ... }`. `command` alone is also the type of `%x"..."`
+            TokenKind::Ident(word)
+                if word == "command" && matches!(self.peek_at(1), TokenKind::Ident(n) if is_type_name(n)) && self.peek_at(2) == &TokenKind::LBrace =>
+            {
+                let doc = self.peek().doc.clone();
+                self.advance();
+                let name = self.expect_ident("for the command")?;
+                StmtKind::Class(Rc::new(self.command_body(name, doc, start)?))
             }
             TokenKind::Keyword(Keyword::If) => self.if_statement()?,
             TokenKind::Keyword(Keyword::While) => {
@@ -414,6 +423,7 @@ impl Parser {
 
     /// `class Name<T> extends Base { ... }`, an `interface` or an `enum`.
     fn class_decl(&mut self, kind: ClassKind, start: Span) -> Result<ClassDecl> {
+        let doc = self.peek().doc.clone();
         self.advance();
         let word = kind.word();
         let name = self.expect_ident(&format!("for the {word}"))?;
@@ -445,7 +455,97 @@ impl Parser {
         let mut members = Vec::new();
         let mut implements = Vec::new();
         self.members(kind, Origin::Own, &mut members, &mut implements)?;
-        Ok(ClassDecl { kind, name, generics, extends, implements, members, values, span: self.span_from(start) })
+        Ok(ClassDecl { kind, name, generics, extends, implements, members, values, subcommands: Vec::new(), optional_subcommand: false, doc, span: self.span_from(start) })
+    }
+
+    /// The fields and subcommands of a command, after its name *(see `ideas/language/cli.md`)*.
+    fn command_body(&mut self, name: String, doc: Option<String>, start: Span) -> Result<ClassDecl> {
+        self.expect(&TokenKind::LBrace, "to start the command")?;
+        let mut members = Vec::new();
+        let mut subcommands = Vec::new();
+        let mut optional_subcommand = false;
+        loop {
+            self.guard()?;
+            let member_start = self.peek().span;
+            let doc = self.peek().doc.clone();
+            if self.eat(&TokenKind::RBrace) {
+                break;
+            }
+            if self.check(&TokenKind::Eof) {
+                return self.error_here("expected `}` to close the command, found the end of the file");
+            }
+            let word = match &self.peek().kind {
+                TokenKind::Ident(w) => w.clone(),
+                _ => String::new(),
+            };
+            if word == "optional" || word == "subcommand" {
+                if word == "optional" {
+                    self.advance();
+                    if !matches!(&self.peek().kind, TokenKind::Ident(w) if w == "subcommand") {
+                        return self.error_here("`optional` goes before `subcommand`");
+                    }
+                    optional_subcommand = true;
+                }
+                self.advance();
+                let sub = self.expect_ident("for the subcommand")?;
+                if !is_type_name(&sub) {
+                    return self.error_here(format!("the name of a subcommand is written in PascalCase *(i.e. `{}`)*", pascal(&sub)));
+                }
+                subcommands.push(self.command_body(format!("{name}::{sub}"), doc, member_start)?);
+                continue;
+            }
+            let flag = if word == "flag" {
+                self.advance();
+                let mut flag = Flag { short: None, count: false };
+                if self.eat(&TokenKind::LParen) {
+                    let letter = self.expect_ident("for the short flag *(i.e. `flag(v)`)*")?;
+                    let mut chars = letter.chars();
+                    match (chars.next(), chars.next()) {
+                        (Some(c), None) if c.is_ascii_alphanumeric() => flag.short = Some(c),
+                        _ => return self.error_here(format!("a short flag is a single letter, not `{letter}`")),
+                    }
+                    if self.eat(&TokenKind::Comma) {
+                        let what = self.expect_ident("after `,`")?;
+                        if what != "count" {
+                            return self.error_here(format!("expected `count` after the short flag, found `{what}`"));
+                        }
+                        flag.count = true;
+                    }
+                    self.expect(&TokenKind::RParen, "after the short flag")?;
+                }
+                Some(flag)
+            } else {
+                None
+            };
+            let variadic = self.eat(&TokenKind::Ellipsis);
+            let ty = self.parse_type()?;
+            let field = match self.peek().kind.clone() {
+                TokenKind::Field(f) => f,
+                TokenKind::Variable(v) => {
+                    return self.error_here(format!("the arguments of a command are fields of its object, written with `@` *(i.e. `@{v}`)*"));
+                }
+                TokenKind::Ident(_) => return self.error_here("commands only have fields and subcommands, not methods"),
+                other => return self.error_here(format!("expected a field like `@name` after the type, found {other}")),
+            };
+            self.advance();
+            let value = if self.eat(&TokenKind::Eq) { Some(self.expression()?) } else { None };
+            self.expect(&TokenKind::Semicolon, "after the field")?;
+            let kind = MemberKind::Field { constant: false, ty, name: field, value, flag, variadic };
+            members.push(Member { public: true, is_static: false, origin: Origin::Own, kind, doc, span: self.span_from(member_start) });
+        }
+        Ok(ClassDecl {
+            kind: ClassKind::Command,
+            name,
+            generics: Vec::new(),
+            extends: Vec::new(),
+            implements: Vec::new(),
+            members,
+            values: Vec::new(),
+            subcommands,
+            optional_subcommand,
+            doc,
+            span: self.span_from(start),
+        })
     }
 
     /// `AT_WORK, SICK(false);` at the start of an enum.
@@ -519,7 +619,7 @@ impl Parser {
                 let params = self.params()?;
                 let body = FunctionBody::Block(self.block()?);
                 let decl = FunctionDecl { name: "new".into(), generics: Vec::new(), params, ret: None, body };
-                out.push(Member { public, is_static: false, origin: origin.clone(), kind: MemberKind::Constructor(decl), span: self.span_from(start) });
+                out.push(Member { public, is_static: false, origin: origin.clone(), kind: MemberKind::Constructor(decl), doc: None, span: self.span_from(start) });
                 continue;
             }
             let constant = self.eat(&TokenKind::Keyword(Keyword::Const));
@@ -539,8 +639,8 @@ impl Parser {
                     }
                     let value = if self.eat(&TokenKind::Eq) { Some(self.expression()?) } else { None };
                     self.expect(&TokenKind::Semicolon, "after the field")?;
-                    let kind = MemberKind::Field { constant, ty, name, value };
-                    out.push(Member { public, is_static: sigil_static, origin: origin.clone(), kind, span: self.span_from(start) });
+                    let kind = MemberKind::Field { constant, ty, name, value, flag: None, variadic: false };
+                    out.push(Member { public, is_static: sigil_static, origin: origin.clone(), kind, doc: None, span: self.span_from(start) });
                 }
                 TokenKind::Ident(_) => {
                     if constant {
@@ -559,7 +659,7 @@ impl Parser {
                         decl = self.function(ty)?;
                     }
                     let kind = MemberKind::Method { decl, body: has_body };
-                    out.push(Member { public, is_static, origin: origin.clone(), kind, span: self.span_from(start) });
+                    out.push(Member { public, is_static, origin: origin.clone(), kind, doc: None, span: self.span_from(start) });
                 }
                 other => return self.error_here(format!("expected a field (`@name`, `$name`) or a method name after the type, found {other}")),
             }
@@ -1387,7 +1487,14 @@ impl Parser {
             }
         }
         // A `switch` on an enum can have a case for every value instead, which the checker sees
-        let enum_cases = cases.iter().all(|c| c.patterns.iter().all(|p| matches!(p, Pattern::Value(Expr { kind: ExprKind::Static { variable: false, .. }, .. }))));
+        // or of a command's subcommands *(i.e. `case Git::Push ->`)*
+        let enum_cases = cases.iter().all(|c| {
+            c.patterns.iter().all(|p| match p {
+                Pattern::Value(Expr { kind: ExprKind::Static { variable: false, .. }, .. }) => true,
+                Pattern::Type(TypeExpr { kind: TypeKind::Named { name, .. }, .. }) => name.split_once("::").is_some_and(|(l, _)| is_type_name(l)),
+                _ => false,
+            })
+        });
         if as_value && default.is_none() && !covers_both_bools(&cases) && !(enum_cases && !cases.is_empty()) {
             return Err(Diagnostic::new(
                 "a `switch` used as a value must match every value: add a `default`",
@@ -1404,7 +1511,10 @@ impl Parser {
             let checkpoint = self.checkpoint();
             if let Ok(ty) = self.parse_type() {
                 // `Color::RED` is a value of an enum, and `shapes::Point` a type of a module
-                let enum_value = matches!(&ty.kind, TypeKind::Named { name, .. } if name.split_once("::").is_some_and(|(left, _)| is_type_name(left)));
+                // `Git::Commit`, a subcommand, is a type: values are in SCREAMING_CASE
+                let enum_value = matches!(&ty.kind, TypeKind::Named { name, .. } if name.rsplit_once("::").is_some_and(|(left, right)| {
+                    is_type_name(left) && !right.chars().any(|c| c.is_ascii_lowercase())
+                }));
                 if !enum_value && matches!(self.peek().kind, TokenKind::Comma | TokenKind::Arrow) {
                     if matches!(ty.kind, TypeKind::Function { .. }) {
                         return Err(Diagnostic::new("function types can't be used in a `case`", ty.span));

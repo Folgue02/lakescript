@@ -437,6 +437,13 @@ impl<'a> Checker<'a> {
                         Ty::Result(Box::new(arg(self, 0)?), Box::new(arg(self, 1)?))
                     }
                     n if exceptions::is_exception_type(n) => Ty::Exception(Rc::from(n)),
+                    // A subcommand *(i.e. `Git::Commit`)*
+                    n if n.split_once("::").is_some_and(|(left, _)| crate::parser::is_type_name(left)) => {
+                        match self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
+                            Some(t) => t,
+                            None => return self.fail(format!("unknown type `{n}`"), ty.span),
+                        }
+                    }
                     n if n.contains("::") => {
                         let (module, member) = n.split_once("::").unwrap();
                         match self.scopes.iter().rev().find_map(|s| s.modules.get(module)) {
@@ -999,6 +1006,7 @@ impl<'a> Checker<'a> {
                         name: Rc::from(decl.name.as_str()),
                         interface: decl.kind == ClassKind::Interface,
                         is_enum: decl.kind == ClassKind::Enum,
+                        command: decl.kind == ClassKind::Command,
                         generics: decl.generics.iter().map(|g| Rc::from(g.as_str())).collect(),
                         body: std::cell::RefCell::new(types::ClassBody::default()),
                     }))
@@ -1382,7 +1390,7 @@ impl<'a> Checker<'a> {
             // other, it's only known once the class's signature is complete
             ExprKind::Function(name)
                 if !self.not_declared_yet(name)
-                    && self.class_named(name).is_some_and(|c| !c.0.interface && !c.0.is_enum && c.0.body.borrow().constructor.is_some()) =>
+                    && self.class_named(name).is_some_and(|c| !c.0.interface && !c.0.is_enum && !c.0.command && c.0.body.borrow().constructor.is_some()) =>
             {
                 Ty::Func(self.class_named(name).unwrap().0.body.borrow().constructor.clone().unwrap())
             }
@@ -1396,6 +1404,9 @@ impl<'a> Checker<'a> {
                 Some(f) => Ty::Func(f),
                 None if self.class_named(name).is_some_and(|c| c.0.interface) => {
                     return self.fail(format!("`{name}` is an interface: it doesn't create objects, classes implement it"), span);
+                }
+                None if self.class_named(name).is_some_and(|c| c.0.command) => {
+                    return self.fail(format!("`{name}` is a command: its object comes from `{name}::parse()`"), span);
                 }
                 None if self.class_named(name).is_some_and(|c| c.0.is_enum) => {
                     return self.fail(format!("`{name}` is an enum: its values are created where it's declared *(i.e. `{name}::...`)*"), span);
@@ -1553,6 +1564,25 @@ impl<'a> Checker<'a> {
         let Ty::Object(class, _) = self.non_null(subject) else {
             return self.fail("a `switch` used as a value must match every value: add a `default`", switch.subject.span);
         };
+        let subcommands = class.0.body.borrow().subcommands.clone();
+        if !subcommands.is_empty() {
+            // A case for each subcommand
+            let mut missing: Vec<ClassRef> = subcommands;
+            for case in &switch.cases {
+                for pattern in &case.patterns {
+                    if let Pattern::Type(t) = pattern {
+                        if let Ok(Ty::Object(c, _)) = self.ty(t) {
+                            missing.retain(|m| *m != c);
+                        }
+                    }
+                }
+            }
+            if missing.is_empty() {
+                return Ok(());
+            }
+            let names: Vec<String> = missing.iter().map(|m| format!("`{}`", m.0.name)).collect();
+            return self.fail(format!("this `switch` has no case for {}: add them, or a `default`", names.join(", ")), switch.subject.span);
+        }
         if !class.0.is_enum {
             return self.fail("a `switch` used as a value must match every value: add a `default`", switch.subject.span);
         }
@@ -1577,6 +1607,11 @@ impl<'a> Checker<'a> {
         let subject = self.expr(&switch.subject, None)?;
         let subject_var = match &switch.subject.kind {
             ExprKind::Variable(v) => Some(v.clone()),
+            // `switch ($args.subcommand)`: the field of a variable is narrowed too
+            ExprKind::Field { target, name } => match &target.kind {
+                ExprKind::Variable(v) => Some(format!("{v}.{name}")),
+                _ => None,
+            },
             _ => None,
         };
         let mut result: Option<Ty> = None;

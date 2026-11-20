@@ -12,6 +12,8 @@ pub const TREE: &[(&str, Option<&str>)] = &[
     ("FileNotFound", Some("IOError")),
     ("PermissionDenied", Some("IOError")),
     ("ValueError", Some("Exception")),
+    // Arguments that don't match a command *(see `cli.rs`)*
+    ("UsageError", Some("ValueError")),
     ("TypeError", Some("Exception")),
     ("IndexError", Some("Exception")),
     ("ArithmeticError", Some("Exception")),

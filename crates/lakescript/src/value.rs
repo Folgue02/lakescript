@@ -57,6 +57,8 @@ pub struct Class {
     pub constructor: Option<Rc<Function>>,
     /// Gives the fields declared in this class the values written where they're declared.
     pub init: Option<Rc<Function>>,
+    /// For a command: its arguments, and the enums of their types.
+    pub command: Option<(Rc<crate::bytecode::CommandInfo>, Vec<Rc<Class>>)>,
 }
 
 #[derive(Clone)]
@@ -215,6 +217,8 @@ pub fn whole(f: f64) -> Option<i64> {
 pub enum Function {
     User(UserFunction),
     Native(NativeFunction),
+    /// `Git::parse()` or `Git::help()` of a command.
+    Command { class: std::rc::Weak<Class>, help: bool },
 }
 
 /// A function written in Lakescript: its code, the variables of the functions
@@ -284,6 +288,8 @@ impl Function {
         match self {
             Function::User(f) => &f.proto.name,
             Function::Native(f) => &f.name,
+            Function::Command { help: true, .. } => "help",
+            Function::Command { .. } => "parse",
         }
     }
 }

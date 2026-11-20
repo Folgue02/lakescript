@@ -28,6 +28,10 @@ impl Checker<'_> {
         scope.types.insert(decl.name.clone(), Ty::Object(class.clone(), Vec::new()));
         scope.pending.insert(decl.name.clone());
         scope.depth = depth;
+        // A command's subcommands are types too *(i.e. `Git::Commit`)*
+        for sub in &decl.subcommands {
+            self.declare_class(sub, sub.span)?;
+        }
         Ok(class)
     }
 
@@ -38,7 +42,7 @@ impl Checker<'_> {
             let generics = decl.generics.iter().map(|g| Rc::from(g.as_str())).collect();
             let interface = decl.kind == ClassKind::Interface;
             let is_enum = decl.kind == ClassKind::Enum;
-            ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, generics, body: RefCell::new(ClassBody::default()) }))
+            ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, command: decl.kind == ClassKind::Command, generics, body: RefCell::new(ClassBody::default()) }))
         };
         match &self.path {
             // Only the top level of a module: classes in functions are new every time
@@ -58,7 +62,13 @@ impl Checker<'_> {
         let result = self.class_body_inner(decl, class, span);
         self.pop();
         self.this.pop();
-        result
+        result?;
+        for sub in &decl.subcommands {
+            if let Some(Ty::Object(s, _)) = self.scopes.last().unwrap().types.get(&sub.name).cloned() {
+                self.class_body(sub, &s, sub.span)?;
+            }
+        }
+        Ok(())
     }
 
     fn class_body_inner(&mut self, decl: &ClassDecl, class: &ClassRef, span: Span) -> Check<()> {
@@ -111,8 +121,10 @@ impl Checker<'_> {
         }
         for member in &decl.members {
             match &member.kind {
-                MemberKind::Field { constant, ty, name, value } => {
+                MemberKind::Field { constant, ty, name, value, variadic, .. } => {
                     let t = self.ty(ty)?;
+                    // `flag ...string @exclude` collects into a list
+                    let t = if *variadic { Ty::List(Box::new(t)) } else { t };
                     let field = FieldSig { name: name.clone(), ty: t, public: member.public, constant: *constant, has_value: value.is_some() };
                     if member.is_static {
                         if body.statics.contains_key(name) {
@@ -188,6 +200,11 @@ impl Checker<'_> {
             }
         }));
         let ctor_sig = body.constructor.clone().unwrap();
+        if class.0.command {
+            self.command_members(decl, class, &mut body)?;
+            *class.0.body.borrow_mut() = body;
+            return Ok(());
+        }
         if class.0.is_enum {
             self.enum_members(decl, class, &mut body)?;
             *class.0.body.borrow_mut() = body;
@@ -198,6 +215,86 @@ impl Checker<'_> {
         // block, below the scope of its type parameters
         let n = self.scopes.len();
         self.scopes[n - 2].funcs.insert(decl.name.clone(), ctor_sig);
+        Ok(())
+    }
+
+    /// The rules of a command's fields, its `subcommand` field, and `parse()` and `help()`.
+    fn command_members(&mut self, decl: &ClassDecl, class: &ClassRef, body: &mut ClassBody) -> Check<()> {
+        let mut shorts: Vec<char> = Vec::new();
+        let mut optional_seen: Option<String> = None;
+        let mut variadic_seen: Option<String> = None;
+        for member in &decl.members {
+            let MemberKind::Field { name, flag, variadic, value, .. } = &member.kind else { continue };
+            let field = body.fields.iter().find(|f| f.name == *name).unwrap().ty.clone();
+            let element = match (&field, variadic) {
+                (Ty::List(e), true) => (**e).clone(),
+                (t, _) => t.clone(),
+            };
+            let inner = match &element {
+                Ty::Nullable(i) => (**i).clone(),
+                t => t.clone(),
+            };
+            let fits = matches!(&inner, Ty::Str | Ty::Number | Ty::Bool) || matches!(&inner, Ty::Object(c, _) if c.0.is_enum);
+            if !fits {
+                return self.fail(format!("the arguments of a command are strings, numbers, bools or enums, and `{name}` is {}", a(&field)), member.span);
+            }
+            if let Some(f) = flag {
+                if f.count && inner != Ty::Number {
+                    return self.fail(format!("`{name}` counts its flag, so it must be a number"), member.span);
+                }
+                if let Some(c) = f.short {
+                    if c == 'h' {
+                        return self.fail("`-h` is for `--help`, so no field can use it", member.span);
+                    }
+                    if shorts.contains(&c) {
+                        return self.fail(format!("two fields of `{}` use the short flag `-{c}`", decl.name), member.span);
+                    }
+                    shorts.push(c);
+                }
+            }
+            let positional = flag.is_none() && inner != Ty::Bool;
+            if positional {
+                if let Some(v) = &variadic_seen {
+                    return self.fail(format!("`{v}` takes the rest of the arguments, so it must be the last one without `flag`"), member.span);
+                }
+                let optional = value.is_some() || matches!(element, Ty::Nullable(_));
+                if *variadic {
+                    variadic_seen = Some(name.clone());
+                } else if optional {
+                    optional_seen = Some(name.clone());
+                } else if let Some(o) = &optional_seen {
+                    return self.fail(format!("`{name}` is required, so it goes before `{o}`, which is optional"), member.span);
+                }
+            }
+        }
+        let this = class.this_type();
+        if !decl.subcommands.is_empty() {
+            // The type of the field `subcommand`: any of its subcommands
+            let mut subs = Vec::new();
+            for sub in &decl.subcommands {
+                if let Some(Ty::Object(s, _)) = self.scopes.iter().rev().find_map(|sc| sc.types.get(&sub.name)).cloned() {
+                    subs.push(s);
+                }
+            }
+            let base = ClassRef(Rc::new(ClassSig {
+                name: Rc::from(format!("{}::Subcommand", decl.name).as_str()),
+                interface: true,
+                is_enum: false,
+                command: false,
+                generics: Vec::new(),
+                body: RefCell::new(ClassBody { subcommands: subs, ..ClassBody::default() }),
+            }));
+            let ty = Ty::Object(base, Vec::new());
+            let ty = if decl.optional_subcommand { ty.nullable() } else { ty };
+            body.fields.push(FieldSig { name: "subcommand".into(), ty, public: true, constant: true, has_value: false });
+        }
+        let method = |params: Vec<Ty>, names: Vec<&str>, ret: Ty| MemberSig {
+            ty: Rc::new(FnTy { required: 0, params, names: names.into_iter().map(String::from).collect(), variadic: false, ret, generics: Vec::new() }),
+            public: true,
+            has_body: true,
+        };
+        body.static_methods.insert("parse".into(), method(vec![Ty::List(Box::new(Ty::Str)).nullable()], vec!["args"], this));
+        body.static_methods.insert("help".into(), method(Vec::new(), Vec::new(), Ty::Str));
         Ok(())
     }
 
@@ -252,7 +349,31 @@ impl Checker<'_> {
         self.scopes.last_mut().unwrap().generics.extend(decl.generics.iter().cloned());
         let result = self.class_code(decl, &class, span);
         self.pop();
-        result
+        result?;
+        for sub in &decl.subcommands {
+            self.class(sub, sub.span)?;
+        }
+        // Its subcommands are what its field `subcommand` can be
+        let field = class.0.body.borrow().fields.iter().find(|f| f.name == "subcommand").map(|f| f.ty.clone());
+        if let Some(ty) = field {
+            let base = match ty {
+                Ty::Object(b, _) => Some(b),
+                Ty::Nullable(inner) => match *inner {
+                    Ty::Object(b, _) => Some(b),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(base) = base {
+                for sub in base.0.body.borrow().subcommands.iter() {
+                    if !sub.0.body.borrow().interfaces.contains(&base) {
+                        sub.0.body.borrow_mut().interfaces.push(base.clone());
+                        sub.0.body.borrow_mut().interface_args.push(Vec::new());
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// A method's signature as its class sees it, with `Self` and its type parameters.
@@ -569,6 +690,14 @@ impl Checker<'_> {
 
     /// `$object.name`
     pub(super) fn field(&mut self, target: &Expr, name: &str, span: Span) -> Check<Ty> {
+        // What a `switch` on this field proved *(i.e. `case Git::Push ->`)*
+        if let ExprKind::Variable(v) = &target.kind {
+            let key = format!("{v}.{name}");
+            if let Some(t) = self.scopes.iter().rev().find_map(|s| s.narrowed.get(&key).cloned()) {
+                self.expr(target, None)?;
+                return Ok(t);
+            }
+        }
         let t = self.expr(target, None)?;
         match self.shallow(&t) {
             Ty::Object(class, args) => {
@@ -665,7 +794,7 @@ pub(super) fn operator_interfaces() -> Vec<(String, Ty)> {
         };
         let mut body = ClassBody::default();
         body.methods.insert(method.to_string(), MemberSig { ty: Rc::new(sig), public: true, has_body: false });
-        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(*name), interface: true, is_enum: false, generics, body: RefCell::new(body) }));
+        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(*name), interface: true, is_enum: false, command: false, generics, body: RefCell::new(body) }));
         out.push((name.to_string(), Ty::Object(class, Vec::new())));
     }
     out

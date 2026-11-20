@@ -1,0 +1,57 @@
+#!/usr/bin/lks
+// A command describes the arguments of a script: its fields are the
+// arguments, and `Todo::parse()` reads them into an object. The `///`
+// comments are the text of `--help`.
+//
+//   lks examples/todo.lks add 'write the docs' --priority high
+//   lks examples/todo.lks -v list --done
+//   lks examples/todo.lks --help
+
+enum Priority {
+    LOW,
+    NORMAL,
+    HIGH;
+}
+
+/// A small todo list, to show commands
+command Todo {
+    /// Say more about what happens, -vv for even more
+    flag(v, count) number @verbose;
+
+    /// Adds a task
+    subcommand Add {
+        /// What there is to do
+        string @task;
+        /// How soon it must be done
+        flag(p) Priority @priority = Priority::NORMAL;
+        /// Labels for the task, given several times
+        flag(t) ...string @tag;
+    }
+
+    /// Shows the tasks
+    subcommand List {
+        /// Only the ones that are done
+        flag(d) bool @done;
+        /// How many to show at most
+        flag(n) number @limit = 10;
+    }
+}
+
+const $args = Todo::parse();
+if ($args.verbose > 0) {
+    errln(f"verbose level {$args.verbose}");
+}
+
+// A `switch` with a case for each subcommand, and in each case the
+// subcommand has its own fields
+switch ($args.subcommand) {
+    case Todo::Add -> {
+        const $add = $args.subcommand;
+        const $tags = $add.tag.empty?() ? '' : f" [{$add.tag.join(', ')}]";
+        outln(f"Added '{$add.task}' with {$add.priority.name().lower()} priority{$tags}");
+    }
+    case Todo::List -> {
+        const $which = $args.subcommand.done ? 'done' : 'open';
+        outln(f"Showing up to {$args.subcommand.limit} {$which} tasks");
+    }
+}

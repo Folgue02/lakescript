@@ -60,11 +60,13 @@ struct Lexer {
     pos: usize,
     line: u32,
     column: u32,
+    /// `///` lines read since the last token.
+    doc: Vec<String>,
 }
 
 impl Lexer {
     fn new(source: &str) -> Self {
-        Lexer { chars: source.chars().collect(), pos: 0, line: 1, column: 1, file: 0, interpolation_depth: 0 }
+        Lexer { chars: source.chars().collect(), pos: 0, line: 1, column: 1, file: 0, interpolation_depth: 0, doc: Vec::new() }
     }
 
     // ---- Cursor ----
@@ -136,11 +138,20 @@ impl Lexer {
                     self.advance();
                 }
                 Some('/') if self.at(1, '/') => {
+                    // `///` is a doc comment, kept for the token after it
+                    let doc = self.at(2, '/') && !self.at(3, '/');
+                    let mut text = String::new();
                     while let Some(c) = self.peek(0) {
                         if c == '\n' {
                             break;
                         }
+                        text.push(c);
                         self.advance();
+                    }
+                    if doc {
+                        self.doc.push(text[3..].trim().to_string());
+                    } else {
+                        self.doc.clear();
                     }
                 }
                 Some('/') if self.at(1, '*') => {
@@ -171,7 +182,8 @@ impl Lexer {
             None => TokenKind::Eof,
             Some(c) => self.lex_token(c, start)?,
         };
-        Ok(Token { kind, span: self.span_from(start) })
+        let doc = if self.doc.is_empty() { None } else { Some(std::mem::take(&mut self.doc).join("\n")) };
+        Ok(Token { kind, span: self.span_from(start), doc })
     }
 
     fn lex_token(&mut self, c: char, start: Mark) -> Result<TokenKind, Diagnostic> {
@@ -713,7 +725,7 @@ impl Lexer {
                     if tokens.is_empty() {
                         return self.error("empty `{}` in an interpolated string. Write `{{}}` for literal braces", open);
                     }
-                    tokens.push(Token { kind: TokenKind::Eof, span: token.span });
+                    tokens.push(Token { kind: TokenKind::Eof, span: token.span, doc: None });
                     return Ok(tokens);
                 }
                 TokenKind::RBrace => depth -= 1,

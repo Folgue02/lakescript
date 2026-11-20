@@ -295,6 +295,8 @@ pub enum ClassKind {
     Class,
     Interface,
     Enum,
+    /// The arguments of a program *(see `ideas/language/cli.md`)*, or one of its subcommands.
+    Command,
 }
 
 impl ClassKind {
@@ -303,6 +305,7 @@ impl ClassKind {
             ClassKind::Class => "class",
             ClassKind::Interface => "interface",
             ClassKind::Enum => "enum",
+            ClassKind::Command => "command",
         }
     }
 }
@@ -320,6 +323,12 @@ pub struct ClassDecl {
     pub members: Vec<Member>,
     /// The values of an enum.
     pub values: Vec<EnumValue>,
+    /// The subcommands of a command *(i.e. `Git::Commit`)*. Their names are the full ones.
+    pub subcommands: Vec<ClassDecl>,
+    /// Whether the command can be used without a subcommand.
+    pub optional_subcommand: bool,
+    /// Its `///` comment.
+    pub doc: Option<String>,
     pub span: Span,
 }
 
@@ -331,7 +340,16 @@ pub struct Member {
     /// block, or an `implement Interface { }` block.
     pub origin: Origin,
     pub kind: MemberKind,
+    /// Its `///` comment.
+    pub doc: Option<String>,
     pub span: Span,
+}
+
+/// `flag`, `flag(v)` or `flag(v, count)` before a field of a command.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Flag {
+    pub short: Option<char>,
+    pub count: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -344,7 +362,7 @@ pub enum Origin {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MemberKind {
     /// `pub string @name;`, `const number @id = 1;`, or with `$` a static field.
-    Field { constant: bool, ty: TypeExpr, name: String, value: Option<Expr> },
+    Field { constant: bool, ty: TypeExpr, name: String, value: Option<Expr>, flag: Option<Flag>, variadic: bool },
     /// A method. In an interface, `body` is `None` for the ones without a default.
     Method { decl: FunctionDecl, body: bool },
     /// `new(...) { ... }`. A parameter written as a field *(i.e. `@name`)* has `field` set.
@@ -733,6 +751,9 @@ impl fmt::Display for ClassDecl {
         for member in &self.members {
             write!(f, " {member}")?;
         }
+        for sub in &self.subcommands {
+            write!(f, " {sub}")?;
+        }
         write!(f, ")")
     }
 }
@@ -753,7 +774,7 @@ impl fmt::Display for Member {
         }
         let prefix: String = words.iter().map(|w| format!("{w} ")).collect();
         match &self.kind {
-            MemberKind::Field { constant, ty, name, value } => {
+            MemberKind::Field { constant, ty, name, value, .. } => {
                 let kw = if *constant { "const " } else { "" };
                 let sigil = if self.is_static { "$" } else { "@" };
                 let prefix = prefix.replace("static ", "");

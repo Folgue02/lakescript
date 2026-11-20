@@ -9,6 +9,7 @@
 pub mod ast;
 mod bytecode;
 mod checker;
+mod cli;
 mod command;
 mod compiler;
 pub mod diagnostic;

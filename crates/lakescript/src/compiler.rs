@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::bytecode::{ArgKind, Capture, ClassInfo, Import, Op, Param as ParamInfo, Proto, class_names, for_kind};
+use crate::bytecode::{ArgInfo, ArgKind, ArgType, Capture, ClassInfo, CommandInfo, Import, Op, Param as ParamInfo, Proto, class_names, for_kind};
 use crate::diagnostic::Diagnostic;
 use crate::modules::Globals;
 use crate::stack::position as stack_position;
@@ -974,8 +974,15 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Pushes a class by its name. `Self` is the class being compiled.
+    /// Pushes a class by its name. `Self` is the class being compiled, and
+    /// `Git::Commit` a subcommand of the command `Git`.
     fn load_class(&mut self, name: &str) {
+        if let Some((outer, member)) = name.rsplit_once("::").filter(|(outer, _)| crate::parser::is_type_name(outer.split("::").next().unwrap_or(""))) {
+            self.load_class(outer);
+            let n = self.name(member);
+            self.emit(Op::Static { name: n, variable: false });
+            return;
+        }
         let name = if name == "Self" {
             match self.classes.last() {
                 Some(c) => c.clone(),
@@ -999,7 +1006,7 @@ impl<'a> Compiler<'a> {
             self.emit(Op::Null);
             return;
         };
-        match name.split_once("::") {
+        match name.split_once("::").filter(|(m, _)| !crate::parser::is_type_name(m)) {
             Some((module, member)) => match self.globals.find_module(module) {
                 Some(m) => {
                     let n = self.name(member);
@@ -1022,7 +1029,7 @@ impl<'a> Compiler<'a> {
             return 0;
         }
         for name in &names {
-            if let Some((module, member)) = name.split_once("::") {
+            if let Some((module, member)) = name.split_once("::").filter(|(m, _)| !crate::parser::is_type_name(m)) {
                 // A class of an imported module
                 match self.globals.find_module(module) {
                     Some(m) => {
@@ -1034,6 +1041,11 @@ impl<'a> Compiler<'a> {
                         self.emit(Op::Null);
                     }
                 }
+                continue;
+            }
+            if name.contains("::") {
+                // A subcommand *(i.e. `Git::Commit`)*
+                self.load_class(name);
                 continue;
             }
             match self.resolve(name) {
@@ -1059,13 +1071,18 @@ impl<'a> Compiler<'a> {
     fn class(&mut self, decl: &ClassDecl) -> Compiled {
         let interface = decl.kind == ClassKind::Interface;
         let span = self.span;
-        let hoisted = self.f().hoisted.remove(&decl.name);
-        let target = if hoisted {
+        // A subcommand *(i.e. `Git::Commit`)* is kept in its command, not in a variable
+        let nested = decl.name.rsplit_once("::").map(|(outer, member)| (outer.to_string(), member.to_string()));
+        let hoisted = nested.is_none() && self.f().hoisted.remove(&decl.name);
+        let target = if hoisted || nested.is_some() {
             None
         } else {
             let taken = format!("`{}` already exists", decl.name);
             Some(self.declare(&decl.name, true, &taken))
         };
+        if let Some((outer, _)) = &nested {
+            self.load_class(outer);
+        }
         // While the methods are compiled, `Self` is this class
         self.classes.push(decl.name.clone());
         let mut info = ClassInfo {
@@ -1080,6 +1097,7 @@ impl<'a> Compiler<'a> {
             fields: Vec::new(),
             methods: Vec::new(),
             static_methods: Vec::new(),
+            command: None,
         };
         if let (false, Some(parent)) = (interface, decl.extends.first()) {
             self.load_type(parent);
@@ -1095,6 +1113,9 @@ impl<'a> Compiler<'a> {
             self.load_type(ty);
         }
         info.interfaces = implemented.len() as u32;
+        if decl.kind == ClassKind::Command {
+            info.command = Some(Rc::new(self.command_info(decl)));
+        }
         // `init`: the values written where the fields are declared
         let valued: Vec<&Member> = decl
             .members
@@ -1117,7 +1138,7 @@ impl<'a> Compiler<'a> {
         }
         for member in &decl.members {
             match &member.kind {
-                MemberKind::Field { constant, ty, name, value } if !member.is_static => {
+                MemberKind::Field { constant, ty, name, value, .. } if !member.is_static => {
                     let nullable = matches!(ty.kind, TypeKind::Nullable(_));
                     info.fields.push((Rc::from(name.as_str()), *constant, nullable, value.is_some()));
                 }
@@ -1135,6 +1156,10 @@ impl<'a> Compiler<'a> {
                 }
                 _ => {}
             }
+        }
+        if !decl.subcommands.is_empty() {
+            // The subcommand that was given, set by `parse()`
+            info.fields.push((Rc::from("subcommand"), true, decl.optional_subcommand, false));
         }
         // Methods of several `implement` blocks with the same name *(i.e. `mul`
         // of `IMul<number>` and `IMul<Vector>`)*: each one is a method of its
@@ -1215,6 +1240,10 @@ impl<'a> Compiler<'a> {
         self.emit(Op::Class(index));
         match target {
             Some(target) => self.define(target),
+            None if nested.is_some() => {
+                let n = self.name(&nested.as_ref().unwrap().1);
+                self.emit(Op::DefineMember(n));
+            }
             None => match self.resolve(&decl.name) {
                 Resolved::Local(Place::Cell(c), _) => {
                     self.emit(Op::StoreCell(c));
@@ -1254,8 +1283,63 @@ impl<'a> Compiler<'a> {
             }
         }
         self.classes.pop();
+        for sub in &decl.subcommands {
+            self.class(sub)?;
+        }
         self.span = span;
         Ok(())
+    }
+
+    /// What `Git::parse()` needs to know of a command's fields. The enums
+    /// their types name are pushed, for `Op::Class`.
+    fn command_info(&mut self, decl: &ClassDecl) -> CommandInfo {
+        let mut info = CommandInfo {
+            doc: decl.doc.clone(),
+            args: Vec::new(),
+            subcommands: decl.subcommands.iter().map(|s| (Rc::from(s.name.rsplit("::").next().unwrap()), s.doc.clone())).collect(),
+            optional_subcommand: decl.optional_subcommand,
+            enums: 0,
+        };
+        for member in &decl.members {
+            let MemberKind::Field { ty, name, value, flag, variadic, .. } = &member.kind else { continue };
+            let (inner, nullable) = match &ty.kind {
+                TypeKind::Nullable(inner) => (&**inner, true),
+                _ => (ty, false),
+            };
+            let kind = match &inner.kind {
+                TypeKind::Named { name, .. } if name == "string" => ArgType::Str,
+                TypeKind::Named { name, .. } if name == "number" => ArgType::Number,
+                TypeKind::Named { name, .. } if name == "bool" => ArgType::Bool,
+                _ => {
+                    // An enum: its values are the choices
+                    self.load_type(inner);
+                    info.enums += 1;
+                    ArgType::Enum(info.enums - 1)
+                }
+            };
+            let default = value.as_ref().map(|v| match &v.kind {
+                ExprKind::Str(s) => format!("'{s}'"),
+                ExprKind::Int(n) => n.to_string(),
+                ExprKind::Float(n) => n.to_string(),
+                ExprKind::Bool(b) => b.to_string(),
+                ExprKind::Static { name, .. } => name.to_ascii_lowercase().replace('_', "-"),
+                _ => "...".to_string(),
+            });
+            info.args.push(ArgInfo {
+                name: Rc::from(name.as_str()),
+                doc: member.doc.clone(),
+                // `bool` fields are always flags
+                flag: flag.is_some() || kind == ArgType::Bool,
+                short: flag.as_ref().and_then(|f| f.short),
+                count: flag.as_ref().is_some_and(|f| f.count),
+                variadic: *variadic,
+                kind,
+                nullable,
+                has_value: value.is_some(),
+                default,
+            });
+        }
+        info
     }
 
     // ---- Expressions ----

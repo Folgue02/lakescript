@@ -111,6 +111,22 @@ fn greet() {
 }
 
 #[test]
+fn todo() {
+    assert_eq!(
+        run_ok(&["examples/todo.lks", "add", "write the docs", "--priority", "high", "-t", "docs"]),
+        "Added 'write the docs' with high priority [docs]\n"
+    );
+    assert_eq!(run_ok(&["examples/todo.lks", "list", "--done", "-n", "3"]), "Showing up to 3 done tasks\n");
+    let help = run_ok(&["examples/todo.lks", "add", "--help"]);
+    assert!(help.contains("-p, --priority <value>  How soon it must be done (low, normal, high) (default: normal)"), "{help}");
+    let output = lks(&["examples/todo.lks", "add", "x", "-p", "soon"], None);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("`--priority` must be one of low, normal, high, not `soon`"), "{stderr}");
+    assert!(stderr.contains("Usage: todo.lks add [options] <task>"), "{stderr}");
+}
+
+#[test]
 fn wordcount() {
     let output = lks(&["examples/wordcount.lks", "2"], Some("the cat, the dog. The end"));
     assert_eq!(String::from_utf8_lossy(&output.stdout), "6 words, 4 different\n    3  the\n    1  cat\n");

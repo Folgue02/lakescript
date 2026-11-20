@@ -36,6 +36,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | Example | Shows | Run it with |
 |---------|-------|-------------|
 | [greet.lks](greet.lks) | Arguments, environment variables, stderr, exit codes | `lks examples/greet.lks Ana Bo` |
+| [todo.lks](todo.lks) | A `command` with subcommands, flags, an enum, `--help` and usage errors | `lks examples/todo.lks add 'docs' -p high` |
 | [wordcount.lks](wordcount.lks) | Reading piped input | `cat ideas/README.md \| lks examples/wordcount.lks 5` |
 | [commands.lks](commands.lks) | `%x"..."` commands, safe quoting, `process::command()` | |
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |

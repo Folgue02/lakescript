@@ -204,6 +204,9 @@ impl<'a> Interpreter<'a> {
         if let Function::Native(native) = &**function {
             return self.call_native(native, positional, named, span);
         }
+        if let Function::Command { class, help } = &**function {
+            return self.command_function(class, *help, positional, span);
+        }
         if stack_position().abs_diff(self.stack_base) > self.stack_budget {
             return error(TOO_DEEP, span);
         }
@@ -222,6 +225,11 @@ impl<'a> Interpreter<'a> {
         match &*function {
             Function::Native(native) => {
                 let value = self.call_native(native, positional, named, span)?;
+                self.stack.push(value);
+                Ok(false)
+            }
+            Function::Command { class, help } => {
+                let value = self.command_function(class, *help, positional, span)?;
                 self.stack.push(value);
                 Ok(false)
             }
@@ -403,21 +411,21 @@ impl<'a> Interpreter<'a> {
     fn code_of(&self, frame: usize) -> (Rc<Proto>, Rc<Globals>) {
         match &*self.frames[frame].function {
             Function::User(user) => (user.proto.clone(), user.globals.clone()),
-            Function::Native(_) => unreachable!("only a script's functions get frames"),
+            _ => unreachable!("only a script's functions get frames"),
         }
     }
 
     fn globals_of(&self, frame: usize) -> Rc<Globals> {
         match &*self.frames[frame].function {
             Function::User(user) => user.globals.clone(),
-            Function::Native(_) => unreachable!("only a script's functions get frames"),
+            _ => unreachable!("only a script's functions get frames"),
         }
     }
 
     fn upvalue(&self, frame: usize, i: u32) -> &Rc<RefCell<Value>> {
         match &*self.frames[frame].function {
             Function::User(user) => &user.upvalues[i as usize],
-            Function::Native(_) => unreachable!("only a script's functions get frames"),
+            _ => unreachable!("only a script's functions get frames"),
         }
     }
 
@@ -885,6 +893,11 @@ impl<'a> Interpreter<'a> {
                     set_static(&class, &proto.names[name as usize], value.clone(), span!())?;
                     self.stack.push(value);
                 }
+                Op::DefineMember(name) => {
+                    let value = self.pop();
+                    let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the command") };
+                    class.statics.borrow_mut().insert(proto.names[name as usize].clone(), StaticSlot { value, constant: true });
+                }
                 Op::DefineStatic { name, constant } => {
                     let value = self.pop();
                     let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the class") };
@@ -1317,6 +1330,15 @@ impl Interpreter<'_> {
         let methods: Vec<Rc<Function>> = (0..info.methods.len()).map(|_| function()).collect();
         let constructor = info.constructor.then(&mut function);
         let init = info.init.then(&mut function);
+        // The enums of a command's fields
+        let mut enums = Vec::new();
+        for _ in 0..info.command.as_ref().map(|c| c.enums).unwrap_or(0) {
+            match self.pop() {
+                Value::Class(c) if c.is_enum => enums.push(c),
+                other => return error(format!("the fields of a command can be strings, numbers, bools or enums, not {}", describe(&other)), span),
+            }
+        }
+        enums.reverse();
         let mut implemented = Vec::new();
         for _ in 0..info.interfaces {
             match self.pop() {
@@ -1400,9 +1422,17 @@ impl Interpreter<'_> {
             statics: RefCell::new(static_table),
             constructor,
             init,
+            command: info.command.clone().map(|c| (c, enums)),
         });
         if info.is_enum {
             enum_statics(&class);
+        }
+        if class.command.is_some() {
+            let mut statics = class.statics.borrow_mut();
+            for help in [false, true] {
+                let f = Function::Command { class: Rc::downgrade(&class), help };
+                statics.insert(Rc::from(if help { "help" } else { "parse" }), StaticSlot { value: Value::Function(Rc::new(f)), constant: true });
+            }
         }
         Ok(class)
     }
@@ -1423,6 +1453,11 @@ impl Interpreter<'_> {
         class.statics.borrow_mut().insert(name.clone(), StaticSlot { value: value.clone(), constant: true });
         class.values.borrow_mut().push(value);
         Ok(())
+    }
+
+    /// An object made from named values, for `Git::parse()`.
+    pub(crate) fn construct_object(&mut self, class: &Rc<Class>, named: Named, span: Span) -> Exec<Value> {
+        self.construct(class, Vec::new(), named, span)
     }
 
     /// `Point(1, 2)`: a new object, with its fields' values, after its constructor.

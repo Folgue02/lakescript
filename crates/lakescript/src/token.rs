@@ -17,6 +17,8 @@ pub struct Span {
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
+    /// The `///` comment lines right before it, for the help of commands.
+    pub doc: Option<String>,
 }
 
 /// A piece of an interpolated string (`f"..."`, `%x"..."`): plain text, or the
