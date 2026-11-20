@@ -40,5 +40,6 @@ pub fn is_a(kind: &str, ancestor: &str) -> bool {
 }
 
 pub fn new(kind: &str, message: impl Into<String>, span: Span) -> Rc<ExceptionValue> {
-    Rc::new(ExceptionValue { kind: Rc::from(kind), message: message.into(), span })
+    let kind: Rc<str> = Rc::from(kind);
+    Rc::new(ExceptionValue { base: kind.clone(), kind, object: None, message: message.into(), span })
 }

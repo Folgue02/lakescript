@@ -37,6 +37,8 @@ pub enum Value {
 pub struct Class {
     pub name: Rc<str>,
     pub interface: bool,
+    /// The built-in exception it extends, directly or through its superclasses.
+    pub exception: Option<Rc<str>>,
     pub is_enum: bool,
     /// The values of an enum, in order.
     pub values: RefCell<Vec<Value>>,
@@ -103,8 +105,12 @@ impl Class {
 }
 
 pub struct ExceptionValue {
-    /// `"ValueError"`, `"FileNotFound"`...
+    /// `"ValueError"`, `"FileNotFound"`, or the class of a custom one *(i.e. `"ConfigError"`)*.
     pub kind: Rc<str>,
+    /// The built-in exception it is or extends, for `catch (ValueError $e)`.
+    pub base: Rc<str>,
+    /// For an exception of a class that extends a built-in one: its object, with its fields and methods.
+    pub object: Option<Rc<Object>>,
     pub message: String,
     /// Where it was thrown.
     pub span: Span,

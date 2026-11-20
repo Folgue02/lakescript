@@ -75,6 +75,8 @@ fn language_examples() {
         ("examples/collections.lks", "{ 'a' => 3, 'b' => 1, 'c' => 1 }"),
         ("examples/collections.lks", "[[1, 'fig'], [2, 'pear'], [2, 'apple']]"),
         ("examples/patterns.lks", "Year 2026, month 11, day 19"),
+        ("examples/errors.lks", "app.json: `port` is missing (the key was port)"),
+        ("examples/errors.lks", "ConfigError: the port must be a number"),
         ("examples/errors.lks", "Bad port '99999': 99999 isn't a valid port"),
         ("examples/errors.lks", "https\ntrue"),
         ("examples/types.lks", "the string 'hi'"),

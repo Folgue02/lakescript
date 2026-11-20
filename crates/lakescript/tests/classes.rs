@@ -519,3 +519,60 @@ fn the_checker_finds_mistakes_with_operators() {
     assert!(fails("class P { pub number @n; }\noutln(P(1) + P(2));").contains("`P` has no `+`: implement `IAdd`"));
     assert!(fails("class P { pub number @n; }\noutln([P(2), P(1)].sorted());").contains("implement `IOrdered`"));
 }
+
+const ERRORS: &str = "
+class ConfigError extends ValueError {
+    pub string @file;
+    pub string where() = f\"{@file}: {@message}\";
+    pub void raise() {
+        throw @;
+    }
+}
+class MissingKey extends ConfigError {
+    pub string @key;
+    pub new(@key, string $file) {
+        @super(f\"missing `{@key}`\", $file);
+    }
+}
+class Timeout extends Exception {
+    pub number @seconds;
+    pub new(@seconds) {
+        @super(f\"gave up after {@seconds}s\");
+    }
+}
+";
+
+#[test]
+fn exceptions_can_be_classes() {
+    let script = format!(
+        "{ERRORS}
+        try {{
+            throw ConfigError('bad port', file: 'app.json');
+        }} catch (ConfigError $e) {{
+            outln([$e.message(), $e.file, $e.where(), $e.typeName()]);
+            outln($e);
+        }}
+        try {{
+            throw MissingKey('port', 'app.json');
+        }} catch (ValueError $e) {{
+            outln([$e.message(), $e.is(ConfigError), $e.is(MissingKey), $e.is(IOError)]);
+        }}
+        try {{ throw Timeout(3); }} catch (Exception $e) {{ outln($e.toString()); }}
+        outln(try ConfigError('x', file: 'f').raise());"
+    );
+    assert_eq!(
+        run(&script),
+        "['bad port', 'app.json', 'app.json: bad port', 'ConfigError']\nConfigError: bad port\n['missing `port`', true, true, false]\nTimeout: gave up after 3s\nerror(ConfigError: x)\n"
+    );
+    assert!(rejected(&format!("{ERRORS}throw MissingKey('name', 'user.json');")).contains("MissingKey: missing `name`"));
+}
+
+#[test]
+fn the_checker_finds_mistakes_with_exceptions() {
+    assert!(rejected(&format!("{ERRORS}throw ConfigError(1);")).contains("`message` of `ConfigError` must be a string"));
+    assert!(rejected("class X extends ValueError { pub string @message; }").contains("already has a field named `message`"));
+    assert!(rejected("class P { pub number @n; }\nthrow P(1);").contains("only exceptions can be thrown"));
+    assert!(rejected("class P { pub number @n; }\ntry {} catch (P $e) {}").contains("`catch` needs an exception type"));
+    assert!(rejected(&format!("{ERRORS}IOError $v = ConfigError('x', file: 'f');")).contains("its value is a ConfigError"));
+    assert!(rejected(&format!("{ERRORS}const $e = ConfigError('a', file: 'f');\n$e.message = 'b';")).contains("`const` field"));
+}

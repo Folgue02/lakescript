@@ -291,6 +291,7 @@ impl Engine {
             let class = crate::value::Class {
                 name: Rc::from(*name),
                 interface: true,
+                exception: None,
                 is_enum: false,
                 values: std::cell::RefCell::new(Vec::new()),
                 parent: None,

@@ -18,7 +18,27 @@ Exception
 └── CommandFailed       // a shell command returned an error
 ```
 
-- Custom exceptions will be classes that extend these, once there is OOP *(see `oop_wip_ignore.md`)*. Until then, scripts can only use the built-in ones.
+- Custom exceptions are classes that extend one of these *(see [classes.md](classes.md))*:
+
+```
+class ConfigError extends ValueError {
+    pub string @file;
+}
+
+class MissingKey extends ConfigError {
+    pub string @key;
+
+    pub new(@key, string $file) {
+        @super(f"`{@key}` is missing", $file);
+    }
+}
+
+throw ConfigError('the port must be a number', file: 'app.json');
+```
+
+- A custom exception gets the field `message` first, a `const string` that's `''` unless it's given. Its constructor takes it like any other field, and a `new` of its own gives it with `@super(message)`.
+- It's thrown and caught like the built-in ones: `catch (ConfigError $e)` catches it and its subclasses, and `catch (ValueError $e)` too. It has their methods *(i.e. `$e.message()`, `$e.line()`)*, and its own fields and methods.
+- Only exceptions can be thrown: an object of a class that doesn't extend one is an error.
 
 ## Catching
 

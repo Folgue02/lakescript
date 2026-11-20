@@ -170,6 +170,8 @@ pub struct ClassSig {
 #[derive(Default)]
 pub struct ClassBody {
     pub parent: Option<ClassRef>,
+    /// The built-in exception it extends, directly or through its superclasses.
+    pub exception: Option<Rc<str>>,
     /// The types given to the superclass's type parameters *(i.e. `number` in `extends Stack<number>`)*.
     pub parent_args: Vec<Ty>,
     /// The interfaces it implements, or the ones an interface extends.

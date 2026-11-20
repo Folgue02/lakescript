@@ -23,7 +23,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [strings.lks](strings.lks) | String literals, multi-line strings, slicing and string methods |
 | [collections.lks](collections.lks) | List and map methods: grouping, sorting (also with a comparison function), folding, counting |
 | [patterns.lks](patterns.lks) | `-like`, regexes with `-match` and `.match()`, path tests |
-| [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result` |
+| [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result`, custom exceptions as classes |
 | [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, function types |
 | [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
 | [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |

@@ -261,7 +261,7 @@ Built in steps, each with tests and examples:
 3. Done: enums. Values with fields through the constructor, methods, `implement` blocks, `name()`, `values()`, `from()`, `fromIgnoreCase()`, and the checker's error for a `switch` used as a value that misses a value. See `examples/enums.lks`.
 4. Done: generic classes and interfaces. `Stack<string>()`, types found out from the constructor's arguments, superclasses and interfaces with types *(i.e. `extends Stack<number>`)*, and a class that implements the same interface with different types. See `examples/generics.lks`.
 5. Done: operators. The built-in interfaces behind them, `==` with `IEquals`, `.sort()` with `IOrdered`, and `same?()`. See `examples/operators.lks`.
-6. Exceptions as classes.
+6. Done: exceptions as classes. A class extends a built-in exception, gets the field `message`, and is thrown and caught like one *(see [errors.md](errors.md))*. See `examples/errors.lks`.
 7. Importing a type from its own file, and circular imports.
 8. `command` and `subcommand`.
 

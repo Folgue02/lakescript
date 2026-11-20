@@ -957,8 +957,13 @@ impl<'a> Interpreter<'a> {
                 Op::CallMethod { name, argc } => {
                     self.frames[fi].ip = ip;
                     let at = self.stack.len() - argc as usize - 1;
-                    if let Value::Object(object) = &self.stack[at] {
-                        if let Some(method) = object.class.methods.get(&*proto.names[name as usize]).cloned() {
+                    let class = match &self.stack[at] {
+                        Value::Object(o) => Some(o.class.clone()),
+                        Value::Exception(e) => e.object.as_ref().map(|o| o.class.clone()),
+                        _ => None,
+                    };
+                    if let Some(class) = class {
+                        if let Some(method) = class.methods.get(&*proto.names[name as usize]).cloned() {
                             if let Function::User(user) = &*method {
                                 if user.proto.simple && argc as usize + 1 == user.proto.params.len() {
                                     // The method's frame starts at the object, its `@`
@@ -985,8 +990,13 @@ impl<'a> Interpreter<'a> {
                     let kinds = &proto.calls[call as usize];
                     let (mut args, named) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
                     let receiver = self.pop();
-                    if let Value::Object(object) = &receiver {
-                        if let Some(method) = object.class.methods.get(&*proto.names[name as usize]).cloned() {
+                    let class = match &receiver {
+                        Value::Object(o) => Some(o.class.clone()),
+                        Value::Exception(e) => e.object.as_ref().map(|o| o.class.clone()),
+                        _ => None,
+                    };
+                    if let Some(class) = class {
+                        if let Some(method) = class.methods.get(&*proto.names[name as usize]).cloned() {
                             args.insert(0, receiver);
                             if self.enter(method, args, named, span!())? {
                                 reload!();
@@ -1037,7 +1047,13 @@ impl<'a> Interpreter<'a> {
                     };
                     // A new exception gets the place where it's thrown; a caught one keeps its own
                     let exception = if exception.span == Span::default() {
-                        exceptions::new(&exception.kind, exception.message.clone(), span!())
+                        Rc::new(ExceptionValue {
+                            kind: exception.kind.clone(),
+                            base: exception.base.clone(),
+                            object: exception.object.clone(),
+                            message: exception.message.clone(),
+                            span: span!(),
+                        })
                     } else {
                         exception
                     };
@@ -1281,15 +1297,28 @@ impl Interpreter<'_> {
             }
         }
         implemented.reverse();
+        let mut exception = None;
         let parent = if info.parent {
             match self.pop() {
-                Value::Class(c) => Some(c),
+                Value::Class(c) => {
+                    exception = c.exception.clone();
+                    Some(c)
+                }
+                // `extends ValueError`: a built-in exception, which gives the field `message`
+                Value::Function(f) if exceptions::is_exception_type(f.name()) => {
+                    exception = Some(Rc::from(f.name()));
+                    None
+                }
                 other => return error(format!("`{}` can only extend a class, not a {}", info.name, other.type_label()), span),
             }
         } else {
             None
         };
-        let mut fields: Vec<FieldSlot> = parent.as_ref().map(|p| p.fields.clone()).unwrap_or_default();
+        let mut fields: Vec<FieldSlot> = match &parent {
+            Some(p) => p.fields.clone(),
+            None if exception.is_some() => vec![FieldSlot { name: Rc::from("message"), constant: true, nullable: false, has_value: true }],
+            None => Vec::new(),
+        };
         for (name, constant, nullable, has_value) in &info.fields {
             if fields.iter().any(|f| f.name == *name) {
                 return error(format!("`{}` declares the field `{name}` again, which its superclass already has", info.name), span);
@@ -1329,6 +1358,7 @@ impl Interpreter<'_> {
         let class = Rc::new(Class {
             name: info.name.clone(),
             interface: info.interface,
+            exception,
             is_enum: info.is_enum,
             values: RefCell::new(Vec::new()),
             parent,
@@ -1372,16 +1402,24 @@ impl Interpreter<'_> {
         if class.is_enum {
             return error_as(exceptions::TYPE_ERROR, format!("`{}` is an enum: its values are created where it's declared *(i.e. `{}::...`)*", class.name, class.name), span);
         }
-        let object = Rc::new(Object {
-            class: class.clone(),
-            enum_name: None,
-            fields: RefCell::new(vec![Value::Null; class.fields.len()]),
-            building: std::cell::Cell::new(true),
-        });
+        let mut fields = vec![Value::Null; class.fields.len()];
+        if class.exception.is_some() {
+            // The message of an exception is empty unless it's given
+            fields[0] = Value::string("");
+        }
+        let object = Rc::new(Object { class: class.clone(), enum_name: None, fields: RefCell::new(fields), building: std::cell::Cell::new(true) });
         let value = Value::Object(object.clone());
         self.init_fields(class, &value, span)?;
         self.run_constructor(class, &value, positional, named, span)?;
         object.building.set(false);
+        if let Some(base) = &class.exception {
+            // An exception can be thrown and caught like the built-in ones
+            let message = match &object.fields.borrow()[0] {
+                Value::Str(s) => s.to_string(),
+                other => other.to_string(),
+            };
+            return Ok(Value::Exception(Rc::new(ExceptionValue { kind: class.name.clone(), base: base.clone(), object: Some(object), message, span: Span::default() })));
+        }
         Ok(value)
     }
 
@@ -1525,6 +1563,15 @@ impl Interpreter<'_> {
         let this = self.pop();
         let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the class") };
         let Some(parent) = class.parent.clone() else {
+            if class.exception.is_some() {
+                // The constructor of a built-in exception takes the message
+                let message = args.into_iter().next().or_else(|| named.into_iter().find(|(n, ..)| n == "message").map(|(_, v, _)| v));
+                if let (Value::Object(o), Some(m)) = (&this, message) {
+                    o.fields.borrow_mut()[0] = m;
+                }
+                self.stack.push(Value::Null);
+                return Ok(());
+            }
             return error(format!("`{}` has no superclass for `@super(...)`", class.name), span);
         };
         self.run_constructor(&parent, &this, args, named, span)?;
@@ -1577,6 +1624,11 @@ fn enum_statics(class: &Rc<Class>) {
 }
 
 fn get_field(object: &Value, name: &str, span: Span) -> Exec<Value> {
+    if let Value::Exception(e) = object {
+        if let Some(o) = &e.object {
+            return get_field(&Value::Object(o.clone()), name, span);
+        }
+    }
     match object {
         Value::Object(o) => match o.class.field(name) {
             Some(i) => Ok(o.fields.borrow()[i].clone()),
@@ -1588,6 +1640,11 @@ fn get_field(object: &Value, name: &str, span: Span) -> Exec<Value> {
 }
 
 fn set_field(object: &Value, name: &str, value: Value, span: Span) -> Exec<()> {
+    if let Value::Exception(e) = object {
+        if let Some(o) = &e.object {
+            return set_field(&Value::Object(o.clone()), name, value, span);
+        }
+    }
     match object {
         Value::Object(o) => match o.class.field(name) {
             Some(i) => {

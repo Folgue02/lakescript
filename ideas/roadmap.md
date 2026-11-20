@@ -28,11 +28,11 @@ Lakescript's own versions follow [semver](https://semver.org), like its packages
 - Phases 1 to 6 are done, except commands written with `%x"..."` on Windows.
 - Phase 5 replaced the tree-walker with a bytecode compiler and a VM *(see [tooling/vm.md](tooling/vm.md))*. The per-user cache was moved to later, since starting a script already takes about 2 ms.
 - Phase 6 added `ferry` *(see [tooling/ferry.md](tooling/ferry.md))*: projects, dependencies from git repositories with exact versions, the lock file, and installed commands. `examples/sizes/` is a project.
-- Phase 7 is being built, in steps *(see [language/classes.md](language/classes.md#status))*. Type aliases are gone, `pub const` needs its type, and classes, interfaces, enums, generics and operators work. Exceptions as classes, importing a type from its own file, circular imports and `command` are next.
+- Phase 7 is being built, in steps *(see [language/classes.md](language/classes.md#status))*. Type aliases are gone, `pub const` needs its type, and classes, interfaces, enums, generics, operators and custom exceptions work. Importing a type from its own file, circular imports and `command` are next.
 - `examples/backup/backup.lks` is the phase 3 milestone: a real backup script with a module next to it, a JSON config, commands and files.
 
 ## Notes
 
-- Exceptions come in phase 2 as a fixed tree of built-in types, without OOP. In phase 7 they become classes, without breaking the code written before.
+- Exceptions come in phase 2 as a fixed tree of built-in types, without OOP. In phase 7, classes can extend them for custom exceptions, without breaking the code written before. The built-in ones stay built in.
 - OOP comes after the type checker, since classes change how types work (fields, methods, inheritance).
 - Phase 3 is the first milestone: Lakescript can replace a real bash script.

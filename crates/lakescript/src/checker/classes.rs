@@ -81,13 +81,20 @@ impl Checker<'_> {
                     if p.is_a(class) {
                         return self.fail(format!("`{}` can't extend itself, directly or through other classes", decl.name), parent.span);
                     }
+                    body.exception = p.0.body.borrow().exception.clone();
                     body.parent = Some(p);
                     body.parent_args = args;
                 }
+                // A custom exception *(i.e. `class ConfigError extends ValueError`)*
+                Ty::Exception(kind) => body.exception = Some(kind),
                 other => return self.fail(format!("a class can only extend another class, and {} isn't one", a(&other)), parent.span),
             }
         }
         let inherited: Vec<FieldSig> = body.parent.as_ref().map(|p| all_fields(p, &body.parent_args)).unwrap_or_default();
+        if body.parent.is_none() && body.exception.is_some() {
+            // Every exception has its message, first
+            body.fields.push(FieldSig { name: "message".into(), ty: Ty::Str, public: true, constant: true, has_value: true });
+        }
         for member in &decl.members {
             match &member.kind {
                 MemberKind::Field { constant, ty, name, value } => {

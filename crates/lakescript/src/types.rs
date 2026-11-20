@@ -35,7 +35,7 @@ pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Resu
                 "result" => Ok(matches!(value, Value::Result(_))),
                 "command" => no_args(matches!(value, Value::Command(_))),
                 name if crate::exceptions::is_exception_type(name) => {
-                    no_args(matches!(value, Value::Exception(e) if crate::exceptions::is_a(&e.kind, name)))
+                    no_args(matches!(value, Value::Exception(e) if crate::exceptions::is_a(&e.base, name)))
                 }
                 "list" => {
                     let Value::List(items) = value else { return Ok(false) };
@@ -72,7 +72,11 @@ pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Resu
                     Some((_, Value::Class(_))) if !args.is_empty() => Err(format!(
                         "the types of a generic class can't be checked while the script runs, since types are removed before it runs. Use `.is({other})`"
                     )),
-                    Some((_, Value::Class(class))) => Ok(matches!(value, Value::Object(o) if o.class.is_a(class))),
+                    Some((_, Value::Class(class))) => Ok(match value {
+                        Value::Object(o) => o.class.is_a(class),
+                        Value::Exception(e) => e.object.as_ref().is_some_and(|o| o.class.is_a(class)),
+                        _ => false,
+                    }),
                     Some((_, Value::Null)) | None => Err(format!("unknown type `{other}`")),
                     Some(_) => Err(format!("`{other}` isn't a class")),
                 },

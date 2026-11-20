@@ -60,3 +60,36 @@ string portName(?number $port) = switch ($port ?? throw ValueError('no port give
 };
 outln(portName(443));
 outln((try portName(null)).isError());
+
+// Custom exceptions are classes that extend a built-in one. They get the
+// field `message` first, and `catch` finds them by their class or by the
+// exceptions above it
+class ConfigError extends ValueError {
+    pub string @file;
+}
+
+class MissingKey extends ConfigError {
+    pub string @key;
+
+    pub new(@key, string $file) {
+        @super(f"`{@key}` is missing", $file);
+    }
+}
+
+void readConfig(map<string, any> $config) {
+    if ('port' -notin $config.keys()) {
+        throw MissingKey('port', 'app.json');
+    }
+}
+
+try {
+    readConfig({'host' => 'localhost'});
+} catch (MissingKey $e) {
+    outln(f"{$e.file}: {$e.message()} (the key was {$e.key})");
+}
+
+try {
+    throw ConfigError('the port must be a number', file: 'app.json');
+} catch (ValueError $e) {
+    outln(f"{$e.typeName()}: {$e.message()}");
+}

@@ -239,6 +239,7 @@ impl<'a> Checker<'a> {
                 self.assignable(&f.ret, &t.ret)
             }
             (Ty::Param(a), Ty::Param(b)) => a == b,
+            (Ty::Object(f, _), Ty::Exception(k)) => f.0.body.borrow().exception.as_ref().is_some_and(|e| exceptions::is_a(e, k)),
             (Ty::Object(f, fa), Ty::Object(t, ta)) => {
                 let (f, fa, t, ta) = (f.clone(), fa.clone(), t.clone(), ta.clone());
                 // The types of the parameters must be the same, like in lists
@@ -725,7 +726,8 @@ impl<'a> Checker<'a> {
                     let ty = match &catch.ty {
                         Some(t) => {
                             let t = self.ty(t)?;
-                            if !matches!(t, Ty::Exception(_)) {
+                            let custom = matches!(&t, Ty::Object(c, _) if c.0.body.borrow().exception.is_some());
+                            if !custom && !matches!(t, Ty::Exception(_)) {
                                 let span = catch.ty.as_ref().unwrap().span;
                                 return self.fail(format!("`catch` needs an exception type, not {}", a(&t)), span);
                             }
@@ -854,7 +856,8 @@ impl<'a> Checker<'a> {
     fn thrown(&mut self, value: &Expr) -> Check<()> {
         let t = self.expr(value, None)?;
         let t = self.shallow(&t);
-        if !matches!(t, Ty::Exception(_) | Ty::Any | Ty::Var(_)) {
+        let custom = matches!(&t, Ty::Object(c, _) if c.0.body.borrow().exception.is_some());
+        if !custom && !matches!(t, Ty::Exception(_) | Ty::Any | Ty::Var(_)) {
             return self.fail(format!("only exceptions can be thrown, not {} *(i.e. `throw ValueError('...')`)*", a(&t)), value.span);
         }
         Ok(())
@@ -1100,7 +1103,14 @@ impl<'a> Checker<'a> {
                     return self.fail("`@super(...)` can only be used in a constructor", span);
                 };
                 let parent = this.class.0.body.borrow().parent.clone();
+                let exception = this.class.0.body.borrow().exception.clone();
                 let Some(parent) = parent else {
+                    if let Some(kind) = exception {
+                        // The built-in exception's constructor takes the message
+                        let sig = FnTy { params: vec![Ty::Str], names: vec!["message".into()], required: 0, variadic: false, ret: Ty::Void, generics: Vec::new() };
+                        self.call(&sig, &HashMap::new(), args, &kind, span)?;
+                        return Ok(Ty::Void);
+                    }
                     return self.fail(format!("`{}` has no superclass for `@super(...)`", this.class.0.name), span);
                 };
                 let ctor = parent.0.body.borrow().constructor.clone();
@@ -1590,8 +1600,14 @@ impl<'a> Checker<'a> {
                 };
                 return self.call(&chosen.ty, &receiver, args, method, span);
             }
-            if !matches!(method, "toString" | "typeName" | "equals" | "same?") {
-                return self.fail(format!("`{}` has no method `.{method}()`", class.0.name), span);
+            let exception = class.0.body.borrow().exception.clone();
+            match exception {
+                // The methods every exception has
+                Some(kind) => r = Ty::Exception(kind),
+                None if !matches!(method, "toString" | "typeName" | "equals" | "same?") => {
+                    return self.fail(format!("`{}` has no method `.{method}()`", class.0.name), span);
+                }
+                None => {}
             }
         }
         let (key, params): (&str, Vec<Ty>) = match &r {
