@@ -1,0 +1,7 @@
+[project]
+author = "folgue02"
+name = "sizes"
+version = "0.1.0"
+kind = "application"
+
+[dependencies]

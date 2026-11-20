@@ -39,7 +39,14 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases | |
 | [backup/backup.lks](backup/backup.lks) | A real script: arguments, a JSON config, a helper module, `tar`, rotating old backups | `lks examples/backup/backup.lks <folder> <backups folder>` |
 
+## A project
+
+| Example | Shows | Run it with |
+|---------|-------|-------------|
+| [sizes/](sizes) | A `ferry` project: `ferry.toml`, a module in `src/folgue02/sizes/` shared by two commands in `bin/` | `ferry run human 1536` or `ferry run bytes '1.5 KB'`, from `examples/sizes` |
+
+The tests of `ferry` run it (`crates/ferry/tests/ferry.rs`).
+
 ## Not yet
 
-- `ferry`, the package and build tool: phase 6.
 - Classes, enums and `command` for command-line arguments: phase 7.

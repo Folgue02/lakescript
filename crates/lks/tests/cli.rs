@@ -69,3 +69,18 @@ fn the_exit_code_is_the_scripts() {
     assert_eq!(lks(&["examples/greet.lks"]).status.code(), Some(2));
     assert_eq!(lks(&["examples/greet.lks", ""]).status.code(), Some(1));
 }
+
+#[test]
+fn module_path_adds_folders_for_use() {
+    let dir = std::env::temp_dir().join(format!("lks-module-path-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("one/a")).unwrap();
+    std::fs::create_dir_all(dir.join("two")).unwrap();
+    std::fs::write(dir.join("one/a/x.lks"), "pub number n() = 1;").unwrap();
+    std::fs::write(dir.join("two/y.lks"), "pub number n() = 2;").unwrap();
+    std::fs::write(dir.join("main.lks"), "use a/x;\nuse y;\noutln(x::n() + y::n());").unwrap();
+    let folders = format!("{}:{}", dir.join("one").display(), dir.join("two").display());
+    let out = lks(&["--module-path", &folders, dir.join("main.lks").to_str().unwrap()]);
+    assert_eq!(stdout(&out), "3\n", "{}", stderr(&out));
+    assert_eq!(lks(&["--module-path"]).status.code(), Some(2));
+    std::fs::remove_dir_all(&dir).unwrap();
+}

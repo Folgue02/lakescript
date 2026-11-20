@@ -1,0 +1,23 @@
+// Sizes in bytes, shared by both commands in bin/.
+
+pub const $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+
+// 1536 -> "1.5 KB"
+pub string human(number $bytes) {
+    let $size = $bytes;
+    let $unit = 0;
+    while ($size >= 1024 && $unit < $units.length() - 1) {
+        $size /= 1024;
+        $unit += 1;
+    }
+    return f"{$size.round(1)} {$units[$unit]}";
+}
+
+// "1.5 KB" -> 1536
+pub number bytes(string $text) {
+    const $parts = $text.trim().upper().split(' ');
+    const $unit = if ($parts.length() > 1) $parts[1] else 'B';
+    const $power = $units.indexOf($unit);
+    if ($power == null) throw ValueError(f"unknown unit '{$unit}'");
+    return ($parts[0].toNumber() * 1024 ** $power).round();
+}

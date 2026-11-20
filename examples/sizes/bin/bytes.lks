@@ -1,0 +1,6 @@
+// ferry run bytes '1.5 KB' '2 MB'
+use std/process;
+use folgue02/sizes/units;
+
+for ($arg in process::args())
+    outln(units::bytes($arg));

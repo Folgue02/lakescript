@@ -16,6 +16,9 @@ Options go before the script. Everything after the script is passed to it,
 even if it looks like an option of lks.
 
 Options:
+  --module-path <folders>
+                   More folders where `use` looks for modules,
+                   separated by `:`
   --no-type-check  Run the script without checking its types first,
                    for scripts that were already checked
   -h, --help       Show this help
@@ -46,6 +49,7 @@ struct Options {
     show_tokens: bool,
     show_ast: bool,
     show_bytecode: bool,
+    module_path: Vec<std::path::PathBuf>,
 }
 
 /// What the command line asks for.
@@ -68,6 +72,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
             "--tokens" => options.show_tokens = true,
             "--ast" => options.show_ast = true,
             "--bytecode" => options.show_bytecode = true,
+            "--module-path" => match args.next() {
+                Some(folders) => options.module_path.extend(std::env::split_paths(&folders)),
+                None => return Err("`--module-path` needs the folders after it".into()),
+            },
             "-h" | "--help" => return Ok(Request::Help),
             "-V" | "--version" => return Ok(Request::Version),
             "--" => match args.next() {
@@ -84,7 +92,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
 }
 
 fn run() -> ExitCode {
-    let (options, script, args) = match parse_args(std::env::args().skip(1)) {
+    let (mut options, script, args) = match parse_args(std::env::args().skip(1)) {
         Ok(Request::Run { options, script, args }) => (options, script, args),
         Ok(Request::Help) => {
             print!("{USAGE}");
@@ -116,6 +124,9 @@ fn run() -> ExitCode {
     engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
     engine.set_args(args);
     engine.set_type_check(!options.no_type_check);
+    for folder in options.module_path.drain(..) {
+        engine.add_module_root(folder);
+    }
     if let Some(extra) = std::env::var_os("LKS_PATH") {
         for folder in std::env::split_paths(&extra) {
             engine.add_module_root(folder);

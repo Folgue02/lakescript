@@ -14,6 +14,7 @@ lks [options] <script> [arguments for the script...]
 
 | Option | Meaning |
 |--------|---------|
+| `--module-path <folders>` | More folders where `use` looks for modules, separated by `:`, after the script's folder and before `LKS_PATH`. It's what the commands installed by [ferry](ferry.md) use |
 | `--no-type-check` | Runs the script without checking its types first, for scripts that were already checked. Since types never change what the code does, it behaves the same |
 | `-h`, `--help` | Shows the help |
 | `-V`, `--version` | Shows the version |

@@ -213,15 +213,36 @@ impl Engine {
     /// of the real file, if it's reached through a link), and
     /// `process::scriptPath()` returns it.
     pub fn run_file(&mut self, path: &Path) -> Result<Outcome, Diagnostic> {
+        let source = self.open_file(path)?;
+        self.run(&source)
+    }
+
+    /// Type checks a script without running it. Its folder is where `use`
+    /// looks first, like with `run_file`, and the modules it uses are checked too.
+    pub fn check_file(&mut self, path: &Path) -> Result<(), Diagnostic> {
+        let source = self.open_file(path)?;
+        self.check_source(&source)
+    }
+
+    /// Type checks a script given as text without running it.
+    pub fn check_source(&mut self, source: &str) -> Result<(), Diagnostic> {
+        let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
+        self.check(&program).map_err(|d| self.locate(d))
+    }
+
+    /// Reads a script and makes its folder the first place `use` looks.
+    fn open_file(&mut self, path: &Path) -> Result<String, Diagnostic> {
         let source = std::fs::read_to_string(path)
             .map_err(|e| Diagnostic::new(format!("can't read {}: {e}", path.display()), Default::default()))?;
         let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        if let Some(folder) = real.parent() {
+        if let Some(folder) = real.parent()
+            && !self.host.loader.roots.iter().any(|r| r == folder)
+        {
             self.host.loader.roots.insert(0, folder.to_path_buf());
         }
         self.host.loader.files[0] = path.display().to_string();
         self.host.state.script_path = Some(real);
-        self.run(&source)
+        Ok(source)
     }
 
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {

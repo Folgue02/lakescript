@@ -11,7 +11,7 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **3. Bash replacement** | The first useful real scripts | `use`, `pub` and the module path (for `std/` and files next to the script), `%x"..."` and commands, `err`/`errln`, `exit`, `std/process` (with `process::args()`), `std/env`, `std/fs`, `std/path`, `std/io`, `std/json` |
 | **4. Types** | The checker | Inference, generics, `.as()` and `.is()` narrowing, Rust-style error messages |
 | **5. Speed** | Faster scripts | Bytecode compiler and a VM that replaces the tree-walker. The per-user cache moves to later |
-| **6. Projects** | Bigger programs | `ferry`, the project file, dependencies, the CLI |
+| **6. Projects** | Bigger programs | `ferry`: the project file, `bin/` commands, dependencies from git repositories, the lock file, `ferry install` |
 | **7. OOP** | Classes | Classes, enums, custom exceptions as classes, `command` and `subcommand` for command-line arguments |
 | **Later** | | The rest of the standard library, the per-user bytecode cache, formatter, language server, concurrency |
 
@@ -25,8 +25,9 @@ Lakescript's own versions follow [semver](https://semver.org), like its packages
 
 ## Status
 
-- Phases 1 to 5 are done, except commands written with `%x"..."` on Windows.
+- Phases 1 to 6 are done, except commands written with `%x"..."` on Windows.
 - Phase 5 replaced the tree-walker with a bytecode compiler and a VM *(see [tooling/vm.md](tooling/vm.md))*. The per-user cache was moved to later, since starting a script already takes about 2 ms.
+- Phase 6 added `ferry` *(see [tooling/ferry.md](tooling/ferry.md))*: projects, dependencies from git repositories with exact versions, the lock file, and installed commands. `examples/sizes/` is a project.
 - `examples/backup/backup.lks` is the phase 3 milestone: a real backup script with a module next to it, a JSON config, commands and files.
 
 ## Notes

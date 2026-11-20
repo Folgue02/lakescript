@@ -1,0 +1,6 @@
+// ferry run human 1536 1048576
+use std/process;
+use folgue02/sizes/units;
+
+for ($arg in process::args())
+    outln(units::human($arg.toNumber()));

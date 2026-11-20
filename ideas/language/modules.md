@@ -5,7 +5,7 @@ Modules work like Java's packages: they're namespaces, and they match the folder
 Paths are never relative: a module is always imported with the same path, no matter which file imports it. There is no `./` or `../`:
 
 ```
-// In src/main.lks, src/company/app.lks or src/company/utils/other.lks, always:
+// In bin/app.lks, src/company/app.lks or src/company/utils/other.lks, always:
 use company/utils/strings::strPad;
 ```
 
@@ -13,7 +13,7 @@ use company/utils/strings::strPad;
 
 Like Java's classpath, the module path is the list of places where `use` looks for modules. `use a/b/c;` looks for `a/b/c.lks` in each of them:
 
-1. The project's `src/` folder. For a standalone script, the folder the script is in. If the script is run through a link *(i.e. `/usr/local/bin/deploy` pointing to `~/scripts/deploy.lks`)*, it's the folder of the real file, so the files it uses are found wherever the link is.
+1. The project's `src/` folder *(the scripts in `bin/` use the same module path, see [ferry.md](../tooling/ferry.md))*. For a standalone script, the folder the script is in. If the script is run through a link *(i.e. `/usr/local/bin/deploy` pointing to `~/scripts/deploy.lks`)*, it's the folder of the real file, so the files it uses are found wherever the link is.
 2. The dependencies of the project, added by `ferry` from the lock file, so a project always gets the same ones.
 3. The folders in the `LKS_PATH` environment variable, separated by `:`, for standalone scripts and quick tests.
 4. The standard library, built into `lks` under `std/` *(i.e. `use std/fs;`)*.
@@ -21,7 +21,7 @@ Like Java's classpath, the module path is the list of places where `use` looks f
 ```
 use std/fs;                 // the standard library
 use helpers;                // helpers.lks, next to the script
-use config/paths;           // src/config/paths.lks in a project
+use folgue02/backup/config; // src/folgue02/backup/config.lks in a project
 ```
 
 - A standalone script and the files it uses are moved together, like a project. `use helpers;` keeps working as long as `helpers.lks` stays next to the script.
@@ -32,24 +32,21 @@ use config/paths;           // src/config/paths.lks in a project
 
 ### Packages
 
-Every package has an ID, which can be a single name or a path *(i.e. `acme_http`, `github_io/folgue02/backup`)*. Its parts follow the same rules as names, so a dot becomes `_` *(i.e. `github_io`)*.
+Every package has an ID, `author/name` *(i.e. `folgue02/backup`)*. Both parts follow the same rules as names. How projects, repositories and versions work is in [ferry.md](../tooling/ferry.md).
 
 ```
-// The project github_io/folgue02/something depends on github_io/user/dependency
-use config;                              // src/config.lks, the project's own module
-use github_io/user/dependency/client;    // client.lks of the dependency
+// In the project folgue02/something, which depends on acme/http
+use folgue02/something/config;     // src/folgue02/something/config.lks, the project's own module
+use acme/http/client;              // client.lks of the dependency
 ```
 
-- A dependency is only reachable through its ID: a module belongs to the dependency whose ID starts its path.
-- The project's own modules keep their short paths from `src/`. Only dependencies are written with their ID.
+- A project's modules live under `src/author/name/`, so every module has the same full path in its own project and in the projects that use it, and every path belongs to a single package.
 - Versions follow [semver](https://semver.org): `MAJOR.MINOR.PATCH` *(i.e. `1.4.2`)*. A new major version may break code that uses the package, a minor one only adds, and a patch only fixes.
-    - A dependency asks for a range, written like Cargo's: `^1.4` is any `1.x.y` from `1.4.0` on, `~1.4` is any `1.4.y`, and `=1.4.2` is exactly that one.
+    - For now a dependency asks for an exact version. Ranges written like Cargo's *(i.e. `^1.4`, `~1.4`)* can come later.
 - `ferry` picks a single version of each package, so when two dependencies use the same package, they share it.
 - Every clash is found by `ferry` while resolving the dependencies, never by `lks` while the script runs:
-    - Two dependencies that need versions of a package that don't work together. The error names both of them and both versions.
-    - A module of the project whose path starts with the ID of a dependency *(i.e. `src/github_io/user/dependency/client.lks`)*.
-    - A package ID that starts another one *(i.e. `github_io/user` and `github_io/user/dependency`)*, so every path belongs to a single package.
-- Sharing the first parts of an ID is fine *(i.e. the project and its dependencies can all start with `github_io/`)*.
+    - Two dependencies that need different versions of a package. The error names both of them and both versions.
+    - Two packages with the same ID from different repositories *(i.e. `github:acme/http` and `work:acme/http`)*.
 
 ### Without `use`
 
@@ -129,7 +126,3 @@ string _read(string $path) = readFile($path);   // only usable in this file
 - `::` is a single token, so it's never confused with a symbol *(`:name`)*.
 - The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*.
 - Circular imports are an error: if `a` uses `b`, `b` can't use `a`, directly or through other modules. This keeps the rule that everything is defined before it's used, so modules can still be compiled in one pass.
-
-## Still to be decided
-
-- Whether a package ID also says where `ferry` downloads it from (like Go), or packages come from a registry (like Cargo). To be discussed with the tooling.
