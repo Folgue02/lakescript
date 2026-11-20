@@ -27,7 +27,7 @@ Whole numbers from a start to an end, like `1..5` or `1..=5` *(see Ranges in [bu
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `toList()` | `list<number>` | *(i.e. `(1..=3).toList()` is `[1, 2, 3]`)* |
-| `map((number) -> U $fn)` | `list<U>` | `$fn` applied to every number *(i.e. `(1..=3).map(($n) = $n * $n)` is `[1, 4, 9]`)* |
+| `map((number) -> U $fn)` | `list<U>` | `$fn` applied to every number *(i.e. `(1..=3).map(($n) -> $n * $n)` is `[1, 4, 9]`)* |
 | `filter((number) -> bool $fn)` | `list<number>` | The numbers `$fn` returns `true` for |
 | `sum()` | `number` | The sum of its numbers |
 | `random()` | `?number` | A random number from it, or `null` if it's empty *(i.e. `(1..=6).random()`)* |

@@ -56,11 +56,14 @@ fn language_examples() {
         ("examples/hello.lks", "Sum of squares: 14"),
         ("examples/features.lks", "First 10 primes: [2, 3, 5, 7, 11, 13, 17, 19, 23, 29]"),
         ("examples/closures.lks", "The counter is at 3"),
+        ("examples/closures.lks", "7 is odd: true"),
         ("examples/control_flow.lks", "['child', 'teenager', 'adult']"),
         ("examples/strings.lks", "['userAccountName', 'user_account_name', 'user-account-name', 'User Account Name']"),
         ("examples/collections.lks", "{ 'a' => 3, 'b' => 1, 'c' => 1 }"),
+        ("examples/collections.lks", "[[1, 'fig'], [2, 'pear'], [2, 'apple']]"),
         ("examples/patterns.lks", "Year 2026, month 11, day 19"),
         ("examples/errors.lks", "Bad port '99999': 99999 isn't a valid port"),
+        ("examples/errors.lks", "https\ntrue"),
         ("examples/types.lks", "the string 'hi'"),
     ] {
         let out = run_ok(&[script]);
@@ -72,9 +75,14 @@ fn language_examples() {
 fn system_examples() {
     assert!(run_ok(&["examples/commands.lks"]).contains("<a file; echo hacked>"));
     assert!(run_ok(&["examples/files.lks"]).contains("Cleaned up: true"));
-    assert!(run_ok(&["examples/json.lks"]).contains("lakescript by folgue02, indent 4"));
+    let json = run_ok(&["examples/json.lks"]);
+    assert!(json.contains("lakescript by folgue02, indent 4"));
+    assert!(json.contains("['start', 'stop']"));
     assert_eq!(run_ok(&["examples/time.lks"]), "4999950000\ntimed it\n");
-    assert!(run_ok(&["examples/modules/main.lks"]).contains("The Module System"));
+    let modules = run_ok(&["examples/modules/main.lks"]);
+    assert!(modules.contains("The Module System"));
+    assert!(modules.contains("8 4"));
+    assert!(modules.contains("math::average ran 2 times"));
 }
 
 #[test]

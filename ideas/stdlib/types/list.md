@@ -12,7 +12,7 @@
 | `indexOf(T $value)` | `?number` | Position of the first `$value`, or `null` *(i.e. `['a', 'b', 'a'].indexOf('a')` is `0`)* |
 | `indexOfLast(T $value)` | `?number` | Position of the last `$value`, or `null` |
 | `count(T $value)` | `number` | How many times `$value` is in the list |
-| `countWhere((T) -> bool $fn)` | `number` | How many elements `$fn` returns `true` for *(i.e. `$ages.countWhere(($a) = $a >= 18)`)* |
+| `countWhere((T) -> bool $fn)` | `number` | How many elements `$fn` returns `true` for *(i.e. `$ages.countWhere(($a) -> $a >= 18)`)* |
 
 ## Getting
 
@@ -47,8 +47,10 @@ These change the list.
 |--------|---------|-------------|
 | `sort()` | `list<T>` | Sorts the list from smallest to biggest, using `<`. Returns the list |
 | `sorted()` | `list<T>` | A sorted copy |
-| `sortBy<K>((T) -> K $key)` | `list<T>` | Sorts the list by what `$key` returns *(i.e. `$files.sortBy(($f) = $f.length())`)* |
+| `sortBy<K>((T) -> K $key)` | `list<T>` | Sorts the list by what `$key` returns *(i.e. `$files.sortBy(($f) -> $f.length())`)* |
 | `sortedBy<K>((T) -> K $key)` | `list<T>` | A copy sorted by what `$key` returns |
+| `sortWith((T, T) -> number $compare)` | `list<T>` | Sorts the list with a comparison function, which returns a negative number if the first value goes first, a positive one if the second does, and `0` if they're equal. For values `<` can't compare, like lists *(i.e. `$rows.sortWith(($a, $b) -> $a[0] - $b[0])`)*. The sort is stable, so equal values keep their order. Returns the list |
+| `sortedWith((T, T) -> number $compare)` | `list<T>` | A copy sorted with a comparison function |
 | `reverse()` | `list<T>` | Reverses the list. Returns the list |
 | `reversed()` | `list<T>` | A reversed copy |
 | `shuffle()` | `list<T>` | Puts the elements in random order. Returns the list |
@@ -60,10 +62,10 @@ These always return a new list.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `map((T) -> U $fn)` | `list<U>` | `$fn` applied to every element *(i.e. `$names.map(($n) = $n.upper())`)* |
+| `map((T) -> U $fn)` | `list<U>` | `$fn` applied to every element *(i.e. `$names.map(($n) -> $n.upper())`)* |
 | `filter((T) -> bool $fn)` | `list<T>` | The elements `$fn` returns `true` for |
 | `reject((T) -> bool $fn)` | `list<T>` | The elements `$fn` returns `false` for |
-| `flatMap((T) -> list<U> $fn)` | `list<U>` | Like `map`, joining the lists `$fn` returns *(i.e. `$lines.flatMap(($l) = $l.words())`)* |
+| `flatMap((T) -> list<U> $fn)` | `list<U>` | Like `map`, joining the lists `$fn` returns *(i.e. `$lines.flatMap(($l) -> $l.words())`)* |
 | `flatten()` | `list<U>` | For a `list<list<U>>`: joins the lists inside it *(i.e. `[[1, 2], [3]].flatten()` is `[1, 2, 3]`)*. Throws a `TypeError` if an element isn't a list |
 | `unique()` | `list<T>` | Without repeated values, keeping the first of each *(i.e. `[1, 2, 1].unique()` is `[1, 2]`)* |
 | `uniqueBy<K>((T) -> K $key)` | `list<T>` | Without elements with a repeated `$key` |
@@ -80,9 +82,9 @@ These always return a new list.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `groupBy((T) -> K $key)` | `map<K, list<T>>` | The elements grouped by what `$key` returns *(i.e. `$files.groupBy(($f) = $f.afterLast('.'))`)* |
-| `countBy((T) -> K $key)` | `map<K, number>` | How many elements give each `$key` *(i.e. `$words.countBy(($w) = $w.lower())`)* |
-| `partition((T) -> bool $fn)` | `list<list<T>>` | Two lists: the elements `$fn` returns `true` for, and the rest *(i.e. `let [$adults, $kids] = $ages.partition(($a) = $a >= 18);`)* |
+| `groupBy((T) -> K $key)` | `map<K, list<T>>` | The elements grouped by what `$key` returns *(i.e. `$files.groupBy(($f) -> $f.afterLast('.'))`)* |
+| `countBy((T) -> K $key)` | `map<K, number>` | How many elements give each `$key` *(i.e. `$words.countBy(($w) -> $w.lower())`)* |
+| `partition((T) -> bool $fn)` | `list<list<T>>` | Two lists: the elements `$fn` returns `true` for, and the rest *(i.e. `let [$adults, $kids] = $ages.partition(($a) -> $a >= 18);`)* |
 | `toMap((T) -> K $key)` | `map<K, T>` | A map from what `$key` returns to each element. If two give the same key, the last one is kept |
 
 ## Searching
@@ -101,7 +103,7 @@ These always return a new list.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `join(string $separator = '')` | `string` | The elements as text, with `$separator` between them *(i.e. `['a', 'b'].join(', ')` is `'a, b'`)* |
-| `reduce((T, T) -> T $fn)` | `?T` | Combines the elements from left to right, starting with the first one. `null` if the list is empty *(i.e. `$parts.reduce(($a, $b) = $a + '/' + $b)`)* |
+| `reduce((T, T) -> T $fn)` | `?T` | Combines the elements from left to right, starting with the first one. `null` if the list is empty *(i.e. `$parts.reduce(($a, $b) -> $a + '/' + $b)`)* |
 | `fold(U $initial, (U, T) -> U $fn)` | `U` | Like `reduce`, starting from `$initial` |
 | `sum()` | `number` | The sum, for a `list<number>`. `0` for an empty list |
 | `product()` | `number` | The product, for a `list<number>`. `1` for an empty list |
@@ -109,7 +111,7 @@ These always return a new list.
 | `min()` | `?T` | The smallest element, using `<`, or `null` |
 | `max()` | `?T` | The biggest element, using `<`, or `null` |
 | `minBy<K>((T) -> K $key)` | `?T` | The element with the smallest `$key`, or `null` |
-| `maxBy<K>((T) -> K $key)` | `?T` | The element with the biggest `$key`, or `null` *(i.e. `$files.maxBy(($f) = $f.size())`)* |
+| `maxBy<K>((T) -> K $key)` | `?T` | The element with the biggest `$key`, or `null` *(i.e. `$files.maxBy(($f) -> $f.size())`)* |
 
 ## Looping
 

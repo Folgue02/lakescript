@@ -111,12 +111,26 @@ string _read(string $path) = readFile($path);   // only usable in this file
 - `pub` goes before functions, constants declared with `const` and type aliases *(i.e. `pub type Predicate = (string) -> bool;`)*.
 - `let` variables can't be `pub`, so another module can never change them. A module that wants to share changing state does it through functions.
 - Importing something that isn't `pub` is an error *(i.e. `use config/paths::_read;`)*.
+- `pub` type aliases are imported like functions, and can also be reached with `::` wherever a type goes:
+
+```
+// src/filters/core.lks
+pub type Filter = (any) -> list<any>;
+
+// Another file
+use filters/core;
+use filters/core::Filter;
+
+list<any> apply(Filter $f, any $v) = $f($v);
+const core::Filter $same = ($v) -> [$v];
+```
 
 ## Loading
 
 - Every module is loaded once, like PHP's `require_once` or C's `#pragma once`. All the files that `use` it share the same module, and its constants are only computed once.
 - A module is loaded the first time something in it is used, not when the `use` line is read.
-- An imported module can only have declarations at its top level: functions, `const` and `type`. Importing it never prints, runs commands or touches files.
+- An imported module can only have declarations at its top level: functions, `const`, `let` and `type`. Importing it never prints, runs commands or touches files.
+    - A `let` at the top level of a module is its own state *(i.e. the position of a parser, or a cache)*. It can't be `pub`: other modules can't read or change it, only the module's functions. To share it, a `pub` function returns it.
     - A `const` can still call a function *(i.e. `const $config = loadConfig();`)*. It runs once, when the module is loaded, only to compute the value.
     - Anything else at the top level of an imported module is an error *(i.e. `outln('loaded');`)*. Only the script being run can have statements at its top level.
 - `use` lines go at the top of the file, before any other statement. A `use` inside a function, an `if` or a loop is an error, so all the modules a file needs can be seen at a glance.
@@ -125,4 +139,4 @@ string _read(string $path) = readFile($path);   // only usable in this file
 
 - `::` is a single token, so it's never confused with a symbol *(`:name`)*.
 - The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*.
-- Circular imports are an error: if `a` uses `b`, `b` can't use `a`, directly or through other modules. This keeps the rule that everything is defined before it's used, so modules can still be compiled in one pass.
+- Circular imports are an error: if `a` uses `b`, `b` can't use `a`, directly or through other modules. This keeps the rule that a module is complete before another one uses it, so modules can still be loaded one after the other.

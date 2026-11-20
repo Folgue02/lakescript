@@ -24,7 +24,7 @@ outln(last($names).upper());
 outln(last([1, 2, 3]) * 10);
 
 // Anonymous functions take their parameter types from where they go
-outln($names.map(($n) = $n.length()));
+outln($names.map(($n) -> $n.length()));
 
 // A map gives `null` for a missing key, so the value is nullable
 const $ages = {'Ana' => 30};
@@ -52,6 +52,6 @@ outln(describe('HI'));
 
 // Type aliases give long types a name
 type Check = (string) -> bool;
-const $long = ($s) = $s.length() > 2;
+const $long = ($s) -> $s.length() > 2;
 Check $test = $long;
 outln($names.filter($test));

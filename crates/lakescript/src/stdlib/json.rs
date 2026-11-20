@@ -235,6 +235,20 @@ pub fn parse(text: &str) -> Result<Value, NativeError> {
     Ok(value)
 }
 
+/// Every value in a text with several of them, separated by whitespace:
+/// streams like `{"a":1} {"a":2}` and JSON Lines. An empty text gives `[]`.
+pub fn parse_all(text: &str) -> Result<Value, NativeError> {
+    let mut reader = Reader { text, bytes: text.as_bytes(), pos: 0 };
+    let mut values = Vec::new();
+    loop {
+        reader.skip_space();
+        if reader.pos >= text.len() {
+            return Ok(Value::list(values));
+        }
+        values.push(reader.value(0)?);
+    }
+}
+
 // ---- Writing ----
 
 fn quote(text: &str, out: &mut String) {
@@ -343,6 +357,10 @@ pub fn register(m: &mut Exports) {
     m.function("parse", |_, values| {
         let a = Args::new("json::parse", values, 1, 1)?;
         parse(&a.str(0)?)
+    });
+    m.function("parseAll", |_, values| {
+        let a = Args::new("json::parseAll", values, 1, 1)?;
+        parse_all(&a.str(0)?)
     });
     m.function_named("stringify", &["value", "indent"], |_, values| {
         let a = Args::new("json::stringify", values, 1, 2)?;

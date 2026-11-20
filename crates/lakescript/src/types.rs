@@ -60,6 +60,9 @@ pub fn matches(value: &Value, ty: &TypeExpr) -> Result<bool, String> {
                     }
                 }
                 "void" => Err("`void` isn't the type of any value".into()),
+                other if other.contains("::") => Err(format!(
+                    "`{other}` is a type of another module, which `.is()`, `.as()` and `catch` can't check yet. Write the type it stands for instead"
+                )),
                 other => Err(format!("unknown type `{other}`")),
             }
         }

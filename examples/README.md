@@ -18,12 +18,12 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 |---------|-------|
 | [hello.lks](hello.lks) | Constants, a one-line function, a `for` over a range, f-strings |
 | [features.lks](features.lks) | Phase 1: FizzBuzz, primes, maps, default and named arguments, varargs, numbers |
-| [closures.lks](closures.lks) | Anonymous functions, closures, functions as values |
+| [closures.lks](closures.lks) | Anonymous functions with `->`, closures, functions as values, functions that call each other |
 | [control_flow.lks](control_flow.lks) | `if` and `switch` as values, `yield`, cases by type, loops, destructuring |
 | [strings.lks](strings.lks) | String literals, multi-line strings, slicing and string methods |
-| [collections.lks](collections.lks) | List and map methods: grouping, sorting, folding, counting |
+| [collections.lks](collections.lks) | List and map methods: grouping, sorting (also with a comparison function), folding, counting |
 | [patterns.lks](patterns.lks) | `-like`, regexes with `-match` and `.match()`, path tests |
-| [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw`, `try` returning a `result` |
+| [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result` |
 | [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, type aliases |
 
 ## Scripts that use the system
@@ -34,9 +34,9 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [wordcount.lks](wordcount.lks) | Reading piped input | `cat ideas/README.md \| lks examples/wordcount.lks 5` |
 | [commands.lks](commands.lks) | `%x"..."` commands, safe quoting, `process::command()` | |
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
-| [json.lks](json.lks) | `std/json`: parsing, writing, typed values with `.as()` | |
+| [json.lks](json.lks) | `std/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
 | [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
-| [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases | |
+| [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, a shared `pub type` and a module's private `let` | |
 | [backup/backup.lks](backup/backup.lks) | A real script: arguments, a JSON config, a helper module, `tar`, rotating old backups | `lks examples/backup/backup.lks <folder> <backups folder>` |
 
 ## A project

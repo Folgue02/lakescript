@@ -21,7 +21,7 @@ if ($parts != null) {
 }
 
 // Every match, and replacing with groups
-outln('a1 b22 c333'.matchAll(%r"([a-z])(\d+)").map(($m) = $m[2].length()));
+outln('a1 b22 c333'.matchAll(%r"([a-z])(\d+)").map(($m) -> $m[2].length()));
 outln('Smith, John'.replaceMatches(%r"(\w+), (\w+)", '$2 $1'));
 outln('too    many   spaces'.replaceMatches(%r"\s+", ' '));
 outln('a;b, c'.splitMatches(%r"[;,]\s*"));

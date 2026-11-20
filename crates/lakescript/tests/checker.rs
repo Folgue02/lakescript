@@ -92,7 +92,7 @@ fn methods_of_built_in_types() {
     assert_eq!(ok("outln('hello'.padStart(7, '*').upper());"), "**HELLO\n");
     assert!(rejected("'a'.nope();").contains("a string has no method `.nope()`"));
     assert!(rejected("'a'.padStart('x');").contains("must be a number, but this is a string"));
-    assert!(rejected("const $n = [1, 2].map(($x) = $x * 2);\n$n[0].upper();").contains("a number has no method `.upper()`"));
+    assert!(rejected("const $n = [1, 2].map(($x) -> $x * 2);\n$n[0].upper();").contains("a number has no method `.upper()`"));
     assert!(rejected("'a1'.replace(%r\"\\d\", 'x');").contains("For a regex, use `.replaceMatches()`"));
     assert!(rejected("'a1'.replaceMatches('1', 'x');").contains("For a string, use `.replace()`"));
     assert_eq!(ok("outln(%w[b a].sorted().join('-'));"), "a-b\n");
@@ -100,10 +100,10 @@ fn methods_of_built_in_types() {
 
 #[test]
 fn anonymous_functions_take_their_parameter_types_from_where_they_go() {
-    assert_eq!(ok("outln(['a', 'bb'].map(($s) = $s.length()));"), "[1, 2]\n");
-    assert!(rejected("['a'].map(($s) = $s * 2);").contains("`*` needs numbers, but got a string and a number"));
-    assert!(rejected("[1].filter(($n) = $n + 1);").contains("must be a (number) -> bool"));
-    assert_eq!(ok("number apply((number) -> number $f) = $f(3);\noutln(apply(($x) = $x * $x));"), "9\n");
+    assert_eq!(ok("outln(['a', 'bb'].map(($s) -> $s.length()));"), "[1, 2]\n");
+    assert!(rejected("['a'].map(($s) -> $s * 2);").contains("`*` needs numbers, but got a string and a number"));
+    assert!(rejected("[1].filter(($n) -> $n + 1);").contains("must be a (number) -> bool"));
+    assert_eq!(ok("number apply((number) -> number $f) = $f(3);\noutln(apply(($x) -> $x * $x));"), "9\n");
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn types_written_in_the_code() {
     assert!(rejected("Thing $t = 1;").contains("unknown type `Thing`"));
     assert!(rejected("outln(1.is(Nope));").contains("unknown type `Nope`"));
     assert_eq!(ok("type Names = list<string>;\nNames $n = ['a'];\noutln($n);"), "['a']\n");
-    assert!(rejected("type Check = (string) -> bool;\nCheck $c = ($x) = $x.length();").contains("its value is a (string) -> number"));
+    assert!(rejected("type Check = (string) -> bool;\nCheck $c = ($x) -> $x.length();").contains("its value is a (string) -> number"));
 }
 
 #[test]
@@ -193,4 +193,43 @@ fn the_check_can_be_turned_off() {
     let err = engine.run("outln('started');\noutln('a' + 1);").unwrap_err();
     assert!(err.message.contains("TypeError"));
     assert_eq!(output.text(), "started\n");
+}
+
+#[test]
+fn throw_expressions_fit_any_type() {
+    assert_eq!(ok("string f(?string $n) = $n ?? throw ValueError('none');\noutln(f('a').upper());"), "A\n");
+    assert_eq!(ok("number f(any $v) = switch ($v) {\n case number -> $v;\n default -> throw TypeError('x');\n};\noutln(f(2) + 1);"), "3\n");
+    assert!(rejected("const $x = null ?? throw 'oops';").contains("only exceptions can be thrown"));
+}
+
+#[test]
+fn functions_can_call_each_other_in_any_order() {
+    let script = "
+        bool even(number $n) = if ($n == 0) true else odd($n - 1);
+        bool odd(number $n) = if ($n == 0) false else even($n - 1);
+        outln([even(10), odd(7)]);
+        void parse() {
+            let $pos = 0;
+            number expr() = term() + 1;
+            number term() {
+                $pos += 1;
+                return if ($pos < 3) expr() else 0;
+            }
+            outln(expr());
+        }
+        parse();
+    ";
+    assert_eq!(ok(script), "[true, true]\n3\n");
+    // The block's own statements still can't use a function before it's declared
+    assert!(rejected("f();\nvoid f() {}").contains("`f` is declared further down"));
+    assert!(rejected("void g() {\n  h();\n  void h() {}\n}").contains("`h` is declared further down"));
+    // Signatures are known from the start, so wrong calls are found too
+    assert!(rejected("number a() = b('x');\nnumber b(number $n) = $n;").contains("string"));
+    assert!(rejected("void f() {}\nvoid f() {}").contains("a function named `f` already exists"));
+}
+
+#[test]
+fn aliases_work_in_is_and_as() {
+    let script = "type Pair = list<number>;\ntype Num = number;\nconst $x = <any>[1, 2];\noutln([$x.is(Pair), (5).is(Num), (5).is(?Pair)]);\noutln($x.as(Pair).length());";
+    assert_eq!(ok(script), "[true, true, false]\n2\n");
 }

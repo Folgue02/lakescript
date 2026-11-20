@@ -15,6 +15,7 @@ outln(json::stringify($data, indent: 2));
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `parse(string $text)` | `any` | The value the JSON text holds. Throws a `ValueError` with the line and column if it isn't valid |
+| `parseAll(string $text)` | `list<any>` | Every value in a text that holds several, separated by whitespace: streams like `{"a":1} {"a":2}` and JSON Lines, also when a value spans several lines. An empty text gives `[]` |
 | `stringify(any $value, ?number $indent = null)` | `string` | The value as JSON text. Compact without `$indent`, indented with that many spaces with it *(i.e. `json::stringify($data, indent: 2)`)* |
 | `read(string $path)` | `any` | Reads and parses a file, like `json::parse(fs::read($path))` |
 | `write(string $path, any $value, ?number $indent = 2)` | `void` | Writes the value to a file, indented by default since files are usually read by people. `indent: null` writes it compact |
@@ -28,7 +29,7 @@ There's no schema: the values become the built-in types, and the result is `any`
 | object | `map<string, any>`, keeping the order of the keys |
 | array | `list<any>` |
 | string | `string` |
-| number | `number`. Very big integers become floats, like in JavaScript |
+| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |
 | `true`, `false` | `bool` |
 | `null` | `null` |
 

@@ -30,13 +30,13 @@ These change the map.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `set(K $key, V $value)` | `map<K, V>` | Same as `$map[$key] = $value`. Returns the map |
-| `update(K $key, V $default, (V) -> V $fn)` | `V` | Sets `$key` to what `$fn` returns for its value, or for `$default` if it's not there. Returns the new value *(i.e. `$counts.update($word, 0, ($n) = $n + 1)`)* |
+| `update(K $key, V $default, (V) -> V $fn)` | `V` | Sets `$key` to what `$fn` returns for its value, or for `$default` if it's not there. Returns the new value *(i.e. `$counts.update($word, 0, ($n) -> $n + 1)`)* |
 | `remove(K $key)` | `?V` | Removes `$key` and returns its value, or `null` if it wasn't there |
 | `removeWhere((K, V) -> bool $fn)` | `number` | Removes the keys `$fn` returns `true` for, and returns how many there were |
 | `merge(map<K, V> $other)` | `map<K, V>` | Adds the keys of `$other`, replacing the ones that already exist. Returns the map |
 | `clear()` | `void` | Removes everything |
 | `sortByKey()` | `map<K, V>` | Reorders the keys from smallest to biggest. Returns the map |
-| `sortBy<S>((K, V) -> S $key)` | `map<K, V>` | Reorders the keys by what `$key` returns *(i.e. `$scores.sortBy(($name, $score) = -$score)`)* |
+| `sortBy<S>((K, V) -> S $key)` | `map<K, V>` | Reorders the keys by what `$key` returns *(i.e. `$scores.sortBy(($name, $score) -> -$score)`)* |
 
 ## Transforming
 
@@ -47,9 +47,9 @@ These always return a new map.
 | `merged(map<K, V> $other)` | `map<K, V>` | A copy with the keys of `$other` added, replacing the ones that already exist *(i.e. `$defaults.merged($userConfig)`)* |
 | `filter((K, V) -> bool $fn)` | `map<K, V>` | The keys `$fn` returns `true` for |
 | `reject((K, V) -> bool $fn)` | `map<K, V>` | The keys `$fn` returns `false` for |
-| `mapValues((V) -> U $fn)` | `map<K, U>` | The same keys, with `$fn` applied to each value *(i.e. `$sizes.mapValues(($s) = $s.formatBytes())`)* |
+| `mapValues((V) -> U $fn)` | `map<K, U>` | The same keys, with `$fn` applied to each value *(i.e. `$sizes.mapValues(($s) -> $s.formatBytes())`)* |
 | `mapKeys((K) -> J $fn)` | `map<J, V>` | `$fn` applied to each key. If two give the same key, the last one is kept |
-| `map((K, V) -> U $fn)` | `list<U>` | A list with what `$fn` returns for each key and value *(i.e. `$env.map(($k, $v) = f"{$k}={$v}")`)* |
+| `map((K, V) -> U $fn)` | `list<U>` | A list with what `$fn` returns for each key and value *(i.e. `$env.map(($k, $v) -> f"{$k}={$v}")`)* |
 | `invert()` | `map<V, K>` | Values become keys and keys become values |
 | `sortedByKey()` | `map<K, V>` | A copy with the keys from smallest to biggest |
 | `sortedBy<S>((K, V) -> S $key)` | `map<K, V>` | A copy ordered by what `$key` returns |

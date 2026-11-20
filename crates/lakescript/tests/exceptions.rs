@@ -168,9 +168,9 @@ fn try_expressions() {
         outln($bad.isError());
         outln($bad.orElse(0));
         outln($ok.orElse(0));
-        outln($bad.orElseGet(() = -1));
-        outln($ok.map(($n) = $n + 1));
-        outln($bad.map(($n) = $n + 1).isError());
+        outln($bad.orElseGet(() -> -1));
+        outln($ok.map(($n) -> $n + 1));
+        outln($bad.map(($n) -> $n + 1).isError());
         outln($bad.orNull());
         outln($bad.error().is(ValueError));
         outln($ok.error());
@@ -188,4 +188,26 @@ fn try_expressions() {
 fn try_applies_to_the_whole_expression() {
     // Without parentheses, `.orElse()` is part of what `try` runs
     assert_eq!(run("outln(try 'x'.toNumber().toString());"), "error(ValueError: 'x' isn't a number)\n");
+}
+
+#[test]
+fn throw_as_an_expression() {
+    let script = "
+        string name(?string $n) = $n ?? throw ValueError('no name');
+        outln(name('Ana'));
+        outln((try name(null)).isError());
+
+        string describe(any $v) = switch ($v) {
+            case string -> $v;
+            case bool -> throw TypeError('no bools');
+            default -> 'other';
+        };
+        outln(describe('x'));
+        try { describe(true); } catch (TypeError $e) { outln($e.message()); }
+
+        const $n = if (1 > 2) 1 else throw ValueError('never');
+    ";
+    assert_eq!(error(script).contains("never"), true);
+    let script = script.replace("const $n = if (1 > 2) 1 else throw ValueError('never');", "");
+    assert_eq!(run(&script), "Ana\ntrue\nx\nno bools\n");
 }

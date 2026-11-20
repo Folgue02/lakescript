@@ -183,6 +183,8 @@ list<T> sort();
 list<T> sorted();
 list<T> sortBy<K>((T) -> K $key);
 list<T> sortedBy<K>((T) -> K $key);
+list<T> sortWith((T, T) -> number $compare);
+list<T> sortedWith((T, T) -> number $compare);
 list<T> reverse();
 list<T> reversed();
 list<T> shuffle();
@@ -340,6 +342,7 @@ command command(string $program, ...string $args);
 
 module std/json
 any parse(string $text);
+list<any> parseAll(string $text);
 string stringify(any $value, ?number $indent = null);
 any read(string $path);
 void write(string $path, any $value, ?number $indent = 2);

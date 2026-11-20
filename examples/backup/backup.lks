@@ -35,10 +35,10 @@ const $exclude = ($config['exclude'] ?? []).as(list<string>);
 
 // What's going to be copied
 const $files = fs::walk($source)
-    .map(($f) = path::relative($f, $source))
-    .reject(($f) = $exclude.any(($pattern) = $f -like $pattern || $f.startsWith($pattern + '/')));
+    .map(($f) -> path::relative($f, $source))
+    .reject(($f) -> $exclude.any(($pattern) -> $f -like $pattern || $f.startsWith($pattern + '/')));
 
-const $size = $files.map(($f) = fs::size(path::join($source, $f))).sum();
+const $size = $files.map(($f) -> fs::size(path::join($source, $f))).sum();
 outln(f"Backing up {plural($files.length(), 'file')} ({$size.formatBytes()}) from {$source}");
 
 // The archive: tar gets the list of files on its stdin, so no name can break the command
@@ -54,7 +54,7 @@ outln(f"Created {$name} ({fs::size($archive).formatBytes()})");
 // Keep only the newest ones
 const $prefix = path::name($source) + '-';
 const $old = fs::list($target)
-    .filter(($f) = $f.startsWith($prefix) && $f.endsWith('.tar.gz'))
+    .filter(($f) -> $f.startsWith($prefix) && $f.endsWith('.tar.gz'))
     .sorted()
     .reversed()
     .skip($keep);
@@ -63,4 +63,4 @@ for ($f in $old) {
     fs::remove(path::join($target, $f));
     outln(f"Removed {$f}");
 }
-outln(f"Keeping {plural(fs::list($target).countWhere(($f) = $f.startsWith($prefix)), 'backup')}");
+outln(f"Keeping {plural(fs::list($target).countWhere(($f) -> $f.startsWith($prefix)), 'backup')}");

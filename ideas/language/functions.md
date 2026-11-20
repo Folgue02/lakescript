@@ -7,7 +7,15 @@
 - Should allow calling them while naming parameters. Named and positional arguments can be mixed, but positional ones go first *(i.e. `createFile('daniel', extension: 'jpg')`)*.
 - Must always have a return type. Functions that don't return anything use `void` *(i.e. `void log(string $message) { ... }`)*. This way a definition never looks like a call followed by a block.
 - Should allow generics. The type parameters go after the name *(i.e. `T first<T>(list<T> $items) = $items[0];`)*. They're inferred when calling, so they're never written in a call: `first($names)`.
-- Must be defined before they're called *(see [syntax.md](syntax.md))*. Because of this, two functions can't call each other: the first one can't see the second. A function can call itself.
+- Functions can call each other in any order: a function can call any function declared in the same block or around it, even one further down, so recursive functions that call each other work *(i.e. a parser with `expr()` and `term()`)*. A function can call itself.
+    - The statements of the block itself can only call a function after its declaration, since it doesn't exist before that line runs *(i.e. `f();` above `void f() { ... }` is an error)*. The checker says so before anything runs.
+    - The signatures of a block's functions, and its `type` aliases, are known from the start of the block, so calls to functions further down are checked like any other.
+
+```
+bool even(number $n) = if ($n == 0) true else odd($n - 1);
+bool odd(number $n) = if ($n == 0) false else even($n - 1);
+outln(even(10));    // true
+```
 - Functions can use the variables and constants declared outside them, as long as they're declared before the function. `let` variables can be read and changed, `const` ones can only be read:
 
 ```
@@ -40,20 +48,22 @@ $scores.filter(($name, $score) {
     return $score > 20;
 });
 
-// One line, the expression after `=` is the return value
-$fruits.map(($fruit) = $fruit.upper());
+// One line, the expression after `->` is the return value
+$fruits.map(($fruit) -> $fruit.upper());
 ```
 
-- When an anonymous function is passed where a function type is expected, the parameters without a type take the types from it. In `$fruits.map(($fruit) = ...)`, `$fruit` is a `string` because `$fruits` is a `list<string>`. Otherwise they're `any`.
-- `(...)` followed by `{` or `=` in an expression is an anonymous function. Parenthesized expressions can't be assigned to, so `($a) = 5` is never an assignment.
-- Like named functions, they can use the variables around them *(i.e. `$fruits.filter(($f) = $f -like $pattern)`)*. This works like closures in JavaScript:
+- When an anonymous function is passed where a function type is expected, the parameters without a type take the types from it. In `$fruits.map(($fruit) -> ...)`, `$fruit` is a `string` because `$fruits` is a `list<string>`. Otherwise they're `any`.
+- One-line anonymous functions use `->`, and named functions use `=`, like in Kotlin *(`fun f(x) = ...` and `{ x -> ... }`)*: `($x) -> $x + 1` and `() -> 42` are anonymous functions, `number inc(number $x) = $x + 1;` is a named one. `($x) = ...` would read like an assignment, especially next to another `=` *(i.e. `const $f = ($x) = $x + 1;`)*, so it's an error that points to `->`.
+- `(...)` followed by `{` or `->` in an expression is an anonymous function.
+- `=>` can't be used for this, since map literals and `for ($k => $v in ...)` already use it.
+- Like named functions, they can use the variables around them *(i.e. `$fruits.filter(($f) -> $f -like $pattern)`)*. This works like closures in JavaScript:
     - They use the variable itself, not a copy of its value, so they see later changes, and changes they make are seen outside.
     - They keep working after the function that created them has returned, and the variables they use stay alive with them.
 
 ```
 (() -> number) makeCounter() {
     let $count = 0;
-    return () = ++$count;
+    return () -> ++$count;
 }
 
 const $next = makeCounter();
@@ -75,7 +85,10 @@ list<(string) -> bool>          // inside generics
 ```
 
 - Default values and parameter names aren't part of the type. `string greet(string $name = "user")` has the type `(string) -> string`.
-- `->` is only used in function types and after the cases of a `switch`, never in expressions. When the parser finds a `(` where a type or an expression could start, it looks for the matching `)`: if `->` follows, it's a type. After `case`, there is a value or a type name, but never a function type, so `case ($a + 1) -> ...` is always read as a value.
+- `->` is used in function types, in one-line anonymous functions and after the cases of a `switch`. They never get mixed up:
+    - Types have no `$` and anonymous functions name their parameters with `$`: `(number) -> number` is a type, `($n) -> $n * 2` is an anonymous function.
+    - `() ->` has nothing inside to tell them apart, so the position decides. Each position takes either a type or an expression, never both, and `.as()` and `.is()` always take types.
+    - After `case`, there is a value or a type name, but never a function type or an anonymous function, so `case ($a + 1) -> ...` is always read as the value `$a + 1` and the arrow of the case.
 - Function types can be wrapped in parentheses to make them easier to read *(i.e. `((number) -> number) makeAdder(number $n) = ...;`)*.
 - If nullable types are written with a `?` prefix, `?(number) -> number` is ambiguous. Use parentheses: `?((number) -> number)` is a nullable function, `(number) -> ?number` is a function that returns a nullable number.
 - There are no C-style casts like `(number) $x`, since they would clash with this syntax. Conversions are done with methods *(i.e. `$x.toNumber()`)*.
@@ -95,6 +108,9 @@ list<string> filter(list<string> $items, Predicate $check) {
 Adder makeAdder(number $n) = ...;
 ```
 
+- Aliases also work in `.is()`, `.as()` and `catch` *(i.e. `$value.is(Pair)`)*: they're replaced by the type they stand for when the script is compiled.
+    - For now, this only works for aliases of the same file. An alias imported from another module *(i.e. `core::Filter`)* can be used in every other place, but `.is()`, `.as()` and `catch` give an error that says to write the type it stands for, since types are removed before the script runs and the other module's aliases aren't known then.
+
 ## Names ending in `?`
 
 Function and method names can end with `?`, usually for functions that return a `bool` *(i.e. `1.even?()`, `$list.empty?()`)*.
@@ -108,7 +124,7 @@ $user.name?.upper()   // `name`, then the nullable operator `?.`
 $n.even ? 'a' : 'b'   // `even`, then the ternary operator
 ```
 
-- Since functions are always called with parentheses, `even?` can't be referenced without calling it. To pass it as a value, wrap it in an anonymous function *(i.e. `$numbers.filter(($n) = $n.even?())`)*.
+- Since functions are always called with parentheses, `even?` can't be referenced without calling it. To pass it as a value, wrap it in an anonymous function *(i.e. `$numbers.filter(($n) -> $n.even?())`)*.
 - Variable names can't end with `?`, so `$ok?(1) : 2` is always a ternary.
 
 Examples:

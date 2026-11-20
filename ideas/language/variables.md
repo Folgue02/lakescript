@@ -1,6 +1,6 @@
 # Variables
 
-- A variable can't be declared twice, not even in an inner scope: there is no shadowing.
+- A variable can't be declared twice, not even in an inner scope: there is no shadowing. This includes the parameters of anonymous functions: in `($n) -> $n * 2`, `$n` can't be the name of a variable around it. It was discussed after the jq rewrite *(lq)*, and kept: a different name is always clearer than a reused one.
 
 ```
 let $count = 0;

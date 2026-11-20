@@ -18,7 +18,7 @@ const $greeting = env::get('GREETING') ?? 'Hello';
 for ($name in $names)
     outln(f"{$greeting}, {$name.capitalize()}!");
 
-if ($names.any(($n) = $n.blank?())) {
+if ($names.any(($n) -> $n.blank?())) {
     errln('one of the names is empty');
     exit(1);
 }

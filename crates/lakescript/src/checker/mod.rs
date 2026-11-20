@@ -44,6 +44,12 @@ struct Scope {
     narrowed: HashMap<String, Ty>,
     aliases: HashMap<String, Ty>,
     generics: HashSet<String>,
+    /// Functions of this block whose declaration hasn't been reached yet.
+    /// Other functions can call them, but the block's own statements can't.
+    pending: HashSet<String>,
+    /// How many functions deep the statements of this scope are *(see
+    /// `Checker::returns`)*, set when its functions are declared.
+    depth: usize,
 }
 
 #[derive(Clone)]
@@ -319,6 +325,14 @@ impl<'a> Checker<'a> {
         self.scopes.iter().rev().find_map(|s| s.funcs.get(name).cloned())
     }
 
+    /// Whether `name` is a function of a block whose declaration hasn't been
+    /// reached, used by that block's own statements: it doesn't exist yet
+    /// when they run. Inside another function it's fine, since that function
+    /// runs later.
+    fn not_declared_yet(&self, name: &str) -> bool {
+        self.scopes.iter().rev().find(|s| s.funcs.contains_key(name)).is_some_and(|s| s.pending.contains(name) && s.depth == self.returns.len())
+    }
+
     fn lookup_module(&self, name: &str) -> Option<ModuleSig> {
         self.scopes.iter().rev().find_map(|s| s.modules.get(name).cloned())
     }
@@ -378,6 +392,16 @@ impl<'a> Checker<'a> {
                         Ty::Result(Box::new(arg(self, 0)?), Box::new(arg(self, 1)?))
                     }
                     n if exceptions::is_exception_type(n) => Ty::Exception(Rc::from(n)),
+                    n if n.contains("::") => {
+                        let (module, member) = n.split_once("::").unwrap();
+                        match self.scopes.iter().rev().find_map(|s| s.modules.get(module)) {
+                            None => return self.fail(format!("there's no module named `{module}` here: import it with `use`"), ty.span),
+                            Some(m) => match m.types.get(member) {
+                                Some(t) => t.clone(),
+                                None => return self.fail(format!("`{}` has no `pub` type named `{member}`", m.path), ty.span),
+                            },
+                        }
+                    }
                     n => {
                         if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.aliases.get(n).cloned()) {
                             alias
@@ -394,10 +418,48 @@ impl<'a> Checker<'a> {
 
     // ---- Statements ----
 
+    /// Functions are declared when their block starts, so they can call each
+    /// other in any order. `use` and `type` go first too, since the
+    /// signatures need them. The bodies are checked where they are.
     fn block(&mut self, stmts: &[Stmt]) -> Check<()> {
-        for stmt in stmts {
-            self.stmt(stmt)?;
+        let mut early = HashSet::new();
+        for (i, stmt) in stmts.iter().enumerate() {
+            let inner = match &stmt.kind {
+                StmtKind::Pub(inner) => &**inner,
+                _ => stmt,
+            };
+            match &inner.kind {
+                StmtKind::Use(_) | StmtKind::TypeAlias { .. } => {
+                    self.stmt(stmt)?;
+                    early.insert(i);
+                }
+                StmtKind::Function(decl) => self.hoist(decl, inner.span)?,
+                _ => {}
+            }
         }
+        for (i, stmt) in stmts.iter().enumerate() {
+            if !early.contains(&i) {
+                self.stmt(stmt)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Declares a function's signature before its block runs.
+    fn hoist(&mut self, decl: &FunctionDecl, span: Span) -> Check<()> {
+        if self.lookup_func(&decl.name).is_some() && self.scopes.len() > 2 || self.scopes.last().unwrap().funcs.contains_key(&decl.name) {
+            return self.fail(format!("a function named `{}` already exists", decl.name), span);
+        }
+        // The type parameters are known inside the signature
+        self.push();
+        self.scopes.last_mut().unwrap().generics.extend(decl.generics.iter().cloned());
+        let sig = self.signature(decl, span);
+        self.pop();
+        let depth = self.returns.len();
+        let scope = self.scopes.last_mut().unwrap();
+        scope.funcs.insert(decl.name.clone(), Rc::new(sig?));
+        scope.pending.insert(decl.name.clone());
+        scope.depth = depth;
         Ok(())
     }
 
@@ -597,13 +659,7 @@ impl<'a> Checker<'a> {
                     self.scoped(&Vec::new(), |c| c.block(f))?;
                 }
             }
-            StmtKind::Throw(value) => {
-                let t = self.expr(value, None)?;
-                let t = self.shallow(&t);
-                if !matches!(t, Ty::Exception(_) | Ty::Any | Ty::Var(_)) {
-                    return self.fail(format!("only exceptions can be thrown, not {} *(i.e. `throw ValueError('...')`)*", a(&t)), value.span);
-                }
-            }
+            StmtKind::Throw(value) => self.thrown(value)?,
             StmtKind::Use(decl) => self.use_decl(decl, span)?,
             StmtKind::Pub(inner) => self.stmt(inner)?,
             StmtKind::Block(stmts) => self.scoped(&Vec::new(), |c| c.block(stmts))?,
@@ -615,18 +671,12 @@ impl<'a> Checker<'a> {
     }
 
     fn function(&mut self, decl: &FunctionDecl, span: Span) -> Check<()> {
-        if self.lookup_func(&decl.name).is_some() && self.scopes.len() > 2 || self.scopes.last().unwrap().funcs.contains_key(&decl.name) {
-            return self.fail(format!("a function named `{}` already exists", decl.name), span);
+        // Usually declared when the block started *(see `block`)*
+        if !self.scopes.last_mut().unwrap().pending.remove(&decl.name) {
+            self.hoist(decl, span)?;
+            self.scopes.last_mut().unwrap().pending.remove(&decl.name);
         }
-        // The type parameters are known inside the signature and the body
-        self.push();
-        self.scopes.last_mut().unwrap().generics.extend(decl.generics.iter().cloned());
-        let sig = self.signature(decl, span);
-        self.pop();
-        let sig = sig?;
-        let sig = Rc::new(sig);
-        // Declared before the body, so it can call itself
-        self.scopes.last_mut().unwrap().funcs.insert(decl.name.clone(), sig.clone());
+        let sig = self.scopes.last().unwrap().funcs[&decl.name].clone();
         let ret = sig.ret.clone();
         self.push();
         self.scopes.last_mut().unwrap().generics.extend(decl.generics.iter().cloned());
@@ -717,6 +767,16 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// The value after `throw`, which must be an exception.
+    fn thrown(&mut self, value: &Expr) -> Check<()> {
+        let t = self.expr(value, None)?;
+        let t = self.shallow(&t);
+        if !matches!(t, Ty::Exception(_) | Ty::Any | Ty::Var(_)) {
+            return self.fail(format!("only exceptions can be thrown, not {} *(i.e. `throw ValueError('...')`)*", a(&t)), value.span);
+        }
+        Ok(())
+    }
+
     fn use_decl(&mut self, decl: &UseDecl, span: Span) -> Check<()> {
         let module = self.module(&decl.path, span)?;
         match &decl.items {
@@ -733,11 +793,12 @@ impl<'a> Checker<'a> {
                             None => return self.fail(format!("`{}` has no `pub` constant named `${}`", module.path, item.name), span),
                         }
                     } else {
-                        match module.functions.get(&item.name) {
-                            Some(f) => {
-                                self.scopes.last_mut().unwrap().funcs.insert(local, f.clone());
-                            }
-                            None => return self.fail(format!("`{}` has no `pub` function named `{}`", module.path, item.name), span),
+                        if let Some(f) = module.functions.get(&item.name) {
+                            self.scopes.last_mut().unwrap().funcs.insert(local, f.clone());
+                        } else if let Some(t) = module.types.get(&item.name) {
+                            self.scopes.last_mut().unwrap().aliases.insert(local, t.clone());
+                        } else {
+                            return self.fail(format!("`{}` has no `pub` function or type named `{}`", module.path, item.name), span);
                         }
                     }
                 }
@@ -792,11 +853,13 @@ impl<'a> Checker<'a> {
         checker.file = Some(shown.clone());
         let mut public_fns = Vec::new();
         let mut public_consts = Vec::new();
+        let mut public_types = Vec::new();
         for stmt in &program {
             if let StmtKind::Pub(inner) = &stmt.kind {
                 match &inner.kind {
                     StmtKind::Function(d) => public_fns.push(d.name.clone()),
                     StmtKind::Let { name, .. } => public_consts.push(name.clone()),
+                    StmtKind::TypeAlias { name, .. } => public_types.push(name.clone()),
                     _ => {}
                 }
             }
@@ -808,11 +871,11 @@ impl<'a> Checker<'a> {
             };
             let declaration = matches!(
                 inner.kind,
-                StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { constant: true, .. }
+                StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { .. }
             );
             if !declaration {
                 return Err(located(Diagnostic::new(
-                    "an imported module can only have declarations at its top level: functions, `const` and `type`",
+                    "an imported module can only have declarations at its top level: functions, `const`, `let` and `type`",
                     stmt.span,
                 )));
             }
@@ -823,6 +886,12 @@ impl<'a> Checker<'a> {
         for name in public_fns {
             if let Some(f) = globals.funcs.get(&name) {
                 sig.functions.insert(name, f.clone());
+            }
+        }
+        for name in public_types {
+            if let Some(t) = globals.aliases.get(&name) {
+                let ty = checker.resolve(t);
+                sig.types.insert(name, forget_vars(&ty));
             }
         }
         for name in public_consts {
@@ -990,6 +1059,12 @@ impl<'a> Checker<'a> {
                 None => return self.fail(format!("`${name}` isn't declared"), span),
             },
             ExprKind::Function(name) => match self.lookup_func(name) {
+                Some(_) if self.not_declared_yet(name) => {
+                    return self.fail(
+                        format!("`{name}` is declared further down, so it can't be used here yet. Other functions can call it from anywhere"),
+                        span,
+                    );
+                }
                 Some(f) => Ty::Func(f),
                 None => return self.fail(format!("there's no function named `{name}`. Functions must be defined before they're used"), span),
             },
@@ -1105,6 +1180,14 @@ impl<'a> Checker<'a> {
             ExprKind::Try(inner) => {
                 let t = self.expr(inner, None)?;
                 Ty::Result(Box::new(t), Box::new(Ty::Exception(Rc::from("Exception"))))
+            }
+            ExprKind::Throw(value) => {
+                self.thrown(value)?;
+                // It never gives a value, so it takes whatever type is expected there
+                match expected {
+                    Some(t) => t.clone(),
+                    None => self.fresh(),
+                }
             }
         })
     }

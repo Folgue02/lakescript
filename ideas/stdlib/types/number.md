@@ -54,4 +54,4 @@ Any number, whole or with decimals *(see Number in [builtin_types.md](../../lang
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `times((number) -> void $fn)` | `void` | Calls `$fn` this many times, with the count from 0 *(i.e. `3.times(($i) = outln($i))`)* |
+| `times((number) -> void $fn)` | `void` | Calls `$fn` this many times, with the count from 0 *(i.e. `3.times(($i) -> outln($i))`)* |

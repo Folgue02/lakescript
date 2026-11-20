@@ -2,7 +2,7 @@
 // Anonymous functions and closures.
 
 // One line: the expression after `=` is the value
-const $double = ($n) = $n * 2;
+const $double = ($n) -> $n * 2;
 outln($double(21));
 
 // With types and a block
@@ -14,13 +14,13 @@ outln($describe('Daniel', 23));
 
 // Passed to methods: the parameter types come from the list
 const $fruits = %w[apple banana cherry];
-outln($fruits.map(($f) = $f.capitalize()).join(', '));
-outln($fruits.filter(($f) = $f.contains('an')));
+outln($fruits.map(($f) -> $f.capitalize()).join(', '));
+outln($fruits.filter(($f) -> $f.contains('an')));
 
 // Closures keep the variables they use, like in JavaScript
 (() -> number) makeCounter() {
     let $count = 0;
-    return () = ++$count;
+    return () -> ++$count;
 }
 
 const $next = makeCounter();
@@ -30,16 +30,21 @@ outln(f"The counter is at {$next()}");
 
 // They see later changes, and each loop pass keeps its own variable
 let $greeting = 'Hello';
-const $greet = ($name) = f"{$greeting}, {$name}";
+const $greet = ($name) -> f"{$greeting}, {$name}";
 $greeting = 'Bye';
 outln($greet('world'));
 
 let $printers = [];
 for ($i in 1..=3)
-    $printers << () = $i * 10;
-outln($printers.map(($p) = $p()));
+    $printers << () -> $i * 10;
+outln($printers.map(($p) -> $p()));
 
 // Functions are values too: named ones can be passed by name
 number square(number $n) = $n ** 2;
 number applyTwice((number) -> number $f, number $x) = $f($f($x));
 outln(applyTwice(square, 3));
+
+// Functions can call each other in any order, even one declared further down
+bool even?(number $n) = if ($n == 0) true else odd?($n - 1);
+bool odd?(number $n) = if ($n == 0) false else even?($n - 1);
+outln(f"7 is odd: {odd?(7)}");

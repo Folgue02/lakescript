@@ -14,11 +14,11 @@ const $text = if (io::piped?()) io::readAll() else 'the cat and the dog and the 
 
 const $words = $text.lower()
     .splitMatches(%r"[^a-z']+")
-    .reject(($w) = $w.empty?());
+    .reject(($w) -> $w.empty?());
 
 outln(f"{$words.length()} words, {$words.unique().length()} different");
 
-const $counts = $words.countBy(($w) = $w).sortedBy(($word, $n) = -$n);
+const $counts = $words.countBy(($w) -> $w).sortedBy(($word, $n) -> -$n);
 
 let $shown = 0;
 for ($word => $n in $counts) {

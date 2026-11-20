@@ -16,7 +16,7 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
 - **No JIT**: a JIT makes long programs faster but the first seconds slower, which is the opposite of what scripts need.
 - **Lazy loading**: imports and the standard library are only loaded when they're used.
 - **Regexes are compiled on first use**, not when the script starts, since a script might never reach the line that uses them.
-- **Single-pass compiling**: functions must be defined before they're called, so the script can be compiled from top to bottom in one go.
+- **Compiled from top to bottom**: a block's functions and types are declared when it starts, so functions can call each other in any order, but the statements of a block can only use a function after its declaration. Everything else is compiled in one pass.
 - **The language is a library**: the `lakescript` crate holds the lexer, parser, interpreter and standard library, and `lks` and `ferry` are programs built on it. So that any program can embed it, the library keeps no global state, never prints or exits on its own (output goes through something the host can replace, and errors are returned), never panics because of what a script does, lets the host leave out modules like `process` or `fs`, and lets the host add its own functions written in Rust.
 
 ## Notes

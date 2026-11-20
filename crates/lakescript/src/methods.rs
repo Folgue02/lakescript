@@ -236,6 +236,55 @@ fn sort_by_keys(items: &mut Vec<Value>, keys: Vec<Value>, span: Span) -> Exec<()
     Ok(())
 }
 
+/// A stable merge sort with a comparison function written in Lakescript,
+/// which returns a negative number, zero or a positive number. Rust's own
+/// sorts can panic when the order isn't consistent, and can't stop at the
+/// first error, so this one is written by hand.
+fn sort_with(interp: &mut Interpreter, items: Vec<Value>, f: &Rc<Function>, span: Span) -> Exec<Vec<Value>> {
+    if items.len() <= 1 {
+        return Ok(items);
+    }
+    let compare = |a: &Value, b: &Value, interp: &mut Interpreter| -> Exec<bool> {
+        // `true` if `b` must go before `a`
+        match call_fn(interp, f, vec![a.clone(), b.clone()], span)? {
+            Value::Int(n) => Ok(n > 0),
+            Value::Float(n) if !n.is_nan() => Ok(n > 0.0),
+            other => error(
+                format!("the function of `.sortWith()` must return a number (negative, zero or positive), but it returned {}", other.type_name()),
+                span,
+            ),
+        }
+    };
+    let mut src = items;
+    let mut dst: Vec<Value> = Vec::with_capacity(src.len());
+    let n = src.len();
+    let mut width = 1;
+    while width < n {
+        dst.clear();
+        let mut start = 0;
+        while start < n {
+            let mid = (start + width).min(n);
+            let end = (start + 2 * width).min(n);
+            let (mut i, mut j) = (start, mid);
+            while i < mid && j < end {
+                if compare(&src[i], &src[j], interp)? {
+                    dst.push(src[j].clone());
+                    j += 1;
+                } else {
+                    dst.push(src[i].clone());
+                    i += 1;
+                }
+            }
+            dst.extend_from_slice(&src[i..mid]);
+            dst.extend_from_slice(&src[j..end]);
+            start = end;
+        }
+        std::mem::swap(&mut src, &mut dst);
+        width *= 2;
+    }
+    Ok(src)
+}
+
 // ---- string ----
 
 fn char_index(s: &str, byte: usize) -> usize {
@@ -1004,6 +1053,17 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
             };
             sort_by_keys(&mut values, keys, span)?;
             if method.starts_with("sorted") {
+                Value::list(values)
+            } else {
+                *list.borrow_mut() = values;
+                receiver.clone()
+            }
+        }
+        "sortWith" | "sortedWith" => {
+            a.count(1, 1)?;
+            let f = a.func(0)?;
+            let values = sort_with(interp, items(), &f, span)?;
+            if method == "sortedWith" {
                 Value::list(values)
             } else {
                 *list.borrow_mut() = values;

@@ -22,7 +22,7 @@
     - Doc comments start with `///` and go before what they document, so editors can show them *(still to be discussed)*.
 - Blocks used as values end with `};`, since they're part of a statement: maps, anonymous functions, `switch` and `if` expressions *(i.e. `const $scores = { ... };`)*. Blocks of statements like `if`, `for`, `while` or function definitions end with just `}`.
 - Trailing commas are allowed in lists, maps, function parameters and arguments *(i.e. `['a', 'b',]`)*, so multi-line lists can be reordered and extended without touching the other lines.
-- Scripts run from top to bottom. Functions must be defined before they're called.
+- Scripts run from top to bottom. A function can be called by the statements after its declaration, and by other functions from anywhere *(see [functions.md](functions.md))*.
 
 ## Names and reserved words
 

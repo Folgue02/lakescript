@@ -7,6 +7,6 @@ pub const $source = process::scriptPath() ?? 'unknown';
 pub string title(string $text) = $text.capitalizeWords();
 
 pub string table(map<string, string> $rows) {
-    const $width = $rows.keys().map(($k) = $k.length()).max() ?? 0;
-    return $rows.map(($k, $v) = f"{$k.padEnd($width)}  {$v}").join("\n");
+    const $width = $rows.keys().map(($k) -> $k.length()).max() ?? 0;
+    return $rows.map(($k, $v) -> f"{$k.padEnd($width)}  {$v}").join("\n");
 }

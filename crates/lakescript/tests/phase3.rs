@@ -108,7 +108,36 @@ fn only_pub_things_can_be_used() {
     let dir = TempDir::new("private");
     dir.file("helpers.lks", "string secret() = 'hidden';\n");
     assert!(error_in(&dir, "use helpers;\nhelpers::secret();").contains("has no `pub` function named `secret`"));
-    assert!(error_in(&dir, "use helpers::secret;").contains("has no `pub` function named `secret`"));
+    assert!(error_in(&dir, "use helpers::secret;").contains("has no `pub` function or type named `secret`"));
+}
+
+#[test]
+fn pub_types_can_be_imported() {
+    let dir = TempDir::new("pubtypes");
+    dir.file(
+        "filters.lks",
+        "pub type Filter = (any) -> list<any>;\n\
+         pub Filter identity() = ($v) -> [$v];\n",
+    );
+    let script = "use filters;\n\
+                  use filters::{Filter, identity};\n\
+                  list<any> apply(Filter $f, any $v) = $f($v);\n\
+                  const filters::Filter $same = identity();\n\
+                  outln(apply($same, 1));\n";
+    // Without the checker, the VM skips the imported type
+    assert_eq!(run_in(&dir, script), "[1]\n");
+    // With the checker, both `Filter` and `filters::Filter` are known types
+    let path = dir.file("main.lks", script);
+    let output = CapturedOutput::new();
+    let mut engine = Engine::with_output(output.clone());
+    if let Err(e) = engine.run_file(&path) {
+        panic!("{}", e.render("main.lks"));
+    }
+    assert_eq!(output.text(), "[1]\n");
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    let bad = dir.file("bad.lks", "use filters;\nconst filters::Missing $x = 1;\n");
+    let message = engine.run_file(&bad).unwrap_err().render("bad.lks");
+    assert!(message.contains("has no `pub` type named `Missing`"), "{message}");
 }
 
 #[test]
@@ -351,7 +380,7 @@ fn files() {
          fs::write(path::join($d, 'src/util/text.lks'), '');\n\
          fs::write(path::join($d, 'src/.hidden.lks'), '');\n\
          outln(fs::list($d));\n\
-         outln(fs::walk(path::join($d, 'src')).map(($p) = path::relative($p, $d)));\n\
+         outln(fs::walk(path::join($d, 'src')).map(($p) -> path::relative($p, $d)));\n\
          process();\n\
          void process() {{}}\n",
         dir.path()
@@ -457,4 +486,40 @@ fn json_files() {
         dir.path()
     ));
     assert_eq!(out, "{\n  \"port\": 8080\n}\n\n8080\n[1]\n\n");
+}
+
+#[test]
+fn json_streams() {
+    let out = run(
+        "use std/json;\n\
+         outln(json::parseAll('{\"a\": 1} {\"a\": 2}'));\n\
+         outln(json::parseAll(\"1\\n[2, 3]\\n\\\"x\\\"\\n\"));\n\
+         outln(json::parseAll('  '));\n\
+         outln(json::parseAll('{\"a\":\\n 1}\\n{}'));\n",
+    );
+    assert_eq!(out, "[{ 'a' => 1 }, { 'a' => 2 }]\n[1, [2, 3], 'x']\n[]\n[{ 'a' => 1 }, {}]\n");
+    assert!(error("use std/json;\njson::parseAll('{} {');").contains("invalid JSON at line 1"));
+}
+
+#[test]
+fn modules_can_keep_private_variables() {
+    let dir = TempDir::new("modlet");
+    dir.file("counter.lks", "let $count = 0;\npub number next() {\n  $count += 1;\n  return $count;\n}\n");
+    let script = "use counter;\ncounter::next();\noutln(counter::next());\n";
+    assert_eq!(run_in(&dir, script), "2\n");
+    let path = dir.file("main.lks", script);
+    let output = CapturedOutput::new();
+    let mut engine = Engine::with_output(output.clone());
+    if let Err(e) = engine.run_file(&path) {
+        panic!("{}", e.render("main.lks"));
+    }
+    assert_eq!(output.text(), "2\n");
+    // Other modules can't reach them
+    let bad = dir.file("bad.lks", "use counter::{$count};\n");
+    let message = Engine::with_output(CapturedOutput::new()).run_file(&bad).unwrap_err().message;
+    assert!(message.contains("no `pub` constant named `$count`"), "{message}");
+    dir.file("public.lks", "pub let $x = 1;\n");
+    let bad = dir.file("bad2.lks", "use public;\n");
+    let message = Engine::with_output(CapturedOutput::new()).run_file(&bad).unwrap_err().message;
+    assert!(message.contains("`pub` goes before functions, constants"), "{message}");
 }

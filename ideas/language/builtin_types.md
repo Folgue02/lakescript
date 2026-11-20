@@ -265,7 +265,7 @@ It holds either a value of type `T` or an error of type `E`. It's what `try` ret
 
 ```
 const $config = (try readFile('config.txt')).orElse('');
-const $size = (try readFile($path)).map(($text) = $text.length()).orNull();
+const $size = (try readFile($path)).map(($text) -> $text.length()).orNull();
 ```
 
 **NOTE**: `try` applies to the whole expression after it, so `try readFile($path).orElse('')` would mean `try (readFile($path).orElse(''))`. Parentheses are needed to call methods on the result.

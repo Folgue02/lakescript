@@ -49,6 +49,19 @@ throw ValueError(f"'{$input}' isn't a valid port");
 
 - The built-in exceptions are created by calling them with a message *(i.e. `ValueError('...')`)*.
 - Only exceptions can be thrown: `throw 'oops';` is an error.
+- `throw` is also an expression, so it can go where a value is expected. It never gives a value, so the checker accepts it in place of any type:
+
+```
+const $name = $config['name'] ?? throw ValueError('the config needs a name');
+
+string describe(any $v) = switch ($v) {
+    case string -> $v;
+    case bool -> throw TypeError('bools have no description');
+    default -> 'something else';
+};
+```
+
+- Like `try`, `throw` applies to the whole expression after it.
 
 ## `try` as an expression
 

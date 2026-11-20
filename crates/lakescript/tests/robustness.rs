@@ -54,5 +54,5 @@ fn deep_interpolation_is_an_error_not_a_crash() {
 #[test]
 fn endless_recursion_is_an_error_not_a_crash() {
     assert!(run("number f(number $n) = f($n + 1); f(0);").unwrap_err().contains("too many nested calls"));
-    assert!(run("void f() { [1].map(($x) = f()); } f();").unwrap_err().contains("too many nested calls"));
+    assert!(run("void f() { [1].map(($x) -> f()); } f();").unwrap_err().contains("too many nested calls"));
 }

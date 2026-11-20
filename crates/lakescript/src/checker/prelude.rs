@@ -22,6 +22,8 @@ pub struct ModuleSig {
     pub path: String,
     pub functions: HashMap<String, Rc<FnTy>>,
     pub constants: HashMap<String, Ty>,
+    /// `pub type` aliases.
+    pub types: HashMap<String, Ty>,
 }
 
 pub struct Prelude {

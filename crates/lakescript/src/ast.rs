@@ -68,7 +68,7 @@ pub enum ExprKind {
     /// `.as(type)` and `.is(type)`
     TypeCheck { receiver: Box<Expr>, ty: TypeExpr, check: TypeCheckKind, nullable: bool },
     Index { target: Box<Expr>, index: Box<Expr>, nullable: bool },
-    /// `($a, $b) { ... }` or `($a) = $a * 2`
+    /// `($a, $b) { ... }` or `($a) -> $a * 2`
     Lambda(Rc<FunctionDecl>),
     /// `if (...) a else b` used as a value
     If { cond: Box<Expr>, then: Box<Branch>, otherwise: Box<Branch> },
@@ -76,6 +76,9 @@ pub enum ExprKind {
     Switch(Box<Switch>),
     /// `try expr`: a `result` instead of an exception.
     Try(Box<Expr>),
+    /// `throw expr` used as a value *(i.e. `$x ?? throw ValueError('...')`)*.
+    /// It never gives a value, so it fits wherever a value of any type goes.
+    Throw(Box<Expr>),
     /// `paths::load`: a function of an imported module.
     ModuleFunction { module: String, name: String },
     /// `paths::$defaultPath`: a constant of an imported module.
@@ -459,6 +462,7 @@ impl fmt::Display for Expr {
             If { cond, then, otherwise } => write!(f, "(if {cond} {then} {otherwise})"),
             Switch(switch) => write!(f, "{switch}"),
             Try(inner) => write!(f, "(try {inner})"),
+            Throw(inner) => write!(f, "(throw {inner})"),
             ModuleFunction { module, name } => write!(f, "{module}::{name}"),
             ModuleConstant { module, name } => write!(f, "{module}::${name}"),
         }

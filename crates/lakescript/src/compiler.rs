@@ -83,6 +83,8 @@ struct FnState {
     expr_blocks: usize,
     /// The top level of a script or module, where declarations outside blocks are globals.
     top_level: bool,
+    /// Functions whose places were made when their block started *(see `hoist`)*.
+    hoisted: HashSet<String>,
 }
 
 impl FnState {
@@ -91,6 +93,7 @@ impl FnState {
             proto: Proto { name: Rc::from(name), ..Default::default() },
             locals: Vec::new(),
             scopes: Vec::new(),
+            hoisted: HashSet::new(),
             next_slot: 0,
             next_cell: 0,
             captured,
@@ -114,6 +117,9 @@ pub struct Compiler<'a> {
     module: bool,
     /// What a module makes available with `pub`.
     pub public: HashSet<String>,
+    /// Type aliases, replaced by what they stand for in `.is()`, `.as()`
+    /// and `catch`, since types are removed before the script runs.
+    aliases: HashMap<String, TypeExpr>,
     span: Span,
     stack_base: usize,
     stack_budget: usize,
@@ -128,6 +134,7 @@ impl<'a> Compiler<'a> {
             declared: HashSet::new(),
             module: false,
             public: HashSet::new(),
+            aliases: HashMap::new(),
             span: Span::default(),
             stack_base: stack_position(),
             stack_budget,
@@ -150,6 +157,7 @@ impl<'a> Compiler<'a> {
         let mut captured = HashSet::new();
         collect_stmts(program, false, &mut captured);
         self.functions.push(FnState::new(name, captured, true));
+        self.hoist(program);
         for stmt in program {
             if self.module {
                 let inner = match &stmt.kind {
@@ -158,11 +166,11 @@ impl<'a> Compiler<'a> {
                 };
                 let declaration = matches!(
                     inner.kind,
-                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { constant: true, .. }
+                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::TypeAlias { .. } | StmtKind::Let { .. }
                 );
                 if !declaration {
                     self.span = stmt.span;
-                    self.fail("an imported module can only have declarations at its top level: functions, `const` and `type`");
+                    self.fail("an imported module can only have declarations at its top level: functions, `const`, `let` and `type`");
                     continue;
                 }
             }
@@ -244,9 +252,26 @@ impl<'a> Compiler<'a> {
     }
 
     fn ty(&mut self, ty: &TypeExpr) -> u32 {
+        let ty = self.expand(ty, 0);
         let types = &mut self.f().proto.types;
-        types.push(ty.clone());
+        types.push(ty);
         types.len() as u32 - 1
+    }
+
+    /// A type with its aliases replaced. An alias from another module stays
+    /// as it is, and checking it fails when it runs.
+    fn expand(&self, ty: &TypeExpr, depth: usize) -> TypeExpr {
+        let kind = match &ty.kind {
+            TypeKind::Named { name, args } if args.is_empty() && depth < 64 && self.aliases.contains_key(name) => {
+                return self.expand(&self.aliases[name], depth + 1);
+            }
+            TypeKind::Named { name, args } => {
+                TypeKind::Named { name: name.clone(), args: args.iter().map(|a| self.expand(a, depth + 1)).collect() }
+            }
+            TypeKind::Nullable(inner) => TypeKind::Nullable(Box::new(self.expand(inner, depth + 1))),
+            other => other.clone(),
+        };
+        TypeExpr { kind, span: ty.span }
     }
 
     /// An error thrown when this point of the code runs.
@@ -451,6 +476,15 @@ impl<'a> Compiler<'a> {
                 self.span = stmt.span;
                 self.destructure(names, rest, *constant)?;
             }
+            StmtKind::Function(decl) if self.f().hoisted.remove(&decl.name) => {
+                let proto = self.function(decl)?;
+                self.emit(Op::Closure(proto));
+                match self.resolve(&decl.name) {
+                    Resolved::Local(Place::Cell(c), _) => self.emit(Op::StoreCell(c)),
+                    Resolved::Local(Place::Slot(s), _) => self.emit(Op::StoreLocal(s)),
+                    _ => unreachable!("hoisted functions are locals"),
+                };
+            }
             StmtKind::Function(decl) => {
                 let taken = format!("a function named `{}` already exists", decl.name);
                 let target = self.declare(&decl.name, false, &taken);
@@ -475,6 +509,10 @@ impl<'a> Compiler<'a> {
                     }
                     StmtKind::Let { name, .. } => {
                         self.public.insert(format!("${name}"));
+                    }
+                    // Types are removed before running: this only lets `use m::{Type}` find it
+                    StmtKind::TypeAlias { name, .. } => {
+                        self.public.insert(format!("type {name}"));
                     }
                     _ => {}
                 }
@@ -562,8 +600,39 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
+    /// Makes the places of a block's functions before anything in it runs,
+    /// so functions declared further down can be called from the ones above.
+    /// Only for locals: globals are already found when they're used.
+    fn hoist(&mut self, stmts: &[Stmt]) {
+        // Aliases too, like the checker does
+        for stmt in stmts {
+            let inner = match &stmt.kind {
+                StmtKind::Pub(inner) => &**inner,
+                _ => stmt,
+            };
+            if let StmtKind::TypeAlias { name, ty } = &inner.kind {
+                self.aliases.insert(name.clone(), ty.clone());
+            }
+        }
+        if self.at_global_scope() {
+            return;
+        }
+        for stmt in stmts {
+            if let StmtKind::Function(decl) = &stmt.kind {
+                self.span = stmt.span;
+                let taken = format!("a function named `{}` already exists", decl.name);
+                let target = self.declare(&decl.name, false, &taken);
+                // Empty until the declaration runs
+                self.emit(Op::Null);
+                self.define(target);
+                self.f().hoisted.insert(decl.name.clone());
+            }
+        }
+    }
+
     fn block(&mut self, stmts: &[Stmt]) -> Compiled {
         self.open_scope();
+        self.hoist(stmts);
         for stmt in stmts {
             self.stmt(stmt)?;
         }
@@ -886,6 +955,7 @@ impl<'a> Compiler<'a> {
                 self.emit(Op::Return);
             }
             FunctionBody::Block(stmts) => {
+                self.hoist(stmts);
                 for stmt in stmts {
                     self.stmt(stmt)?;
                 }
@@ -1114,6 +1184,10 @@ impl<'a> Compiler<'a> {
                 self.patch(to_end);
             }
             ExprKind::Switch(switch) => self.switch(switch, true)?,
+            ExprKind::Throw(value) => {
+                self.expr(value)?;
+                self.emit_at(Op::Throw, span);
+            }
             ExprKind::Try(inner) => {
                 let push = self.emit(Op::PushTry(0));
                 self.f().handlers.push(Handler::TryExpr);
@@ -1473,6 +1547,7 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         ExprKind::Unary { operand: e, .. }
         | ExprKind::PathTest { path: e, .. }
         | ExprKind::Try(e)
+        | ExprKind::Throw(e)
         | ExprKind::Increment { target: e, .. }
         | ExprKind::TypeCheck { receiver: e, .. } => collect_expr(e, inside, out),
         ExprKind::Binary { left, right, .. } => {

@@ -1005,8 +1005,12 @@ impl<'a> Interpreter<'a> {
         let module = self.load(source, span)?;
         for (name, variable, global, local) in &import.items {
             let key = if *variable { format!("${name}") } else { name.clone() };
+            if !*variable && !module.public.contains(&key) && module.public.contains(&format!("type {name}")) {
+                // A type alias: only the checker uses it
+                continue;
+            }
             if !module.public.contains(&key) {
-                let what = if *variable { "constant" } else { "function" };
+                let what = if *variable { "constant" } else { "function or type" };
                 return error(format!("`{}` has no `pub` {what} named `{key}`", module.path), span);
             }
             let value = module.globals.get(&key).unwrap_or(Value::Null);

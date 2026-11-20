@@ -35,6 +35,10 @@ outln(fs::read($path).trim());
 outln(json::read($path)['hosts']);
 fs::remove($path);
 
+// Several values in one text: JSON Lines, or values one after the other
+const $events = json::parseAll('{"type": "start"}\n{"type": "stop"}\n');
+outln($events.map(($e) -> $e['type']));
+
 // Invalid JSON says where
 try {
     json::parse('{"a": 1,}');

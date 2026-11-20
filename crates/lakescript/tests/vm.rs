@@ -33,7 +33,7 @@ fn closures_see_later_changes_and_make_them() {
         type Counter = () -> number;
         Counter counter() {
             let $n = 0;
-            return () = ++$n;
+            return () -> ++$n;
         }
         const $a = counter();
         const $b = counter();
@@ -50,9 +50,9 @@ fn every_pass_of_a_loop_has_its_own_variables() {
         const $later = <() -> number>[];
         for ($i in 1..4) {
             const $double = $i * 2;
-            $later << () = $i + $double;
+            $later << () -> $i + $double;
         }
-        outln($later.map(($f) = $f()));
+        outln($later.map(($f) -> $f()));
     ";
     assert_eq!(run(script), "[3, 6, 9]\n");
 }
@@ -61,7 +61,7 @@ fn every_pass_of_a_loop_has_its_own_variables() {
 fn closures_use_parameters_and_functions_around_them() {
     let script = "
         type Adder = (number) -> number;
-        Adder adder(number $n) = ($x) = $x + $n;
+        Adder adder(number $n) = ($x) -> $x + $n;
         outln(adder(10)(5));
         void outer() {
             number fact(number $n) = if ($n < 2) 1 else $n * fact($n - 1);
@@ -120,7 +120,7 @@ fn exceptions_cross_rust_code() {
         } catch (ValueError $e) {
             outln(f\"caught {$e.message()}\");
         }
-        outln([1, 2].map(($x) = (try 10 % ($x - 1)).isError()));
+        outln([1, 2].map(($x) -> (try 10 % ($x - 1)).isError()));
     ";
     assert_eq!(run(script), "caught two\n[true, false]\n");
 }
@@ -178,4 +178,12 @@ fn errors_happen_when_their_line_runs() {
 fn the_bytecode_can_be_listed() {
     let listing = Engine::with_output(CapturedOutput::new()).bytecode("number f(number $x) = $x + 1;\noutln(f(1));").unwrap();
     assert!(listing.contains("Call(1)") && listing.contains("script/0:f(x)"), "{listing}");
+}
+
+#[test]
+fn local_functions_can_call_ones_declared_below() {
+    // Without the checker too: the places of a block's functions exist from its start
+    let script = "void outer() {\n  number a(number $n) = if ($n > 0) b($n - 1) else 0;\n  number b(number $n) = a($n) + 1;\n  outln(a(4));\n}\nouter();";
+    assert_eq!(run_unchecked(script).unwrap(), "4\n");
+    assert_eq!(run(script), "4\n");
 }

@@ -148,7 +148,7 @@ fn numbers() {
     assert_eq!(eval("3_000_000_000.formatBytes()"), "2.8 GB");
     assert_eq!(eval("500.formatBytes()"), "500 bytes");
     assert_eq!(eval("65.toChar()"), "A");
-    assert_eq!(run("3.times(($i) = out($i)); outln();"), "012\n");
+    assert_eq!(run("3.times(($i) -> out($i)); outln();"), "012\n");
     assert!(error("5.div(0);").contains("division by zero"));
 }
 
@@ -157,7 +157,7 @@ fn list_basics() {
     assert_eq!(eval("['a', 'b', 'a'].indexOf('a')"), "0");
     assert_eq!(eval("['a', 'b', 'a'].indexOfLast('a')"), "2");
     assert_eq!(eval("[1, 2, 1].count(1)"), "2");
-    assert_eq!(eval("[17, 20, 30].countWhere(($a) = $a >= 18)"), "2");
+    assert_eq!(eval("[17, 20, 30].countWhere(($a) -> $a >= 18)"), "2");
     assert_eq!(eval("[].first()"), "null");
     assert_eq!(eval("[1, 2].last()"), "2");
     assert_eq!(eval("[1, 2].getOrDefault(5, 0)"), "0");
@@ -179,7 +179,7 @@ fn list_changing() {
         outln($l);
         let $m = [1, 2, 1, 3, 1];
         outln($m.removeAll(1));
-        outln($m.removeWhere(($x) = $x > 2));
+        outln($m.removeWhere(($x) -> $x > 2));
         outln($m);
         $m.clear();
         outln($m);
@@ -196,7 +196,7 @@ fn list_ordering() {
         $l.sort();
         outln($l);
         outln($copy);
-        outln(['ccc', 'a', 'bb'].sortedBy(($s) = $s.length()));
+        outln(['ccc', 'a', 'bb'].sortedBy(($s) -> $s.length()));
         outln([1, 2, 3].reversed());
         outln(['b', 'a'].sort());
     ";
@@ -206,44 +206,44 @@ fn list_ordering() {
 
 #[test]
 fn list_transforming() {
-    assert_eq!(eval("['a', 'b'].map(($s) = $s.upper())"), "['A', 'B']");
-    assert_eq!(eval("[1, 2, 3, 4].filter(($n) = $n.even?())"), "[2, 4]");
-    assert_eq!(eval("[1, 2, 3, 4].reject(($n) = $n.even?())"), "[1, 3]");
-    assert_eq!(eval("['a b', 'c'].flatMap(($l) = $l.words())"), "['a', 'b', 'c']");
+    assert_eq!(eval("['a', 'b'].map(($s) -> $s.upper())"), "['A', 'B']");
+    assert_eq!(eval("[1, 2, 3, 4].filter(($n) -> $n.even?())"), "[2, 4]");
+    assert_eq!(eval("[1, 2, 3, 4].reject(($n) -> $n.even?())"), "[1, 3]");
+    assert_eq!(eval("['a b', 'c'].flatMap(($l) -> $l.words())"), "['a', 'b', 'c']");
     assert_eq!(eval("[[1, 2], [3], []].flatten()"), "[1, 2, 3]");
     assert_eq!(eval("[1, 2, 1, [1], [1]].unique()"), "[1, 2, [1]]");
-    assert_eq!(eval("['a', 'B', 'b'].uniqueBy(($s) = $s.lower())"), "['a', 'B']");
+    assert_eq!(eval("['a', 'B', 'b'].uniqueBy(($s) -> $s.lower())"), "['a', 'B']");
     assert_eq!(eval("[1, null, 2].compact()"), "[1, 2]");
     assert_eq!(eval("[1, 2, 3].take(2)"), "[1, 2]");
     assert_eq!(eval("[1, 2, 3].skip(2)"), "[3]");
-    assert_eq!(eval("[1, 2, 5, 1].takeWhile(($n) = $n < 3)"), "[1, 2]");
-    assert_eq!(eval("[1, 2, 5, 1].skipWhile(($n) = $n < 3)"), "[5, 1]");
+    assert_eq!(eval("[1, 2, 5, 1].takeWhile(($n) -> $n < 3)"), "[1, 2]");
+    assert_eq!(eval("[1, 2, 5, 1].skipWhile(($n) -> $n < 3)"), "[5, 1]");
     assert_eq!(eval("[1, 2, 3].chunk(2)"), "[[1, 2], [3]]");
     assert_eq!(eval("[1].concat([2])"), "[1, 2]");
 }
 
 #[test]
 fn list_grouping_and_searching() {
-    assert_eq!(eval("['a.txt', 'b.log', 'c.txt'].groupBy(($f) = $f.afterLast('.'))"), "{ 'txt' => ['a.txt', 'c.txt'], 'log' => ['b.log'] }");
-    assert_eq!(eval("['A', 'a', 'b'].countBy(($w) = $w.lower())"), "{ 'a' => 2, 'b' => 1 }");
-    assert_eq!(run("let [$adults, $kids] = [20, 5, 30].partition(($a) = $a >= 18); outln($adults); outln($kids);"), "[20, 30]\n[5]\n");
-    assert_eq!(eval("['ab', 'cd'].toMap(($s) = $s[0])"), "{ 'a' => 'ab', 'c' => 'cd' }");
-    assert_eq!(eval("[1, 5, 8].find(($n) = $n > 3)"), "5");
-    assert_eq!(eval("[1, 5, 8].findLast(($n) = $n > 3)"), "8");
-    assert_eq!(eval("[1, 5, 8].findIndex(($n) = $n > 3)"), "1");
-    assert_eq!(eval("[1, 5].find(($n) = $n > 10)"), "null");
-    assert_eq!(eval("[1, 5].any(($n) = $n > 3)"), "true");
-    assert_eq!(eval("[1, 5].all(($n) = $n > 3)"), "false");
-    assert_eq!(eval("[].all(($n) = $n > 3)"), "true");
-    assert_eq!(eval("[1, 5].none(($n) = $n > 10)"), "true");
+    assert_eq!(eval("['a.txt', 'b.log', 'c.txt'].groupBy(($f) -> $f.afterLast('.'))"), "{ 'txt' => ['a.txt', 'c.txt'], 'log' => ['b.log'] }");
+    assert_eq!(eval("['A', 'a', 'b'].countBy(($w) -> $w.lower())"), "{ 'a' => 2, 'b' => 1 }");
+    assert_eq!(run("let [$adults, $kids] = [20, 5, 30].partition(($a) -> $a >= 18); outln($adults); outln($kids);"), "[20, 30]\n[5]\n");
+    assert_eq!(eval("['ab', 'cd'].toMap(($s) -> $s[0])"), "{ 'a' => 'ab', 'c' => 'cd' }");
+    assert_eq!(eval("[1, 5, 8].find(($n) -> $n > 3)"), "5");
+    assert_eq!(eval("[1, 5, 8].findLast(($n) -> $n > 3)"), "8");
+    assert_eq!(eval("[1, 5, 8].findIndex(($n) -> $n > 3)"), "1");
+    assert_eq!(eval("[1, 5].find(($n) -> $n > 10)"), "null");
+    assert_eq!(eval("[1, 5].any(($n) -> $n > 3)"), "true");
+    assert_eq!(eval("[1, 5].all(($n) -> $n > 3)"), "false");
+    assert_eq!(eval("[].all(($n) -> $n > 3)"), "true");
+    assert_eq!(eval("[1, 5].none(($n) -> $n > 10)"), "true");
 }
 
 #[test]
 fn list_combining() {
     assert_eq!(eval("['a', 'b'].join(', ')"), "a, b");
-    assert_eq!(eval("['usr', 'bin'].reduce(($a, $b) = $a + '/' + $b)"), "usr/bin");
-    assert_eq!(eval("[].reduce(($a, $b) = $a)"), "null");
-    assert_eq!(eval("[1, 2, 3].fold(10, ($acc, $n) = $acc + $n)"), "16");
+    assert_eq!(eval("['usr', 'bin'].reduce(($a, $b) -> $a + '/' + $b)"), "usr/bin");
+    assert_eq!(eval("[].reduce(($a, $b) -> $a)"), "null");
+    assert_eq!(eval("[1, 2, 3].fold(10, ($acc, $n) -> $acc + $n)"), "16");
     assert_eq!(eval("[1, 2, 3].sum()"), "6");
     assert_eq!(eval("[].sum()"), "0");
     assert_eq!(eval("[2, 3].product()"), "6");
@@ -251,8 +251,8 @@ fn list_combining() {
     assert_eq!(eval("[].average()"), "null");
     assert_eq!(eval("[3, 1, 2].min()"), "1");
     assert_eq!(eval("['b', 'c', 'a'].max()"), "c");
-    assert_eq!(eval("['ccc', 'a'].minBy(($s) = $s.length())"), "a");
-    assert_eq!(run("['a', 'b'].eachWithIndex(($v, $i) = out(f\"{$i}{$v}\")); outln();"), "0a1b\n");
+    assert_eq!(eval("['ccc', 'a'].minBy(($s) -> $s.length())"), "a");
+    assert_eq!(run("['a', 'b'].eachWithIndex(($v, $i) -> out(f\"{$i}{$v}\")); outln();"), "0a1b\n");
 }
 
 #[test]
@@ -267,21 +267,21 @@ fn maps() {
         $groups.getOrSet('txt', []) << 'b.txt';
         outln($groups);
         let $counts = {};
-        for ($w in %w[x y x]) $counts.update($w, 0, ($n) = $n + 1);
+        for ($w in %w[x y x]) $counts.update($w, 0, ($n) -> $n + 1);
         outln($counts);
         outln($m.remove('a'));
         outln($m);
         outln({'port' => 1}.merged({'port' => 2, 'host' => 'x'}));
-        outln({'a' => 1, 'b' => 2}.filter(($k, $v) = $v > 1));
-        outln({'a' => 1}.mapValues(($v) = $v * 10));
-        outln({'a' => 1}.mapKeys(($k) = $k.upper()));
-        outln({'a' => 1, 'b' => 2}.map(($k, $v) = f\"{$k}={$v}\"));
+        outln({'a' => 1, 'b' => 2}.filter(($k, $v) -> $v > 1));
+        outln({'a' => 1}.mapValues(($v) -> $v * 10));
+        outln({'a' => 1}.mapKeys(($k) -> $k.upper()));
+        outln({'a' => 1, 'b' => 2}.map(($k, $v) -> f\"{$k}={$v}\"));
         outln({'a' => 'x'}.invert());
         outln({'b' => 1, 'a' => 2}.sortedByKey());
-        outln({'x' => 3, 'y' => 9}.sortedBy(($name, $score) = -$score));
-        outln({'a' => 1}.find(($k, $v) = $v == 1));
-        outln({'a' => 1}.any(($k, $v) = $v > 0));
-        outln({'a' => 1, 'b' => 2}.countWhere(($k, $v) = $v > 0));
+        outln({'x' => 3, 'y' => 9}.sortedBy(($name, $score) -> -$score));
+        outln({'a' => 1}.find(($k, $v) -> $v == 1));
+        outln({'a' => 1}.any(($k, $v) -> $v > 0));
+        outln({'a' => 1, 'b' => 2}.countWhere(($k, $v) -> $v > 0));
         outln({'a' => 1}.first());
     ";
     assert_eq!(
@@ -297,8 +297,8 @@ fn ranges() {
     assert_eq!(eval("(3..3).empty?()"), "true");
     assert_eq!(eval("(1..5).last()"), "4");
     assert_eq!(eval("(1..=5).reverse().toList()"), "[5, 4, 3, 2, 1]");
-    assert_eq!(eval("(1..=3).map(($n) = $n * $n)"), "[1, 4, 9]");
-    assert_eq!(eval("(1..=10).filter(($n) = $n % 3 == 0)"), "[3, 6, 9]");
+    assert_eq!(eval("(1..=3).map(($n) -> $n * $n)"), "[1, 4, 9]");
+    assert_eq!(eval("(1..=10).filter(($n) -> $n % 3 == 0)"), "[3, 6, 9]");
     assert_eq!(eval("(1..=100).sum()"), "5050");
 }
 
@@ -337,6 +337,16 @@ fn wrong_arguments() {
     assert!(error("'a'.padStart('x');").contains("must be a whole number, not a string"));
     assert!(error("[1].map(5);").contains("must be a function"));
     assert!(error("[[1], 2].flatten();").contains("needs a list of lists"));
-    assert!(error("[1].filter(($x) = 1);").contains("must return a bool"));
+    assert!(error("[1].filter(($x) -> 1);").contains("must return a bool"));
     assert!(error("'a'.nope();").contains("has no method `.nope()`"));
+}
+
+#[test]
+fn sorting_with_a_comparison_function() {
+    // Lists can't be compared with `<`, but a comparison function can order them
+    assert_eq!(eval("[[2, 'b'], [1, 'z'], [2, 'a']].sortedWith(($a, $b) -> $a[0] - $b[0])"), "[[1, 'z'], [2, 'b'], [2, 'a']]");
+    assert_eq!(eval("[3, 1, 2].sortWith(($a, $b) -> $b - $a)"), "[3, 2, 1]");
+    assert_eq!(eval("(1..=20).toList().sortedWith(($a, $b) -> ($a % 3) - ($b % 3))"), "[3, 6, 9, 12, 15, 18, 1, 4, 7, 10, 13, 16, 19, 2, 5, 8, 11, 14, 17, 20]");
+    assert_eq!(eval("[].sortedWith(($a, $b) -> 0)"), "[]");
+    assert!(error("[1, 2].sortWith(($a, $b) -> 'x');").contains("must return a number"));
 }

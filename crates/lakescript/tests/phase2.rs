@@ -30,12 +30,12 @@ fn anonymous_functions() {
         };
         outln($describe('Daniel', 23));
 
-        const $double = ($n) = $n * 2;
+        const $double = ($n) -> $n * 2;
         outln($double(21));
 
         number apply((number) -> number $f, number $x) = $f($x);
-        outln(apply(($x) = $x + 1, 1));
-        outln(($x) = $x);
+        outln(apply(($x) -> $x + 1, 1));
+        outln(($x) -> $x);
     ";
     assert_eq!(run(script), "Daniel is 23\n42\n2\n<function anonymous>\n");
 }
@@ -45,7 +45,7 @@ fn closures_work_like_javascript() {
     let script = "
         (() -> number) makeCounter() {
             let $count = 0;
-            return () = ++$count;
+            return () -> ++$count;
         }
         const $next = makeCounter();
         $next();
@@ -56,13 +56,13 @@ fn closures_work_like_javascript() {
 
         // They see later changes to the variables they use
         let $greeting = 'Hello';
-        const $greet = ($name) = f\"{$greeting} {$name}\";
+        const $greet = ($name) -> f\"{$greeting} {$name}\";
         $greeting = 'Bye';
         outln($greet('you'));
 
         // Each loop pass has its own variable
         let $fns = [];
-        for ($i in 0..3) $fns << () = $i;
+        for ($i in 0..3) $fns << () -> $i;
         for ($f in $fns) out($f());
         outln();
     ";
@@ -72,6 +72,22 @@ fn closures_work_like_javascript() {
 #[test]
 fn parenthesized_expressions_are_not_lambdas() {
     assert_eq!(run("const $a = 2; outln(($a) == 2); outln(($a + 1) * 2);"), "true\n6\n");
+}
+
+#[test]
+fn lambdas_use_arrows() {
+    assert_eq!(run("const $f = () -> 42; outln($f());"), "42\n");
+    assert_eq!(run("const $add = ($a, $b) -> $a + $b; outln($add(1, 2));"), "3\n");
+    // After `case`, `(...) ->` is the case value and its arrow
+    let script = "
+        const $a = 1;
+        switch (2) {
+            case ($a + 1) -> outln('two');
+            default -> outln('other');
+        }
+    ";
+    assert_eq!(run(script), "two\n");
+    assert!(error("const $f = ($x) = $x + 1;").contains("anonymous functions use `->`"));
 }
 
 #[test]

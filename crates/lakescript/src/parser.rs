@@ -93,6 +93,9 @@ struct Parser {
     /// Where the stack was when parsing started, and how much it may use *(see `guard`)*.
     stack_base: usize,
     stack_budget: usize,
+    /// Set while parsing a `case` value, where `(...) ->` is the value and
+    /// the arrow of the case, not an anonymous function.
+    in_case_pattern: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -104,7 +107,7 @@ struct Checkpoint {
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
         let eof = Token { kind: TokenKind::Eof, span: Span::default() };
-        Parser { tokens, pos: 0, split: 0, split_token: eof, last_span: Span::default(), stack_base: crate::stack::position(), stack_budget: crate::stack::DEFAULT_BUDGET }
+        Parser { tokens, pos: 0, split: 0, split_token: eof, last_span: Span::default(), stack_base: crate::stack::position(), stack_budget: crate::stack::DEFAULT_BUDGET, in_case_pattern: false }
     }
 
     // ---- Cursor ----
@@ -608,6 +611,16 @@ impl Parser {
         match self.peek().kind.clone() {
             TokenKind::Ident(name) => {
                 self.advance();
+                // `module::Type`, a type alias from an imported module
+                let name = match (&self.peek().kind, self.peek_at(1)) {
+                    (TokenKind::ColonColon, TokenKind::Ident(member)) if self.split == 0 => {
+                        let member = member.clone();
+                        self.advance();
+                        self.advance();
+                        format!("{name}::{member}")
+                    }
+                    _ => name,
+                };
                 let mut args = Vec::new();
                 if self.eat(&TokenKind::Lt) {
                     loop {
@@ -964,8 +977,10 @@ impl Parser {
             }
             TokenKind::LParen if self.lambda_ahead() => {
                 let params = self.params()?;
-                let body = if self.eat(&TokenKind::Eq) {
+                let body = if self.eat(&TokenKind::Arrow) {
                     FunctionBody::Expr(self.expression()?)
+                } else if self.check(&TokenKind::Eq) {
+                    return self.error_here("anonymous functions use `->` before their value *(i.e. `($x) -> $x + 1`)*; `=` is only for named functions");
                 } else {
                     FunctionBody::Block(self.block()?)
                 };
@@ -994,12 +1009,19 @@ impl Parser {
                 // `try` applies to the whole expression after it
                 ExprKind::Try(Box::new(self.expression()?))
             }
+            TokenKind::Keyword(Keyword::Throw) => {
+                self.advance();
+                // Like `try`, `throw` applies to the whole expression after it
+                ExprKind::Throw(Box::new(self.expression()?))
+            }
             other => return self.error_here(format!("expected an expression, found {other}")),
         };
         Ok(Expr { kind, span: self.span_from(start) })
     }
 
-    /// `(...)` followed by `{` or `=` is an anonymous function.
+    /// `(...)` followed by `{` or `->` is an anonymous function. `=` is
+    /// matched too, only to explain that anonymous functions use `->`. In a
+    /// `case` value, `(...) ->` is the value and the arrow of the case.
     fn lambda_ahead(&self) -> bool {
         let mut depth = 0usize;
         for (i, token) in self.tokens.iter().enumerate().skip(self.pos) {
@@ -1009,7 +1031,11 @@ impl Parser {
                     depth -= 1;
                     if depth == 0 {
                         let next = self.tokens.get(i + 1).map(|t| &t.kind);
-                        return matches!(next, Some(TokenKind::LBrace | TokenKind::Eq));
+                        return match next {
+                            Some(TokenKind::LBrace | TokenKind::Eq) => true,
+                            Some(TokenKind::Arrow) => !self.in_case_pattern,
+                            _ => false,
+                        };
                     }
                 }
                 TokenKind::Eof => return false,
@@ -1104,7 +1130,10 @@ impl Parser {
             }
             self.restore(checkpoint);
         }
-        Ok(Pattern::Value(self.expression()?))
+        let outer = std::mem::replace(&mut self.in_case_pattern, true);
+        let value = self.expression();
+        self.in_case_pattern = outer;
+        Ok(Pattern::Value(value?))
     }
 
     fn case_body(&mut self, as_value: bool) -> Result<CaseBody> {

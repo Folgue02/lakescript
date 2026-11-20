@@ -30,10 +30,10 @@ try {
 any $text = 'a';
 any $data = {'a' => 1};
 const $attempts = [
-    () = [1, 2][5],
-    () = 10 % 0,
-    () = $text + 1,
-    () = $data['a'].as(string),
+    () -> [1, 2][5],
+    () -> 10 % 0,
+    () -> $text + 1,
+    () -> $data['a'].as(string),
 ];
 for ($attempt in $attempts) {
     try {
@@ -49,5 +49,14 @@ const $bad = try parsePort('nope');
 outln($ok);
 outln($bad.isError());
 outln($bad.orElse(80));
-outln($ok.map(($p) = $p + 1).orNull());
+outln($ok.map(($p) -> $p + 1).orNull());
 outln((try parsePort('22')).orElse(80));
+
+// `throw` is also an expression, for a missing value or an impossible case
+string portName(?number $port) = switch ($port ?? throw ValueError('no port given')) {
+    case 80 -> 'http';
+    case 443 -> 'https';
+    default -> 'other';
+};
+outln(portName(443));
+outln((try portName(null)).isError());
