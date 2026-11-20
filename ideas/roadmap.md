@@ -13,7 +13,9 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **5. Speed** | Faster scripts | Bytecode compiler and a VM that replaces the tree-walker. The per-user cache moves to later |
 | **6. Projects** | Bigger programs | `ferry`: the project file, `bin/` commands, dependencies from git repositories, the lock file, `ferry install` |
 | **7. OOP** | Classes | Classes, interfaces, enums, custom exceptions as classes, `command` and `subcommand` for command-line arguments. Type aliases are removed, `pub const` needs its type, and modules can import each other in a cycle |
-| **Later** | | The rest of the standard library, the per-user bytecode cache, formatter, language server, concurrency |
+| **8. Editors** | A language server | `lks-lsp`: errors while typing, hover, go to definition and completion, first for farsub *(see [tooling/lsp.md](tooling/lsp.md))* |
+| **9. Documentation** | Docs for scripts and projects | The documentation of the standard library, and `ferry doc` for the `pub` items of a project, from their `///` comments |
+| **Later** | | The rest of the standard library, the per-user bytecode cache, formatter, concurrency |
 
 ## Versions
 
