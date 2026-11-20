@@ -34,6 +34,16 @@ Each one is usable on its own, with tests that send real protocol messages to th
 
 - Phase 8 is `v0.8.0` once milestones 1 to 3 work. Milestones 4 and 5 can be patch versions after it.
 
+### Status
+
+- Milestone 1 is done. `lks-lsp` takes the whole text of a file on every change, checks every open file with it, and sends each error to the file it's in: an error in a module goes to the module, also when only a file that uses it is open. A module of a ferry project is checked as a module, with the project's module path *(`src/` and the packages of the lock file that are already downloaded: `lks-lsp` never downloads)*, and any other file as a script.
+- Every file the editor has open is checked again on each change, since a change in a module can break the files that use it. It takes a few milliseconds.
+- `lks-lsp --version` says its version, and it's in every release archive.
+
+## Using it
+
+An editor starts `lks-lsp` with no arguments for files ending in `.lks`, and talks to it on its stdin and stdout. The language id is `lakescript`. Nothing else needs to be configured: a ferry project is found from the folder of each file.
+
 ## Editors
 
 - The first one is farsub, the editor of its own project. Others *(i.e. VS Code, Neovim, Helix)* come later: they only need to be told to start `lks-lsp` for `.lks` files.

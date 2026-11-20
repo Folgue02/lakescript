@@ -239,10 +239,33 @@ impl Engine {
         self.check(&program).map_err(|d| self.locate(d))
     }
 
+    /// Uses this text for a file instead of what's on the disk, for every
+    /// later check or run: the file an editor has open, before it's saved.
+    pub fn set_file_text(&mut self, path: &Path, text: impl Into<String>) {
+        let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        self.host.loader.overlay.insert(real, text.into());
+    }
+
+    /// Type checks a script given as text, as if it were the file at `path`:
+    /// its folder is where `use` looks first, like with `check_file`.
+    pub fn check_text(&mut self, path: &Path, text: &str) -> Result<(), Diagnostic> {
+        self.use_script_path(path);
+        self.check_source(text)
+    }
+
     /// Reads a script and makes its folder the first place `use` looks.
     fn open_file(&mut self, path: &Path) -> Result<String, Diagnostic> {
-        let source = std::fs::read_to_string(path)
+        let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let source = self
+            .host
+            .loader
+            .read(&real)
             .map_err(|e| Diagnostic::new(format!("can't read {}: {e}", path.display()), Default::default()))?;
+        self.use_script_path(path);
+        Ok(source)
+    }
+
+    fn use_script_path(&mut self, path: &Path) {
         let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         if let Some(folder) = real.parent()
             && !self.host.loader.roots.iter().any(|r| r == folder)
@@ -251,7 +274,6 @@ impl Engine {
         }
         self.host.loader.files[0] = path.display().to_string();
         self.host.state.script_path = Some(real);
-        Ok(source)
     }
 
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {

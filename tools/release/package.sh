@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds `lks` and `ferry` for one target and packs them for a release:
+# Builds `lks`, `ferry` and `lks-lsp` for one target and packs them for a release:
 # `dist/lakescript-<version>-<target>.tar.gz` (`.zip` on Windows), with
 # its `.sha256` next to it, and the page of the standard library inside it
 # as `doc/stdlib.html` and next to it as `lakescript-<version>-stdlib.html`.
@@ -16,7 +16,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
 version="${2:-v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
 
-cargo build --release --locked --target "$target" -p lks -p ferry
+cargo build --release --locked --target "$target" -p lks -p ferry -p lks-lsp
 
 name="lakescript-$version-$target"
 stage="dist/$name"
@@ -26,7 +26,7 @@ exe=""
 case "$target" in
     *windows*) exe=".exe" ;;
 esac
-for bin in lks ferry; do
+for bin in lks ferry lks-lsp; do
     cp "target/$target/release/$bin$exe" "$stage/"
 done
 cp LICENSE NOTICE "$stage/"

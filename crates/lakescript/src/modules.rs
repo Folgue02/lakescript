@@ -130,11 +130,22 @@ pub struct Loader {
     /// values when it finishes: the module, where they go, and their names
     /// and the globals they go into.
     pub pending: Vec<(PathBuf, Rc<Globals>, Vec<(String, u32)>)>,
+    /// The text of files that an editor has open, read instead of the disk,
+    /// so what isn't saved yet is checked *(see `ideas/tooling/lsp.md`)*.
+    pub overlay: HashMap<PathBuf, String>,
 }
 
 impl Loader {
     pub fn new() -> Self {
         Loader { files: vec!["<script>".to_string()], ..Default::default() }
+    }
+
+    /// The text of a module: from the overlay, or from the disk.
+    pub fn read(&self, path: &std::path::Path) -> std::io::Result<String> {
+        if let Some(text) = self.overlay.get(path) {
+            return Ok(text.clone());
+        }
+        std::fs::read_to_string(path)
     }
 
     /// Finds the module for a `use` path *(i.e. `["config", "paths"]`)*.
@@ -150,7 +161,12 @@ impl Loader {
             return Ok(ModuleSource::Std(joined));
         }
         let relative: PathBuf = path.iter().collect::<PathBuf>().with_extension("lks");
-        let found: Vec<PathBuf> = self.roots.iter().map(|r| r.join(&relative)).filter(|p| p.is_file()).collect();
+        let found: Vec<PathBuf> = self
+            .roots
+            .iter()
+            .map(|r| r.join(&relative))
+            .filter(|p| p.is_file() || self.overlay.contains_key(p))
+            .collect();
         match found.as_slice() {
             [] => {
                 // On a file system that sees case, a name in another case isn't found: say why

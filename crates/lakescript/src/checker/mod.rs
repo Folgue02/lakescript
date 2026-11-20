@@ -987,7 +987,7 @@ impl<'a> Checker<'a> {
             d.file = Some(shown.clone());
             d
         };
-        let source = std::fs::read_to_string(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
+        let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
         let program = crate::parse_file(&source, u32::MAX).map_err(located)?;
         let mut sig = ModuleSig { path: shown.clone(), ..Default::default() };
         let public_classes = program.iter().filter_map(|s| match &s.kind {
@@ -1090,7 +1090,7 @@ impl<'a> Checker<'a> {
             d.file = Some(shown.clone());
             d
         };
-        let source = std::fs::read_to_string(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
+        let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
         let program = crate::parse_file(&source, u32::MAX).map_err(located)?;
         let mut state = State::default();
         let modules = Modules {

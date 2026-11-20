@@ -1,21 +1,18 @@
 //! `ferry`, the tool for Lakescript projects: their file, their
 //! dependencies, and installing their commands *(see ideas/tooling/ferry.md)*.
 
-mod home;
-mod project;
-mod resolve;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 use std::process::ExitCode;
 
 use lakescript::terminal::{Paint, When};
 use lakescript::{Diagnostic, Engine};
 
-use home::Home;
-use project::{Kind, MANIFEST, Project};
-use resolve::{Dependency, Lock};
+use ferry::home::Home;
+use ferry::project::{self, Kind, MANIFEST, Project};
+use ferry::resolve::{self, Dependency, Lock};
+use ferry::{Fail, PAINT, paint, status};
 
 /// Scripts run on a thread with a big stack, like with `lks`.
 const STACK_SIZE: usize = 512 * 1024 * 1024;
@@ -46,43 +43,9 @@ Options:
 FERRY_HOME replaces ~/.ferry, where ferry keeps what it downloads and installs.
 ";
 
-/// The colors for stderr, where ferry says what it does.
-static PAINT: OnceLock<Paint> = OnceLock::new();
-
-pub fn paint() -> Paint {
-    *PAINT.get_or_init(|| Paint(When::Auto.colors(std::io::stderr().is_terminal())))
-}
-
-/// A line about what ferry is doing, like cargo's: the verb in green, lined up on the right.
-pub fn status(verb: &str, text: &str) {
-    eprintln!("{} {text}", paint().good(&format!("{verb:>12}")));
-}
-
 /// A hint, in cyan.
 fn note(text: &str) {
     eprintln!("{} {text}", paint().note("note:"));
-}
-
-/// Why ferry stopped. The message is already what the user sees.
-#[derive(Debug)]
-pub struct Fail(String);
-
-impl From<String> for Fail {
-    fn from(message: String) -> Self {
-        Fail(message)
-    }
-}
-
-impl std::fmt::Display for Fail {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl From<&str> for Fail {
-    fn from(message: &str) -> Self {
-        Fail(message.to_string())
-    }
 }
 
 fn main() -> ExitCode {

@@ -1305,7 +1305,7 @@ impl<'a> Interpreter<'a> {
             return Ok(m.clone());
         }
         let shown = path.display().to_string();
-        let source = std::fs::read_to_string(&path).map_err(|e| flow_error_as("IOError", format!("can't read the module '{shown}': {e}"), span))?;
+        let source = self.host.loader.read(&path).map_err(|e| flow_error_as("IOError", format!("can't read the module '{shown}': {e}"), span))?;
         let file = self.host.loader.files.len() as u32;
         self.host.loader.files.push(shown.clone());
         let program = crate::parse_budgeted(&source, file, self.stack_budget).map_err(|d| flow_error(d.message, d.span))?;

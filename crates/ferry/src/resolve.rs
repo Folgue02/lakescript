@@ -121,3 +121,20 @@ pub fn resolve(home: &Home, project: &Project, lock: &Lock) -> Result<(Vec<Depen
 pub fn module_path(project: &Project, dependencies: &[Dependency]) -> Vec<PathBuf> {
     std::iter::once(project.src()).chain(dependencies.iter().map(|d| d.project.src())).collect()
 }
+
+/// The module path of a project from what's already downloaded, without
+/// fetching anything: `src/` and each package of the lock file that's in the
+/// local repository. For tools that only read the code *(i.e. `lks-lsp`)*.
+pub fn installed_module_path(home: &Home, project: &Project) -> Vec<PathBuf> {
+    let mut path = vec![project.src()];
+    if let Ok(lock) = Lock::read(&project.dir) {
+        for locked in &lock.packages {
+            let Ok(package) = Package::parse(&locked.name) else { continue };
+            let dir = home.package_dir(&package, &locked.version);
+            if let Ok(dependency) = Project::read(&dir) {
+                path.push(dependency.src());
+            }
+        }
+    }
+    path
+}

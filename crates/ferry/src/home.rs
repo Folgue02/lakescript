@@ -79,8 +79,13 @@ impl Home {
     }
 
     /// The folder of a version of a package, downloaded the first time, and the commit it is.
+    /// Where a version of a package is kept once it's downloaded.
+    pub fn package_dir(&self, package: &Package, version: &str) -> PathBuf {
+        self.dir.join("repository").join(&package.repository).join(&package.author).join(&package.name).join(version)
+    }
+
     pub fn fetch(&self, package: &Package, version: &str) -> Result<(PathBuf, String), Fail> {
-        let dir = self.dir.join("repository").join(&package.repository).join(&package.author).join(&package.name).join(version);
+        let dir = self.package_dir(package, version);
         let marker = dir.join(".ferry-commit");
         if let Ok(commit) = std::fs::read_to_string(&marker) {
             return Ok((dir, commit.trim().to_string()));
