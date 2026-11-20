@@ -262,6 +262,14 @@ impl Parser {
             TokenKind::Ident(word) if word == "type" && matches!(self.peek_at(1), TokenKind::Ident(_)) && self.peek_at(2) == &TokenKind::Eq => {
                 return self.error_here("there are no type aliases: write the type where it's used, or declare an interface");
             }
+            TokenKind::Keyword(k @ (Keyword::Class | Keyword::Interface | Keyword::Enum)) => {
+                let kind = match *k {
+                    Keyword::Class => ClassKind::Class,
+                    Keyword::Interface => ClassKind::Interface,
+                    _ => ClassKind::Enum,
+                };
+                StmtKind::Class(Rc::new(self.class_decl(kind, start)?))
+            }
             TokenKind::Keyword(Keyword::If) => self.if_statement()?,
             TokenKind::Keyword(Keyword::While) => {
                 self.advance();
@@ -313,10 +321,10 @@ impl Parser {
                 let inner = self.statement()?;
                 let allowed = matches!(
                     inner.kind,
-                    StmtKind::Function(_) | StmtKind::Let { constant: true, .. }
+                    StmtKind::Function(_) | StmtKind::Let { constant: true, .. } | StmtKind::Class(_)
                 );
                 if !allowed {
-                    return Err(Diagnostic::new("`pub` goes before functions and constants declared with `const`", inner.span));
+                    return Err(Diagnostic::new("`pub` goes before functions, constants declared with `const`, classes, interfaces and enums", inner.span));
                 }
                 if let StmtKind::Let { name, ty: None, .. } = &inner.kind {
                     return Err(Diagnostic::new(
@@ -402,6 +410,177 @@ impl Parser {
         Ok(FunctionDecl { name, generics, params, ret: Some(ret), body })
     }
 
+    // ---- Classes ----
+
+    /// `class Name<T> extends Base { ... }`, an `interface` or an `enum`.
+    fn class_decl(&mut self, kind: ClassKind, start: Span) -> Result<ClassDecl> {
+        self.advance();
+        let word = kind.word();
+        let name = self.expect_ident(&format!("for the {word}"))?;
+        if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+            return Err(Diagnostic::new(format!("the name of a {word} is written in PascalCase *(i.e. `{}`)*", pascal(&name)), self.span_from(start)));
+        }
+        let mut generics = Vec::new();
+        if self.eat(&TokenKind::Lt) {
+            loop {
+                generics.push(self.expect_ident("for the type parameter")?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect_closing_angle("after the type parameters")?;
+        }
+        let mut extends = Vec::new();
+        if matches!(&self.peek().kind, TokenKind::Ident(w) if w == "extends") {
+            self.advance();
+            loop {
+                extends.push(self.parse_type()?);
+                if kind == ClassKind::Class || !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            if kind == ClassKind::Enum {
+                return Err(Diagnostic::new("an enum can't extend anything", self.span_from(start)));
+            }
+        }
+        self.expect(&TokenKind::LBrace, &format!("to start the {word}"))?;
+        let values = if kind == ClassKind::Enum { self.enum_values()? } else { Vec::new() };
+        let mut members = Vec::new();
+        self.members(kind, Origin::Own, &mut members)?;
+        Ok(ClassDecl { kind, name, generics, extends, members, values, span: self.span_from(start) })
+    }
+
+    /// `AT_WORK, SICK(false);` at the start of an enum.
+    fn enum_values(&mut self) -> Result<Vec<EnumValue>> {
+        let mut values = Vec::new();
+        while let TokenKind::Ident(name) = self.peek().kind.clone() {
+            let start = self.peek().span;
+            self.advance();
+            let args = if self.check(&TokenKind::LParen) { self.arguments()? } else { Vec::new() };
+            values.push(EnumValue { name, args, span: self.span_from(start) });
+            if !self.eat(&TokenKind::Comma) {
+                break;
+            }
+        }
+        if !self.check(&TokenKind::RBrace) {
+            self.expect(&TokenKind::Semicolon, "after the values of the enum")?;
+        }
+        Ok(values)
+    }
+
+    /// The members of a class until its `}`, or of an `override { }` or `implement X { }` block.
+    fn members(&mut self, kind: ClassKind, origin: Origin, out: &mut Vec<Member>) -> Result<()> {
+        loop {
+            self.guard()?;
+            let start = self.peek().span;
+            if self.eat(&TokenKind::RBrace) {
+                return Ok(());
+            }
+            if self.check(&TokenKind::Eof) {
+                return self.error_here(format!("expected `}}` to close the {}, found the end of the file", kind.word()));
+            }
+            let word = match &self.peek().kind {
+                TokenKind::Ident(w) => w.clone(),
+                _ => String::new(),
+            };
+            if (word == "override" || word == "implement") && origin == Origin::Own {
+                self.advance();
+                let inner = if word == "override" { Origin::Override } else { Origin::Implement(self.parse_type()?) };
+                self.expect(&TokenKind::LBrace, &format!("to start the `{word}` block"))?;
+                self.members(kind, inner, out)?;
+                continue;
+            }
+            let public = self.eat(&TokenKind::Keyword(Keyword::Pub));
+            let is_static = matches!(&self.peek().kind, TokenKind::Ident(w) if w == "static");
+            if is_static {
+                self.advance();
+            }
+            if matches!(&self.peek().kind, TokenKind::Ident(w) if w == "new") && self.peek_at(1) == &TokenKind::LParen {
+                if is_static {
+                    return self.error_here("a constructor can't be `static`");
+                }
+                if origin != Origin::Own {
+                    return self.error_here("the constructor goes in the class itself, not in a block");
+                }
+                self.advance();
+                let params = self.params()?;
+                let body = FunctionBody::Block(self.block()?);
+                let decl = FunctionDecl { name: "new".into(), generics: Vec::new(), params, ret: None, body };
+                out.push(Member { public, is_static: false, origin: origin.clone(), kind: MemberKind::Constructor(decl), span: self.span_from(start) });
+                continue;
+            }
+            let constant = self.eat(&TokenKind::Keyword(Keyword::Const));
+            let ty = self.parse_type()?;
+            match self.peek().kind.clone() {
+                TokenKind::Field(name) | TokenKind::Variable(name) => {
+                    let sigil_static = matches!(self.peek().kind, TokenKind::Variable(_));
+                    self.advance();
+                    if is_static {
+                        return self.error_here("fields don't use `static`: a field written with `$` already belongs to the class");
+                    }
+                    if origin != Origin::Own {
+                        return self.error_here("fields go in the class itself, not in a block");
+                    }
+                    if kind == ClassKind::Interface {
+                        return self.error_here("interfaces can't have fields");
+                    }
+                    let value = if self.eat(&TokenKind::Eq) { Some(self.expression()?) } else { None };
+                    self.expect(&TokenKind::Semicolon, "after the field")?;
+                    let kind = MemberKind::Field { constant, ty, name, value };
+                    out.push(Member { public, is_static: sigil_static, origin: origin.clone(), kind, span: self.span_from(start) });
+                }
+                TokenKind::Ident(_) => {
+                    if constant {
+                        return self.error_here("methods can't be `const`");
+                    }
+                    let decl;
+                    let mut has_body = true;
+                    if kind == ClassKind::Interface && self.method_without_body() {
+                        let name = self.expect_ident("for the method")?;
+                        let generics = self.type_params()?;
+                        let params = self.params()?;
+                        self.expect(&TokenKind::Semicolon, "after the method")?;
+                        decl = FunctionDecl { name, generics, params, ret: Some(ty), body: FunctionBody::Block(Vec::new()) };
+                        has_body = false;
+                    } else {
+                        decl = self.function(ty)?;
+                    }
+                    let kind = MemberKind::Method { decl, body: has_body };
+                    out.push(Member { public, is_static, origin: origin.clone(), kind, span: self.span_from(start) });
+                }
+                other => return self.error_here(format!("expected a field (`@name`, `$name`) or a method name after the type, found {other}")),
+            }
+        }
+    }
+
+    /// Whether the method being read ends with `;` after its parameters, without a body.
+    fn method_without_body(&mut self) -> bool {
+        let checkpoint = self.checkpoint();
+        let result = (|| -> Result<bool> {
+            self.expect_ident("")?;
+            self.type_params()?;
+            self.params()?;
+            Ok(self.check(&TokenKind::Semicolon))
+        })();
+        self.restore(checkpoint);
+        result.unwrap_or(false)
+    }
+
+    /// `<T, U>` after a name, or nothing.
+    fn type_params(&mut self) -> Result<Vec<String>> {
+        let mut generics = Vec::new();
+        if self.eat(&TokenKind::Lt) {
+            loop {
+                generics.push(self.expect_ident("for the type parameter")?);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect_closing_angle("after the type parameters")?;
+        }
+        Ok(generics)
+    }
+
     /// `(...)` with the parameters of a function.
     fn params(&mut self) -> Result<Vec<Param>> {
         self.expect(&TokenKind::LParen, "before the parameters")?;
@@ -443,6 +622,12 @@ impl Parser {
     }
 
     fn param(&mut self) -> Result<Param> {
+        if let TokenKind::Field(name) = self.peek().kind.clone() {
+            // `new(@name)`: stored in the field, with the field's type
+            self.advance();
+            let default = if self.eat(&TokenKind::Eq) { Some(self.expression()?) } else { None };
+            return Ok(Param { name, ty: None, default, variadic: false, field: true });
+        }
         let variadic = self.eat(&TokenKind::Ellipsis);
         let ty = if matches!(self.peek().kind, TokenKind::Variable(_)) { None } else { Some(self.parse_type()?) };
         let name = self.expect_variable("for the parameter")?;
@@ -454,7 +639,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Param { name, ty, default, variadic })
+        Ok(Param { name, ty, default, variadic, field: false })
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>> {
@@ -826,7 +1011,16 @@ impl Parser {
             let kind = match self.peek().kind {
                 TokenKind::Dot | TokenKind::QuestionDot => {
                     let nullable = self.advance().kind == TokenKind::QuestionDot;
-                    self.method(expr, nullable)?
+                    if matches!(self.peek().kind, TokenKind::Ident(_)) && self.peek_at(1) != &TokenKind::LParen {
+                        // `$point.x`: a field
+                        if nullable {
+                            return self.error_here("`?.` doesn't work with fields yet: check for `null` first");
+                        }
+                        let name = self.expect_ident("after `.`")?;
+                        ExprKind::Field { target: Box::new(expr), name }
+                    } else {
+                        self.method(expr, nullable)?
+                    }
                 }
                 TokenKind::LParen => {
                     let args = self.arguments()?;
@@ -957,6 +1151,46 @@ impl Parser {
             TokenKind::Variable(name) => {
                 self.advance();
                 ExprKind::Variable(name)
+            }
+            TokenKind::At => {
+                self.advance();
+                ExprKind::This
+            }
+            TokenKind::Field(name) => {
+                self.advance();
+                if name == "super" {
+                    if self.check(&TokenKind::LParen) {
+                        ExprKind::SuperNew(self.arguments()?)
+                    } else if self.eat(&TokenKind::Dot) {
+                        let method = self.expect_ident("after `@super.`")?;
+                        if !self.check(&TokenKind::LParen) {
+                            return self.error_here(format!("`@super` only calls methods: `@super.{method}()`"));
+                        }
+                        ExprKind::SuperMethod { method, args: self.arguments()? }
+                    } else {
+                        return self.error_here("`@super` is followed by `(...)` for the superclass's constructor, or by `.method()`");
+                    }
+                } else if self.check(&TokenKind::LParen) {
+                    let this = Expr { kind: ExprKind::This, span: start };
+                    ExprKind::MethodCall { receiver: Box::new(this), method: name, args: self.arguments()?, nullable: false }
+                } else {
+                    ExprKind::Field { target: Box::new(Expr { kind: ExprKind::This, span: start }), name }
+                }
+            }
+            TokenKind::Ident(name) if is_type_name(&name) && self.peek_at(1) == &TokenKind::ColonColon => {
+                self.advance();
+                self.advance();
+                match self.peek().kind.clone() {
+                    TokenKind::Variable(member) => {
+                        self.advance();
+                        ExprKind::Static { class: name, name: member, variable: true }
+                    }
+                    TokenKind::Ident(member) => {
+                        self.advance();
+                        ExprKind::Static { class: name, name: member, variable: false }
+                    }
+                    other => return self.error_here(format!("expected a method, a value or a `$field` after `{name}::`, found {other}")),
+                }
             }
             TokenKind::Ident(name) => {
                 self.advance();
@@ -1227,7 +1461,23 @@ fn covers_both_bools(cases: &[Case]) -> bool {
 }
 
 fn is_assignable(expr: &Expr) -> bool {
-    matches!(expr.kind, ExprKind::Variable(_) | ExprKind::Index { nullable: false, .. })
+    matches!(
+        expr.kind,
+        ExprKind::Variable(_) | ExprKind::Index { nullable: false, .. } | ExprKind::Field { .. } | ExprKind::Static { variable: true, .. }
+    )
+}
+
+/// Types, and so classes, are written in PascalCase *(i.e. `Point::origin()`)*,
+/// and modules in lowercase *(i.e. `paths::load()`)*.
+fn pascal(name: &str) -> String {
+    name.split('_').filter(|w| !w.is_empty()).map(|w| {
+        let mut c = w.chars();
+        c.next().map(|f| f.to_ascii_uppercase().to_string() + c.as_str()).unwrap_or_default()
+    }).collect()
+}
+
+pub fn is_type_name(name: &str) -> bool {
+    name == "Self" || name.starts_with(|c: char| c.is_ascii_uppercase())
 }
 
 const PREC_COALESCE: u8 = 1;
@@ -1396,7 +1646,13 @@ mod tests {
         assert_eq!(expr("5.even?()"), "(.even? 5)");
         assert_eq!(expr("$data['name'].as(string).upper()"), "(.upper (.as ([] $data \"name\") string))");
         assert_eq!(expr("$v.is(list<map<string, any>>)"), "(.is $v list<map<string, any>>)");
-        assert!(error("$list.length;").contains("parentheses"));
+        assert_eq!(expr("$list.length"), "(. $list length)");
+        assert_eq!(expr("@name"), "@name");
+        assert_eq!(expr("@greet(1)"), "(.greet @ 1)");
+        assert_eq!(expr("Point::origin()"), "(call Point::origin)");
+        assert_eq!(expr("Self::$count"), "Self::$count");
+        assert_eq!(expr("@super(1)"), "(@super 1)");
+        assert_eq!(expr("@super.hi()"), "(@super.hi)");
         assert!(error("f(a: 1, 2);").contains("positional arguments go before"));
     }
 

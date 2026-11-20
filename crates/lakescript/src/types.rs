@@ -4,11 +4,19 @@
 use crate::ast::{TypeExpr, TypeKind};
 use crate::value::Value;
 
+/// Names the built-in types and exceptions don't use, which are classes.
+pub fn is_class_name(name: &str) -> bool {
+    !matches!(
+        name,
+        "any" | "string" | "number" | "bool" | "symbol" | "range" | "regex" | "result" | "command" | "list" | "map" | "void"
+    ) && !crate::exceptions::is_exception_type(name)
+}
+
 /// `true` if the value has the type. Generic types check everything inside
 /// *(i.e. `list<string>` checks every element)*.
-pub fn matches(value: &Value, ty: &TypeExpr) -> Result<bool, String> {
+pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Result<bool, String> {
     match &ty.kind {
-        TypeKind::Nullable(inner) => Ok(matches!(value, Value::Null) || matches(value, inner)?),
+        TypeKind::Nullable(inner) => Ok(matches!(value, Value::Null) || matches(value, inner, classes)?),
         TypeKind::Function { .. } => Err(
             "function types can't be checked while the script runs, because types are removed before it runs".into(),
         ),
@@ -35,7 +43,7 @@ pub fn matches(value: &Value, ty: &TypeExpr) -> Result<bool, String> {
                         [] => Ok(true),
                         [elem] => {
                             for item in items.borrow().iter() {
-                                if !matches(item, elem)? {
+                                if !matches(item, elem, classes)? {
                                     return Ok(false);
                                 }
                             }
@@ -50,7 +58,7 @@ pub fn matches(value: &Value, ty: &TypeExpr) -> Result<bool, String> {
                         [] => Ok(true),
                         [k, v] => {
                             for (key, val) in entries.borrow().iter() {
-                                if !matches(&key.to_value(), k)? || !matches(val, v)? {
+                                if !matches(&key.to_value(), k, classes)? || !matches(val, v, classes)? {
                                     return Ok(false);
                                 }
                             }
@@ -60,10 +68,11 @@ pub fn matches(value: &Value, ty: &TypeExpr) -> Result<bool, String> {
                     }
                 }
                 "void" => Err("`void` isn't the type of any value".into()),
-                other if other.contains("::") => Err(format!(
-                    "`{other}` is a type of another module, which `.is()`, `.as()` and `catch` can't check yet. Write the type it stands for instead"
-                )),
-                other => Err(format!("unknown type `{other}`")),
+                other => match classes.iter().find(|(n, _)| *n == other) {
+                    Some((_, Value::Class(class))) => no_args(matches!(value, Value::Object(o) if o.class.is_a(class))),
+                    Some((_, Value::Null)) | None => Err(format!("unknown type `{other}`")),
+                    Some(_) => Err(format!("`{other}` isn't a class")),
+                },
             }
         }
     }

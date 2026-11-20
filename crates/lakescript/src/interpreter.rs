@@ -11,7 +11,7 @@ use std::rc::Rc;
 use indexmap::IndexMap;
 
 use crate::ast::{BinaryOp, UnaryOp};
-use crate::bytecode::{ArgKind, Capture, Op, Proto, for_kind};
+use crate::bytecode::{ArgKind, Capture, Op, Proto, class_names, for_kind};
 use crate::command::{CommandKind, CommandValue, shell_quote};
 use crate::compiler::Compiler;
 use crate::diagnostic::Diagnostic;
@@ -24,7 +24,10 @@ use crate::patterns;
 use crate::stack::position as stack_position;
 use crate::token::Span;
 use crate::types;
-use crate::value::{ExceptionValue, Function, Key, NativeContext, NativeError, Range, RegexValue, ResultValue, UserFunction, Value};
+use crate::value::{
+    Class, ExceptionValue, FieldSlot, Function, Key, NativeContext, NativeError, Object, Range, RegexValue, ResultValue, StaticSlot, UserFunction,
+    Value,
+};
 
 /// Why the normal flow stopped, when it crosses Rust code.
 pub enum Flow {
@@ -251,6 +254,14 @@ impl<'a> Interpreter<'a> {
         let callee = self.stack.len() - argc - 1;
         let function = match &self.stack[callee] {
             Value::Function(f) => f.clone(),
+            Value::Class(class) => {
+                let class = class.clone();
+                let args = self.stack.split_off(callee + 1);
+                self.stack.pop();
+                let object = self.construct(&class, args, Vec::new(), span)?;
+                self.stack.push(object);
+                return Ok(false);
+            }
             other => return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", other.type_name()), span),
         };
         if let Function::User(user) = &*function {
@@ -269,6 +280,14 @@ impl<'a> Interpreter<'a> {
         let callee = self.stack.len() - kinds.len() - 1;
         let function = match &self.stack[callee] {
             Value::Function(f) => f.clone(),
+            Value::Class(class) => {
+                let class = class.clone();
+                let (positional, named) = self.complex_args(kinds, callee + 1)?;
+                self.stack.pop();
+                let object = self.construct(&class, positional, named, span)?;
+                self.stack.push(object);
+                return Ok(false);
+            }
             other => return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", other.type_name()), span),
         };
         let (positional, named) = self.complex_args(kinds, callee + 1)?;
@@ -506,6 +525,13 @@ impl<'a> Interpreter<'a> {
                         return Err(undeclared(&global.key, span!()));
                     }
                     let v = global.value.clone();
+                    drop(slots);
+                    self.stack.push(v);
+                }
+                Op::LoadGlobalOrNull(g) => {
+                    let slots = globals.slots.borrow();
+                    let global = &slots[g as usize];
+                    let v = if global.declared { global.value.clone() } else { Value::Null };
                     drop(slots);
                     self.stack.push(v);
                 }
@@ -769,20 +795,84 @@ impl<'a> Interpreter<'a> {
                 }
 
                 // ---- Types ----
-                Op::Is { ty, catch } => {
+                Op::Is { ty, catch, classes } => {
+                    let ty = &proto.types[ty as usize];
+                    let found = self.stack.split_off(self.stack.len() - classes as usize);
                     let v = self.pop();
-                    let ok = types::matches(&v, &proto.types[ty as usize]).map_err(|m| {
+                    let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
+                    let ok = types::matches(&v, ty, &pairs).map_err(|m| {
                         if catch { flow_error_as(exceptions::TYPE_ERROR, m, span!()) } else { flow_error(m, span!()) }
                     })?;
                     self.stack.push(Value::Bool(ok));
                 }
-                Op::As(ty) => {
+                Op::As { ty, classes } => {
                     let ty = &proto.types[ty as usize];
+                    let found = self.stack.split_off(self.stack.len() - classes as usize);
+                    let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
                     let v = self.top();
-                    if !types::matches(v, ty).map_err(|m| flow_error(m, span!()))? {
+                    if !types::matches(v, ty, &pairs).map_err(|m| flow_error(m, span!()))? {
                         let message = format!("`.as({ty})` failed: the value is {}", describe(v));
                         return error_as(exceptions::TYPE_ERROR, message, span!());
                     }
+                }
+
+                // ---- Classes ----
+                Op::Class(i) => {
+                    let class = self.make_class(&proto, i as usize, span!())?;
+                    self.stack.push(Value::Class(class));
+                }
+                Op::GetField(n) => {
+                    let object = self.pop();
+                    let v = get_field(&object, &proto.names[n as usize], span!())?;
+                    self.stack.push(v);
+                }
+                Op::SetField(n) => {
+                    let value = self.pop();
+                    let object = self.pop();
+                    set_field(&object, &proto.names[n as usize], value.clone(), span!())?;
+                    self.stack.push(value);
+                }
+                Op::Static { name, variable } => {
+                    let class = self.pop();
+                    let v = get_static(&class, &proto.names[name as usize], variable, span!())?;
+                    self.stack.push(v);
+                }
+                Op::SetStatic(name) => {
+                    let value = self.pop();
+                    let class = self.pop();
+                    set_static(&class, &proto.names[name as usize], value.clone(), span!())?;
+                    self.stack.push(value);
+                }
+                Op::DefineStatic { name, constant } => {
+                    let value = self.pop();
+                    let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the class") };
+                    let key: Rc<str> = Rc::from(format!("${}", proto.names[name as usize]).as_str());
+                    class.statics.borrow_mut().insert(key, StaticSlot { value, constant });
+                }
+                Op::SuperNew(argc) => {
+                    self.frames[fi].ip = ip;
+                    let args = self.stack.split_off(self.stack.len() - argc as usize);
+                    self.super_new(args, Vec::new(), span!())?;
+                }
+                Op::SuperNewComplex(c) => {
+                    self.frames[fi].ip = ip;
+                    let kinds = &proto.calls[c as usize];
+                    let (args, named) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
+                    self.super_new(args, named, span!())?;
+                }
+                Op::SuperMethod { name, argc } => {
+                    self.frames[fi].ip = ip;
+                    let mut args = self.stack.split_off(self.stack.len() - argc as usize);
+                    let this = self.pop();
+                    let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the class") };
+                    let name = &proto.names[name as usize];
+                    let method = class.parent.as_ref().and_then(|p| p.methods.get(&**name).cloned());
+                    let Some(method) = method else {
+                        return error(format!("the superclass of `{}` has no method `{name}`", class.name), span!());
+                    };
+                    args.insert(0, this);
+                    let v = self.call(&method, args, Vec::new(), span!())?;
+                    self.stack.push(v);
                 }
 
                 // ---- Functions ----
@@ -813,6 +903,25 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::CallMethod { name, argc } => {
                     self.frames[fi].ip = ip;
+                    let at = self.stack.len() - argc as usize - 1;
+                    if let Value::Object(object) = &self.stack[at] {
+                        if let Some(method) = object.class.methods.get(&*proto.names[name as usize]).cloned() {
+                            if let Function::User(user) = &*method {
+                                if user.proto.simple && argc as usize + 1 == user.proto.params.len() {
+                                    // The method's frame starts at the object, its `@`
+                                    self.stack.insert(at, Value::Function(method.clone()));
+                                    self.push_frame(method, at + 1, u64::MAX, span!())?;
+                                    reload!();
+                                    continue;
+                                }
+                            }
+                            let args = self.stack.split_off(at);
+                            if self.enter(method, args, Vec::new(), span!())? {
+                                reload!();
+                            }
+                            continue;
+                        }
+                    }
                     let args = self.stack.split_off(self.stack.len() - argc as usize);
                     let receiver = self.pop();
                     let v = methods::call(self, receiver, &proto.names[name as usize], args, span!())?;
@@ -821,8 +930,17 @@ impl<'a> Interpreter<'a> {
                 Op::CallMethodComplex { name, call } => {
                     self.frames[fi].ip = ip;
                     let kinds = &proto.calls[call as usize];
-                    let (args, _) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
+                    let (mut args, named) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
                     let receiver = self.pop();
+                    if let Value::Object(object) = &receiver {
+                        if let Some(method) = object.class.methods.get(&*proto.names[name as usize]).cloned() {
+                            args.insert(0, receiver);
+                            if self.enter(method, args, named, span!())? {
+                                reload!();
+                            }
+                            continue;
+                        }
+                    }
                     let v = methods::call(self, receiver, &proto.names[name as usize], args, span!())?;
                     self.stack.push(v);
                 }
@@ -1082,6 +1200,198 @@ impl<'a> Interpreter<'a> {
         let module = Rc::new(Module { path: shown, globals, public });
         self.host.loader.cache.insert(path, module.clone());
         Ok(module)
+    }
+}
+
+// ---- Classes ----
+
+impl Interpreter<'_> {
+    /// `Op::Class`: the parts were pushed in order, so they're popped backwards.
+    fn make_class(&mut self, proto: &Proto, i: usize, span: Span) -> Exec<Rc<Class>> {
+        let info = &proto.classes[i];
+        let mut function = || match self.stack.pop() {
+            Some(Value::Function(f)) => f,
+            _ => unreachable!("the compiler pushes the parts of a class"),
+        };
+        let statics: Vec<Rc<Function>> = (0..info.static_methods.len()).map(|_| function()).collect();
+        let methods: Vec<Rc<Function>> = (0..info.methods.len()).map(|_| function()).collect();
+        let constructor = info.constructor.then(&mut function);
+        let init = info.init.then(&mut function);
+        let parent = if info.parent {
+            match self.pop() {
+                Value::Class(c) => Some(c),
+                other => return error(format!("`{}` can only extend a class, not a {}", info.name, other.type_label()), span),
+            }
+        } else {
+            None
+        };
+        let mut fields: Vec<FieldSlot> = parent.as_ref().map(|p| p.fields.clone()).unwrap_or_default();
+        for (name, constant, nullable, has_value) in &info.fields {
+            if fields.iter().any(|f| f.name == *name) {
+                return error(format!("`{}` declares the field `{name}` again, which its superclass already has", info.name), span);
+            }
+            fields.push(FieldSlot { name: name.clone(), constant: *constant, nullable: *nullable, has_value: *has_value });
+        }
+        let mut table = parent.as_ref().map(|p| p.methods.clone()).unwrap_or_default();
+        for (name, f) in info.methods.iter().zip(methods.into_iter().rev()) {
+            table.insert(name.clone(), f);
+        }
+        let mut static_table = IndexMap::new();
+        for (name, f) in info.static_methods.iter().zip(statics.into_iter().rev()) {
+            static_table.insert(name.clone(), StaticSlot { value: Value::Function(f), constant: true });
+        }
+        Ok(Rc::new(Class {
+            name: info.name.clone(),
+            parent,
+            fields,
+            methods: table,
+            statics: RefCell::new(static_table),
+            constructor,
+            init,
+        }))
+    }
+
+    /// `Point(1, 2)`: a new object, with its fields' values, after its constructor.
+    fn construct(&mut self, class: &Rc<Class>, positional: Vec<Value>, named: Named, span: Span) -> Exec<Value> {
+        let object = Rc::new(Object {
+            class: class.clone(),
+            fields: RefCell::new(vec![Value::Null; class.fields.len()]),
+            building: std::cell::Cell::new(true),
+        });
+        let value = Value::Object(object.clone());
+        self.init_fields(class, &value, span)?;
+        self.run_constructor(class, &value, positional, named, span)?;
+        object.building.set(false);
+        Ok(value)
+    }
+
+    /// The values written where the fields are declared, the superclass's first.
+    fn init_fields(&mut self, class: &Rc<Class>, object: &Value, span: Span) -> Exec<()> {
+        if let Some(parent) = &class.parent {
+            self.init_fields(parent, object, span)?;
+        }
+        if let Some(init) = &class.init {
+            self.call(init, vec![object.clone()], Vec::new(), span)?;
+        }
+        Ok(())
+    }
+
+    /// Runs the class's `new` on the object, or the constructor that takes every field.
+    fn run_constructor(&mut self, class: &Rc<Class>, object: &Value, mut positional: Vec<Value>, named: Named, span: Span) -> Exec<()> {
+        if let Some(constructor) = &class.constructor {
+            positional.insert(0, object.clone());
+            self.call(constructor, positional, named, span)?;
+            return Ok(());
+        }
+        let mut parent = class.parent.as_deref();
+        while let Some(p) = parent {
+            if p.constructor.is_some() {
+                return error(
+                    format!("`{}` needs its own `new`, which calls `@super(...)`, since its superclass `{}` has one", class.name, p.name),
+                    span,
+                );
+            }
+            parent = p.parent.as_deref();
+        }
+        let Value::Object(o) = object else { unreachable!("constructors run on objects") };
+        if positional.len() > class.fields.len() {
+            let n = class.fields.len();
+            return error_as(
+                exceptions::TYPE_ERROR,
+                format!("`{}` takes {n} argument{}, but it was given {}", class.name, if n == 1 { "" } else { "s" }, positional.len()),
+                span,
+            );
+        }
+        let mut given = vec![false; class.fields.len()];
+        {
+            let mut fields = o.fields.borrow_mut();
+            for (i, v) in positional.into_iter().enumerate() {
+                fields[i] = v;
+                given[i] = true;
+            }
+            for (name, v, arg_span) in named {
+                let Some(i) = class.field(&name) else {
+                    return error_as(exceptions::TYPE_ERROR, format!("`{}` has no field named `{name}`", class.name), arg_span);
+                };
+                if given[i] {
+                    return error_as(exceptions::TYPE_ERROR, format!("`{name}` was given twice"), arg_span);
+                }
+                fields[i] = v;
+                given[i] = true;
+            }
+        }
+        for (i, slot) in class.fields.iter().enumerate() {
+            if !given[i] && !slot.has_value && !slot.nullable {
+                return error_as(exceptions::TYPE_ERROR, format!("`{}` needs a value for `{}`", class.name, slot.name), span);
+            }
+        }
+        Ok(())
+    }
+
+    /// `@super(...)`: the superclass's constructor, on the same object.
+    fn super_new(&mut self, args: Vec<Value>, named: Named, span: Span) -> Exec<()> {
+        let this = self.pop();
+        let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the class") };
+        let Some(parent) = class.parent.clone() else {
+            return error(format!("`{}` has no superclass for `@super(...)`", class.name), span);
+        };
+        self.run_constructor(&parent, &this, args, named, span)?;
+        self.stack.push(Value::Null);
+        Ok(())
+    }
+}
+
+fn get_field(object: &Value, name: &str, span: Span) -> Exec<Value> {
+    match object {
+        Value::Object(o) => match o.class.field(name) {
+            Some(i) => Ok(o.fields.borrow()[i].clone()),
+            None => error(format!("`{}` has no field `{name}`", o.class.name), span),
+        },
+        Value::Null => error_as(exceptions::TYPE_ERROR, format!("can't read `.{name}` of `null`"), span),
+        other => error(format!("a {} has no fields: `.{name}` only works on objects", other.type_name()), span),
+    }
+}
+
+fn set_field(object: &Value, name: &str, value: Value, span: Span) -> Exec<()> {
+    match object {
+        Value::Object(o) => match o.class.field(name) {
+            Some(i) => {
+                if o.class.fields[i].constant && !o.building.get() {
+                    return error(format!("`{name}` is a `const` field of `{}`: it can only be set while the object is created", o.class.name), span);
+                }
+                o.fields.borrow_mut()[i] = value;
+                Ok(())
+            }
+            None => error(format!("`{}` has no field `{name}`", o.class.name), span),
+        },
+        Value::Null => error_as(exceptions::TYPE_ERROR, format!("can't set `.{name}` of `null`"), span),
+        other => error(format!("a {} has no fields: `.{name}` only works on objects", other.type_name()), span),
+    }
+}
+
+fn get_static(class: &Value, name: &str, variable: bool, span: Span) -> Exec<Value> {
+    let Value::Class(class) = class else {
+        return error(format!("`::` needs a class, and this is a {}", class.type_label()), span);
+    };
+    let key = if variable { format!("${name}") } else { name.to_string() };
+    match class.statics.borrow().get(key.as_str()) {
+        Some(slot) => Ok(slot.value.clone()),
+        None => error(format!("`{}` has no static member `{key}`", class.name), span),
+    }
+}
+
+fn set_static(class: &Value, name: &str, value: Value, span: Span) -> Exec<()> {
+    let Value::Class(class) = class else {
+        return error(format!("`::` needs a class, and this is a {}", class.type_label()), span);
+    };
+    let key = format!("${name}");
+    match class.statics.borrow_mut().get_mut(key.as_str()) {
+        Some(slot) if slot.constant => error(format!("`{}::{key}` is a constant, it can't be changed", class.name), span),
+        Some(slot) => {
+            slot.value = value;
+            Ok(())
+        }
+        None => error(format!("`{}` has no static field `{key}`", class.name), span),
     }
 }
 

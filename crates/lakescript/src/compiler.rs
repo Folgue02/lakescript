@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::bytecode::{ArgKind, Capture, Import, Op, Param as ParamInfo, Proto, for_kind};
+use crate::bytecode::{ArgKind, Capture, ClassInfo, Import, Op, Param as ParamInfo, Proto, class_names, for_kind};
 use crate::diagnostic::Diagnostic;
 use crate::modules::Globals;
 use crate::stack::position as stack_position;
@@ -117,6 +117,8 @@ pub struct Compiler<'a> {
     module: bool,
     /// What a module makes available with `pub`.
     pub public: HashSet<String>,
+    /// The classes being compiled, the innermost last, for `Self`.
+    classes: Vec<String>,
     span: Span,
     stack_base: usize,
     stack_budget: usize,
@@ -131,6 +133,7 @@ impl<'a> Compiler<'a> {
             declared: HashSet::new(),
             module: false,
             public: HashSet::new(),
+            classes: Vec::new(),
             span: Span::default(),
             stack_base: stack_position(),
             stack_budget,
@@ -162,11 +165,11 @@ impl<'a> Compiler<'a> {
                 };
                 let declaration = matches!(
                     inner.kind,
-                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::Let { .. }
+                    StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::Let { .. } | StmtKind::Class(_)
                 );
                 if !declaration {
                     self.span = stmt.span;
-                    self.fail("an imported module can only have declarations at its top level: functions, `const`, `let` and `type`");
+                    self.fail("an imported module can only have declarations at its top level: functions, `const`, `let`, classes, interfaces and enums");
                     continue;
                 }
             }
@@ -466,6 +469,7 @@ impl<'a> Compiler<'a> {
                     _ => unreachable!("hoisted functions are locals"),
                 };
             }
+            StmtKind::Class(decl) => self.class(decl)?,
             StmtKind::Function(decl) => {
                 let taken = format!("a function named `{}` already exists", decl.name);
                 let target = self.declare(&decl.name, false, &taken);
@@ -489,6 +493,9 @@ impl<'a> Compiler<'a> {
                     }
                     StmtKind::Let { name, .. } => {
                         self.public.insert(format!("${name}"));
+                    }
+                    StmtKind::Class(decl) => {
+                        self.public.insert(decl.name.clone());
                     }
                     _ => {}
                 }
@@ -584,14 +591,20 @@ impl<'a> Compiler<'a> {
             return;
         }
         for stmt in stmts {
-            if let StmtKind::Function(decl) = &stmt.kind {
+            let name = match &stmt.kind {
+                StmtKind::Function(decl) => &decl.name,
+                StmtKind::Class(decl) => &decl.name,
+                _ => continue,
+            };
+            {
+                let decl_name = name.clone();
                 self.span = stmt.span;
-                let taken = format!("a function named `{}` already exists", decl.name);
-                let target = self.declare(&decl.name, false, &taken);
+                let taken = format!("`{decl_name}` already exists");
+                let target = self.declare(&decl_name, false, &taken);
                 // Empty until the declaration runs
                 self.emit(Op::Null);
                 self.define(target);
-                self.f().hoisted.insert(decl.name.clone());
+                self.f().hoisted.insert(decl_name);
             }
         }
     }
@@ -733,8 +746,9 @@ impl<'a> Compiler<'a> {
                 let mut to_next = None;
                 if let Some(ty) = &catch.ty {
                     self.emit(Op::Dup);
+                    let classes = self.type_classes(ty);
                     let t = self.ty(ty);
-                    self.emit_at(Op::Is { ty: t, catch: true }, ty.span);
+                    self.emit_at(Op::Is { ty: t, catch: true, classes }, ty.span);
                     to_next = Some(self.emit(Op::JumpIfFalseRaw(0)));
                 }
                 self.open_scope();
@@ -787,8 +801,9 @@ impl<'a> Compiler<'a> {
                     }
                     Pattern::Type(ty) => {
                         self.emit(Op::LoadLocal(subject));
+                        let classes = self.type_classes(ty);
                         let t = self.ty(ty);
-                        self.emit_at(Op::Is { ty: t, catch: false }, ty.span);
+                        self.emit_at(Op::Is { ty: t, catch: false, classes }, ty.span);
                     }
                 }
                 to_body.push(self.emit(Op::JumpIfTrueRaw(0)));
@@ -882,8 +897,10 @@ impl<'a> Compiler<'a> {
         self.f().proto.slots = n;
         for (i, param) in decl.params.iter().enumerate() {
             let i = i as u32;
-            let key = format!("${}", param.name);
-            if self.visible(&key) {
+            // `@` and the parameters written as fields can't be named by the code
+            let hidden = param.name == "@" || param.field;
+            let key = if param.field { format!("$@{}", param.name) } else { format!("${}", param.name) };
+            if !hidden && self.visible(&key) {
                 self.fail(format!(
                     "the parameter `${}` of `{}` has the name of a variable that already exists",
                     param.name, decl.name
@@ -915,6 +932,15 @@ impl<'a> Compiler<'a> {
             });
         }
         self.f().proto.simple = !decl.params.iter().any(|p| p.variadic);
+        // `new(@name)`: the parameter goes into the field
+        for param in decl.params.iter().filter(|p| p.field) {
+            self.load_this();
+            let resolved = self.resolve(&format!("$@{}", param.name));
+            self.load(resolved);
+            let n = self.name(&param.name);
+            self.emit(Op::SetField(n));
+            self.emit(Op::Pop);
+        }
         match &decl.body {
             FunctionBody::Expr(expr) => {
                 self.expr(expr)?;
@@ -934,6 +960,220 @@ impl<'a> Compiler<'a> {
         let protos = &mut self.f().proto.protos;
         protos.push(proto);
         Ok(protos.len() as u32 - 1)
+    }
+
+    // ---- Classes ----
+
+    fn load_this(&mut self) {
+        if self.visible("$@") {
+            let resolved = self.resolve("$@");
+            self.load(resolved);
+        } else {
+            self.fail("`@` can only be used in the methods and the constructor of a class");
+            self.emit(Op::Null);
+        }
+    }
+
+    /// Pushes a class by its name. `Self` is the class being compiled.
+    fn load_class(&mut self, name: &str) {
+        let name = if name == "Self" {
+            match self.classes.last() {
+                Some(c) => c.clone(),
+                None => {
+                    self.fail("`Self` can only be used inside a class");
+                    self.emit(Op::Null);
+                    return;
+                }
+            }
+        } else {
+            name.to_string()
+        };
+        let resolved = self.resolve(&name);
+        self.load(resolved);
+    }
+
+    /// Pushes the classes a type names, for `Is` and `As`. Returns how many.
+    fn type_classes(&mut self, ty: &TypeExpr) -> u8 {
+        let names: Vec<String> = class_names(ty).into_iter().map(String::from).collect();
+        if names.len() > u8::MAX as usize {
+            self.fail("a type can't name more than 255 classes");
+            return 0;
+        }
+        for name in &names {
+            if let Some((module, member)) = name.split_once("::") {
+                // A class of an imported module
+                match self.globals.find_module(module) {
+                    Some(m) => {
+                        let n = self.name(member);
+                        self.emit(Op::ModuleMember { module: m, name: n, constant: false });
+                    }
+                    None => {
+                        self.fail(format!("there's no module named `{module}`. Import it with `use`"));
+                        self.emit(Op::Null);
+                    }
+                }
+                continue;
+            }
+            match self.resolve(name) {
+                // An unknown name is `null`, and `Is` says it's an unknown type
+                Resolved::Global(g) if name != "Self" => {
+                    self.emit(Op::LoadGlobalOrNull(g));
+                }
+                _ => self.load_class(name),
+            }
+        }
+        names.len() as u8
+    }
+
+    /// A method or constructor: a function whose first parameter is `@`.
+    fn method(&mut self, decl: &FunctionDecl) -> Compiled<u32> {
+        let mut with_this = decl.clone();
+        with_this.params.insert(0, Param { name: "@".into(), ty: None, default: None, variadic: false, field: false });
+        self.function(&with_this)
+    }
+
+    /// A class declaration: its parts are pushed, `Op::Class` makes it, and
+    /// then its static fields get their values.
+    fn class(&mut self, decl: &ClassDecl) -> Compiled {
+        if decl.kind != ClassKind::Class {
+            self.fail(format!("{}s aren't ready yet", decl.kind.word()));
+            return Ok(());
+        }
+        let span = self.span;
+        let hoisted = self.f().hoisted.remove(&decl.name);
+        let target = if hoisted {
+            None
+        } else {
+            let taken = format!("`{}` already exists", decl.name);
+            Some(self.declare(&decl.name, true, &taken))
+        };
+        // While the methods are compiled, `Self` is this class
+        self.classes.push(decl.name.clone());
+        let mut info = ClassInfo {
+            name: Rc::from(decl.name.as_str()),
+            parent: false,
+            init: false,
+            constructor: false,
+            fields: Vec::new(),
+            methods: Vec::new(),
+            static_methods: Vec::new(),
+        };
+        if let Some(parent) = decl.extends.first() {
+            match &parent.kind {
+                TypeKind::Named { name, .. } => self.load_class(name),
+                _ => self.fail("a class can only extend another class"),
+            }
+            info.parent = true;
+        }
+        // `init`: the values written where the fields are declared
+        let valued: Vec<&Member> = decl
+            .members
+            .iter()
+            .filter(|m| !m.is_static && matches!(&m.kind, MemberKind::Field { value: Some(_), .. }))
+            .collect();
+        if !valued.is_empty() {
+            let mut stmts = Vec::new();
+            for member in &valued {
+                let MemberKind::Field { name, value: Some(value), .. } = &member.kind else { unreachable!() };
+                let this = Expr { kind: ExprKind::This, span: member.span };
+                let field = Expr { kind: ExprKind::Field { target: Box::new(this), name: name.clone() }, span: member.span };
+                let assign = ExprKind::Assign { op: None, target: Box::new(field), value: Box::new(value.clone()) };
+                stmts.push(Stmt { kind: StmtKind::Expr(Expr { kind: assign, span: member.span }), span: member.span });
+            }
+            let init = FunctionDecl { name: format!("{}.init", decl.name), generics: Vec::new(), params: Vec::new(), ret: None, body: FunctionBody::Block(stmts) };
+            let proto = self.method(&init)?;
+            self.emit(Op::Closure(proto));
+            info.init = true;
+        }
+        for member in &decl.members {
+            match &member.kind {
+                MemberKind::Field { constant, ty, name, value } if !member.is_static => {
+                    let nullable = matches!(ty.kind, TypeKind::Nullable(_));
+                    info.fields.push((Rc::from(name.as_str()), *constant, nullable, value.is_some()));
+                }
+                MemberKind::Constructor(ctor) => {
+                    if info.constructor {
+                        self.fail(format!("`{}` has two constructors", decl.name));
+                        continue;
+                    }
+                    let mut ctor = ctor.clone();
+                    ctor.name = format!("{}.new", decl.name);
+                    self.span = member.span;
+                    let proto = self.method(&ctor)?;
+                    self.emit(Op::Closure(proto));
+                    info.constructor = true;
+                }
+                _ => {}
+            }
+        }
+        for member in &decl.members {
+            if let MemberKind::Method { decl: method, .. } = &member.kind {
+                if member.is_static {
+                    continue;
+                }
+                if info.methods.iter().any(|m| **m == *method.name) {
+                    self.fail(format!("`{}` has two methods named `{}`", decl.name, method.name));
+                    continue;
+                }
+                self.span = member.span;
+                let mut named = method.clone();
+                named.name = format!("{}.{}", decl.name, method.name);
+                let proto = self.method(&named)?;
+                self.emit(Op::Closure(proto));
+                info.methods.push(Rc::from(method.name.as_str()));
+            }
+        }
+        for member in &decl.members {
+            if let MemberKind::Method { decl: method, .. } = &member.kind {
+                if !member.is_static {
+                    continue;
+                }
+                self.span = member.span;
+                let mut named = method.clone();
+                named.name = format!("{}::{}", decl.name, method.name);
+                let proto = self.function(&named)?;
+                self.emit(Op::Closure(proto));
+                info.static_methods.push(Rc::from(method.name.as_str()));
+            }
+        }
+        self.span = span;
+        let classes = &mut self.f().proto.classes;
+        classes.push(info);
+        let index = classes.len() as u32 - 1;
+        self.emit(Op::Class(index));
+        match target {
+            Some(target) => self.define(target),
+            None => match self.resolve(&decl.name) {
+                Resolved::Local(Place::Cell(c), _) => {
+                    self.emit(Op::StoreCell(c));
+                }
+                Resolved::Local(Place::Slot(s), _) => {
+                    self.emit(Op::StoreLocal(s));
+                }
+                _ => unreachable!("hoisted classes are locals"),
+            },
+        }
+        // Static fields, in order, so one can use the ones before it
+        for member in &decl.members {
+            if let MemberKind::Field { constant, name, value, .. } = &member.kind {
+                if !member.is_static {
+                    continue;
+                }
+                self.span = member.span;
+                self.load_class(&decl.name);
+                match value {
+                    Some(v) => self.expr(v)?,
+                    None => {
+                        self.emit(Op::Null);
+                    }
+                }
+                let n = self.name(name);
+                self.emit(Op::DefineStatic { name: n, constant: *constant });
+            }
+        }
+        self.classes.pop();
+        self.span = span;
+        Ok(())
     }
 
     // ---- Expressions ----
@@ -1112,10 +1352,11 @@ impl<'a> Compiler<'a> {
             ExprKind::TypeCheck { receiver, ty, check, nullable } => {
                 self.expr(receiver)?;
                 let to_end = nullable.then(|| self.emit(Op::JumpIfNull(0)));
+                let classes = self.type_classes(ty);
                 let t = self.ty(ty);
                 match check {
-                    TypeCheckKind::Is => self.emit(Op::Is { ty: t, catch: false }),
-                    TypeCheckKind::As => self.emit(Op::As(t)),
+                    TypeCheckKind::Is => self.emit(Op::Is { ty: t, catch: false, classes }),
+                    TypeCheckKind::As => self.emit(Op::As { ty: t, classes }),
                 };
                 if let Some(j) = to_end {
                     self.patch(j);
@@ -1165,6 +1406,47 @@ impl<'a> Compiler<'a> {
                 self.patch(push);
                 self.emit(Op::WrapError);
                 self.patch(to_end);
+            }
+            ExprKind::This => self.load_this(),
+            ExprKind::Field { target, name } => {
+                self.expr(target)?;
+                let n = self.name(name);
+                self.emit(Op::GetField(n));
+            }
+            ExprKind::Static { class, name, variable } => {
+                self.load_class(class);
+                let n = self.name(name);
+                self.emit(Op::Static { name: n, variable: *variable });
+            }
+            ExprKind::SuperNew(args) => {
+                let Some(class) = self.classes.last().cloned() else {
+                    self.fail("`@super` can only be used inside a class");
+                    self.emit(Op::Null);
+                    return Ok(());
+                };
+                self.load_class(&class);
+                self.load_this();
+                match self.args(args)? {
+                    None => self.emit(Op::SuperNew(args.len() as u32)),
+                    Some(call) => self.emit(Op::SuperNewComplex(call)),
+                };
+            }
+            ExprKind::SuperMethod { method, args } => {
+                let Some(class) = self.classes.last().cloned() else {
+                    self.fail("`@super` can only be used inside a class");
+                    self.emit(Op::Null);
+                    return Ok(());
+                };
+                if args.iter().any(|a| a.name.is_some() || a.spread) {
+                    self.fail("`@super` methods only take plain arguments for now");
+                }
+                self.load_class(&class);
+                self.load_this();
+                for arg in args {
+                    self.expr(&arg.value)?;
+                }
+                let n = self.name(method);
+                self.emit(Op::SuperMethod { name: n, argc: args.len() as u32 });
             }
             ExprKind::ModuleFunction { module, name } | ExprKind::ModuleConstant { module, name } => {
                 let constant = matches!(expr.kind, ExprKind::ModuleConstant { .. });
@@ -1310,9 +1592,41 @@ impl<'a> Compiler<'a> {
                     self.emit(Op::Pop);
                 }
             }
+            ExprKind::Field { target: object, name } => {
+                self.expr(object)?;
+                let n = self.name(name);
+                if let Some(op) = op {
+                    self.emit(Op::Dup);
+                    self.emit_at(Op::GetField(n), target.span);
+                    self.expr(value)?;
+                    self.emit_at(binary_op(op), span);
+                } else {
+                    self.expr(value)?;
+                }
+                self.emit_at(Op::SetField(n), target.span);
+                if !keep {
+                    self.emit(Op::Pop);
+                }
+            }
+            ExprKind::Static { class, name, variable: true } => {
+                self.load_class(class);
+                let n = self.name(name);
+                if let Some(op) = op {
+                    self.emit(Op::Dup);
+                    self.emit_at(Op::Static { name: n, variable: true }, target.span);
+                    self.expr(value)?;
+                    self.emit_at(binary_op(op), span);
+                } else {
+                    self.expr(value)?;
+                }
+                self.emit_at(Op::SetStatic(n), target.span);
+                if !keep {
+                    self.emit(Op::Pop);
+                }
+            }
             _ => {
                 self.expr(value)?;
-                self.fail("only variables and indexes can be assigned to");
+                self.fail("only variables, indexes and fields can be assigned to");
             }
         }
         Ok(())
@@ -1344,9 +1658,18 @@ impl<'a> Compiler<'a> {
                     self.emit(Op::Pop);
                 }
             }
+            ExprKind::Field { .. } | ExprKind::Static { .. } => {
+                // `+= 1`, and for `$x++` the new value minus one
+                let one = Expr { kind: ExprKind::Int(delta as i64), span };
+                self.assign(Some(BinaryOp::Add), target, &one, keep, span)?;
+                if keep && !prefix {
+                    self.emit(Op::Int(-(delta as i32)));
+                    self.emit(Op::Add);
+                }
+            }
             _ => {
                 self.expr(target)?;
-                self.fail("only variables and indexes can be assigned to");
+                self.fail("only variables, indexes and fields can be assigned to");
             }
         }
         Ok(())
@@ -1439,6 +1762,22 @@ fn collect_stmt(stmt: &Stmt, inside: bool, out: &mut HashSet<String>) {
         }
         StmtKind::Pub(inner) => collect_stmt(inner, inside, out),
         StmtKind::Block(stmts) => collect_stmts(stmts, inside, out),
+        StmtKind::Class(decl) => {
+            // Its methods use the class itself, for `Self` and `@super`
+            out.insert(decl.name.clone());
+            for member in &decl.members {
+                match &member.kind {
+                    MemberKind::Method { decl, .. } | MemberKind::Constructor(decl) => collect_function(decl, true, out),
+                    MemberKind::Field { value: Some(v), .. } => collect_expr(v, inside || !member.is_static, out),
+                    MemberKind::Field { value: None, .. } => {}
+                }
+            }
+            for value in &decl.values {
+                for a in &value.args {
+                    collect_expr(&a.value, inside, out);
+                }
+            }
+        }
     }
 }
 
@@ -1492,6 +1831,25 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         | ExprKind::Null
         | ExprKind::ModuleFunction { .. }
         | ExprKind::ModuleConstant { .. } => {}
+        ExprKind::This => {
+            if inside {
+                out.insert("$@".into());
+            }
+        }
+        ExprKind::Static { class, .. } => {
+            if inside && class != "Self" {
+                out.insert(class.clone());
+            }
+        }
+        ExprKind::Field { target, .. } => collect_expr(target, inside, out),
+        ExprKind::SuperNew(args) | ExprKind::SuperMethod { args, .. } => {
+            if inside {
+                out.insert("$@".into());
+            }
+            for a in args {
+                collect_expr(&a.value, inside, out);
+            }
+        }
         ExprKind::Interpolated(parts) | ExprKind::Command(parts) => {
             for part in parts {
                 if let StringPart::Expr(e) = part {

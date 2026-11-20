@@ -83,6 +83,17 @@ pub enum ExprKind {
     ModuleFunction { module: String, name: String },
     /// `paths::$defaultPath`: a constant of an imported module.
     ModuleConstant { module: String, name: String },
+    /// `@`: the object a method runs on.
+    This,
+    /// `@name` or `$point.x`: a field of an object.
+    Field { target: Box<Expr>, name: String },
+    /// `Point::origin` or `Self::$count`: a static member of a class. `class`
+    /// is `Self` inside a class.
+    Static { class: String, name: String, variable: bool },
+    /// `@super(...)`, in a constructor: the superclass's constructor.
+    SuperNew(Vec<Arg>),
+    /// `@super.sayHello()`: the superclass's version of a method.
+    SuperMethod { method: String, args: Vec<Arg> },
 }
 
 /// The value of an `if` or `switch` branch: an expression, or a block that
@@ -205,7 +216,8 @@ pub enum StmtKind {
     /// `let [$first, ...$rest] = ...`
     LetList { constant: bool, names: Vec<String>, rest: Option<String>, value: Expr },
     Function(FunctionDecl),
-    /// `type Name = ...;`
+    /// `class`, `interface` or `enum`.
+    Class(Rc<ClassDecl>),
     If { cond: Expr, then: Box<Stmt>, otherwise: Option<Box<Stmt>> },
     While { cond: Expr, body: Box<Stmt> },
     For { pattern: ForPattern, iterable: Expr, body: Box<Stmt> },
@@ -219,7 +231,7 @@ pub enum StmtKind {
     Throw(Expr),
     /// `use a/b/c;`, `use a/b/c::name;`, `use a/b/c::{x, $y};`
     Use(UseDecl),
-    /// `pub` before a function, a `const` or a type alias.
+    /// `pub` before a function, a `const`, a class, an interface or an enum.
     Pub(Box<Stmt>),
     Block(Vec<Stmt>),
     Expr(Expr),
@@ -273,12 +285,80 @@ pub enum FunctionBody {
     Expr(Expr),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassKind {
+    Class,
+    Interface,
+    Enum,
+}
+
+impl ClassKind {
+    pub fn word(self) -> &'static str {
+        match self {
+            ClassKind::Class => "class",
+            ClassKind::Interface => "interface",
+            ClassKind::Enum => "enum",
+        }
+    }
+}
+
+/// A class, an interface or an enum *(see `ideas/language/classes.md`)*.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClassDecl {
+    pub kind: ClassKind,
+    pub name: String,
+    pub generics: Vec<String>,
+    /// The superclass of a class, or the interfaces an interface extends.
+    pub extends: Vec<TypeExpr>,
+    pub members: Vec<Member>,
+    /// The values of an enum.
+    pub values: Vec<EnumValue>,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Member {
+    pub public: bool,
+    pub is_static: bool,
+    /// Where the member comes from: the class itself, an `override { }`
+    /// block, or an `implement Interface { }` block.
+    pub origin: Origin,
+    pub kind: MemberKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Origin {
+    Own,
+    Override,
+    Implement(TypeExpr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemberKind {
+    /// `pub string @name;`, `const number @id = 1;`, or with `$` a static field.
+    Field { constant: bool, ty: TypeExpr, name: String, value: Option<Expr> },
+    /// A method. In an interface, `body` is `None` for the ones without a default.
+    Method { decl: FunctionDecl, body: bool },
+    /// `new(...) { ... }`. A parameter written as a field *(i.e. `@name`)* has `field` set.
+    Constructor(FunctionDecl),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumValue {
+    pub name: String,
+    pub args: Vec<Arg>,
+    pub span: Span,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
     pub name: String,
     pub ty: Option<TypeExpr>,
     pub default: Option<Expr>,
     pub variadic: bool,
+    /// `new(@name)`: stored in the field `name`, whose type it takes.
+    pub field: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -464,6 +544,14 @@ impl fmt::Display for Expr {
             Throw(inner) => write!(f, "(throw {inner})"),
             ModuleFunction { module, name } => write!(f, "{module}::{name}"),
             ModuleConstant { module, name } => write!(f, "{module}::${name}"),
+            This => write!(f, "@"),
+            Field { target, name } => match &target.kind {
+                This => write!(f, "@{name}"),
+                _ => write!(f, "(. {target} {name})"),
+            },
+            Static { class, name, variable } => write!(f, "{class}::{}{name}", if *variable { "$" } else { "" }),
+            SuperNew(a) => write!(f, "(@super{})", args(a)),
+            SuperMethod { method, args: a } => write!(f, "(@super.{method}{})", args(a)),
         }
     }
 }
@@ -473,7 +561,8 @@ impl fmt::Display for Param {
         let dots = if self.variadic { "..." } else { "" };
         let ty = self.ty.as_ref().map(|t| format!("{t} ")).unwrap_or_default();
         let default = self.default.as_ref().map(|d| format!(" = {d}")).unwrap_or_default();
-        write!(f, "({dots}{ty}${}{default})", self.name)
+        let sigil = if self.field { "@" } else { "$" };
+        write!(f, "({dots}{ty}{sigil}{}{default})", self.name)
     }
 }
 
@@ -560,6 +649,7 @@ impl fmt::Display for Stmt {
             Yield(e) => write!(f, "(yield {e})"),
             Throw(e) => write!(f, "(throw {e})"),
             Pub(inner) => write!(f, "(pub {inner})"),
+            Class(decl) => write!(f, "{decl}"),
             Use(decl) => {
                 write!(f, "(use {}", decl.path.join("/"))?;
                 match &decl.items {
@@ -614,6 +704,64 @@ impl fmt::Display for Stmt {
             Return(None) => write!(f, "(return)"),
             Block(stmts) => write!(f, "{}", block(stmts)),
             Expr(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl fmt::Display for ClassDecl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let generics = if self.generics.is_empty() { String::new() } else { format!("<{}>", self.generics.join(", ")) };
+        write!(f, "({} {}{generics}", self.kind.word(), self.name)?;
+        if !self.extends.is_empty() {
+            write!(f, " (extends {})", join(&self.extends, " "))?;
+        }
+        for value in &self.values {
+            let args: String = value.args.iter().map(|a| format!(" {a}")).collect();
+            write!(f, " (value {}{args})", value.name)?;
+        }
+        for member in &self.members {
+            write!(f, " {member}")?;
+        }
+        write!(f, ")")
+    }
+}
+
+impl fmt::Display for Member {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut words = Vec::new();
+        match &self.origin {
+            Origin::Own => {}
+            Origin::Override => words.push("override".to_string()),
+            Origin::Implement(ty) => words.push(format!("implement {ty}")),
+        }
+        if self.public {
+            words.push("pub".into());
+        }
+        if self.is_static {
+            words.push("static".into());
+        }
+        let prefix: String = words.iter().map(|w| format!("{w} ")).collect();
+        match &self.kind {
+            MemberKind::Field { constant, ty, name, value } => {
+                let kw = if *constant { "const " } else { "" };
+                let sigil = if self.is_static { "$" } else { "@" };
+                let prefix = prefix.replace("static ", "");
+                match value {
+                    Some(v) => write!(f, "({prefix}{kw}field {ty} {sigil}{name} {v})"),
+                    None => write!(f, "({prefix}{kw}field {ty} {sigil}{name})"),
+                }
+            }
+            MemberKind::Method { decl, body: has_body } => {
+                let generics = if decl.generics.is_empty() { String::new() } else { format!("<{}>", decl.generics.join(", ")) };
+                let ret = decl.ret.as_ref().map(|r| r.to_string()).unwrap_or_default();
+                let params = join(&decl.params, " ");
+                if *has_body {
+                    write!(f, "({prefix}method {ret} {}{generics} ({params}) {})", decl.name, body(&decl.body))
+                } else {
+                    write!(f, "({prefix}method {ret} {}{generics} ({params}))", decl.name)
+                }
+            }
+            MemberKind::Constructor(decl) => write!(f, "({prefix}new ({}) {})", join(&decl.params, " "), body(&decl.body)),
         }
     }
 }

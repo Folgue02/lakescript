@@ -165,6 +165,10 @@ enum PersonStatus {
 outln(PersonStatus::SICK.canWork);   // false
 ```
 
+## Printing
+
+An object prints as its class and its fields, in the order of the constructor that takes every field *(i.e. `Point(x: 3, y: 4, label: 'home')`)*. Strings get quotes, like inside a list. A class prints as `<class Point>`.
+
 ## Equality and operators
 
 - `==` on two objects calls `equals?` when their class implements `Equals`. Otherwise it's true only for the same object.
@@ -222,6 +226,21 @@ use folgue02/geo/shapes::{Circle, Square};   // a lowercase module, as always
 - The case of the file has to match exactly, even on file systems that ignore it *(i.e. macOS)*, so a script that works on one machine works on all. Two files in the same folder whose names only differ in case or in `_` *(i.e. `ChildClass.lks` and `child_class.lks`)* are an error.
 - Only the last part of the path can be in PascalCase: folders are always lowercase.
 - Importing two types with the same name is an error, so one of them needs `as` *(i.e. `use b/User as RemoteUser;`)*.
+
+## Status
+
+Built in steps, each with tests and examples:
+
+1. Done: classes. Fields with and without values, `const` fields, the constructor that takes every field, `new` with `@field` parameters, methods, `@`, static fields and methods with `Self::`, `extends`, `override`, `@super(...)` and `@super.method()`, `.is()` and `.as()` with classes (also of another module, i.e. `shapes::Point`), and `pub class` in modules. The checker knows them, and private fields and methods can only be used by their own class. See `examples/classes.lks`.
+2. Interfaces and `implement`, with default methods, `Self` and `.is(Interface)`.
+3. Enums.
+4. Operators through interfaces, and `==` with `Equals`.
+5. Generic classes and interfaces.
+6. Exceptions as classes.
+7. Importing a type from its own file, and circular imports.
+8. `command` and `subcommand`.
+
+Not checked yet: that `@` isn't read before `@super(...)`, and that `@super(...)` runs once on every path. The checker only checks that the constructor has one.
 
 ## Not decided yet
 

@@ -1,5 +1,6 @@
 //! Types as the checker sees them.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
@@ -30,6 +31,85 @@ pub enum Ty {
     Var(usize),
     /// A type parameter of a generic function, inside its body *(i.e. `T`)*.
     Param(Rc<str>),
+    /// An object of a class.
+    Object(ClassRef),
+}
+
+/// A class as the checker sees it. Two are the same class only if they're the
+/// same declaration, so they're compared by pointer.
+#[derive(Clone)]
+pub struct ClassRef(pub Rc<ClassSig>);
+
+impl PartialEq for ClassRef {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl fmt::Debug for ClassRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0.name)
+    }
+}
+
+impl ClassRef {
+    /// `true` if it's this class or one of its superclasses.
+    pub fn is_a(&self, other: &ClassRef) -> bool {
+        let mut class = Some(self.clone());
+        while let Some(c) = class {
+            if c == *other {
+                return true;
+            }
+            class = c.0.body.borrow().parent.clone();
+        }
+        false
+    }
+
+    /// Finds a member in the class or its superclasses, with the class that declares it.
+    pub fn find<T: Clone>(&self, get: impl Fn(&ClassBody) -> Option<T>) -> Option<(T, ClassRef)> {
+        let mut class = Some(self.clone());
+        while let Some(c) = class {
+            if let Some(found) = get(&c.0.body.borrow()) {
+                return Some((found, c.clone()));
+            }
+            class = c.0.body.borrow().parent.clone();
+        }
+        None
+    }
+}
+
+pub struct ClassSig {
+    pub name: Rc<str>,
+    /// Filled once every class of the block has a name, so they can use each other.
+    pub body: RefCell<ClassBody>,
+}
+
+#[derive(Default)]
+pub struct ClassBody {
+    pub parent: Option<ClassRef>,
+    pub fields: Vec<FieldSig>,
+    pub methods: HashMap<String, MemberSig>,
+    pub statics: HashMap<String, FieldSig>,
+    pub static_methods: HashMap<String, MemberSig>,
+    /// What calling the class takes: its `new`, or every field.
+    pub constructor: Option<Rc<FnTy>>,
+    /// Whether it has its own `new`.
+    pub own_constructor: bool,
+}
+
+#[derive(Clone)]
+pub struct FieldSig {
+    pub name: String,
+    pub ty: Ty,
+    pub public: bool,
+    pub constant: bool,
+    pub has_value: bool,
+}
+
+#[derive(Clone)]
+pub struct MemberSig {
+    pub ty: Rc<FnTy>,
+    pub public: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -105,6 +185,7 @@ impl fmt::Display for Ty {
                 _ => write!(f, "?{a}"),
             },
             Ty::Param(name) => write!(f, "{name}"),
+            Ty::Object(class) => write!(f, "{}", class.0.name),
             Ty::Func(func) => {
                 let mut params: Vec<String> = func.params.iter().map(|p| p.to_string()).collect();
                 if func.variadic {

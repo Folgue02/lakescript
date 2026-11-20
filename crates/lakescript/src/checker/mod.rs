@@ -6,6 +6,7 @@
 //! TypeScript, with type variables for what isn't known yet *(i.e. the
 //! elements of `[]`)*.
 
+mod classes;
 pub mod prelude;
 pub mod types;
 
@@ -18,7 +19,7 @@ use crate::diagnostic::Diagnostic;
 use crate::exceptions;
 use crate::token::Span;
 use prelude::{ModuleSig, Prelude};
-use types::{FnTy, Ty, a};
+use types::{ClassRef, FnTy, Ty, a};
 
 /// What the checker remembers between runs of the same engine: the types of
 /// the globals, so a later `run` can use them.
@@ -59,6 +60,15 @@ struct VarInfo {
     constant: bool,
 }
 
+/// The class whose method or constructor is being checked.
+#[derive(Clone)]
+struct This {
+    class: ClassRef,
+    /// A static method, which has no `@`.
+    is_static: bool,
+    constructor: bool,
+}
+
 /// What a `return` must give.
 enum Return {
     Declared(Ty),
@@ -79,6 +89,8 @@ pub struct Checker<'a> {
     /// The file being checked, for errors in modules.
     file: Option<String>,
     host_functions: Vec<String>,
+    /// The classes whose code is being checked, the innermost last: what `@` is.
+    this: Vec<This>,
     /// Where the stack was when checking started, so deeply nested code is an error instead of a crash.
     stack_base: usize,
     pub stack_budget: usize,
@@ -116,6 +128,7 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             file: None,
             host_functions: host_functions.to_vec(),
+            this: Vec::new(),
             stack_base: crate::stack::position(),
             stack_budget: crate::stack::DEFAULT_BUDGET,
         }
@@ -219,6 +232,7 @@ impl<'a> Checker<'a> {
                 self.assignable(&f.ret, &t.ret)
             }
             (Ty::Param(a), Ty::Param(b)) => a == b,
+            (Ty::Object(f), Ty::Object(t)) => f.is_a(t),
             (f, t) => f == t,
         }
     }
@@ -245,6 +259,9 @@ impl<'a> Checker<'a> {
                     other => other.clone(),
                 };
                 self.join(x, &y).nullable()
+            }
+            (Ty::Object(x), Ty::Object(y)) if x.is_a(y) || y.is_a(x) => {
+                if x.is_a(y) { b.clone() } else { a.clone() }
             }
             (Ty::Exception(x), Ty::Exception(y)) => {
                 if exceptions::is_a(x, y) {
@@ -403,6 +420,10 @@ impl<'a> Checker<'a> {
                             },
                         }
                     }
+                    "Self" => match self.this.last() {
+                        Some(this) => Ty::Object(this.class.clone()),
+                        None => return self.fail("`Self` can only be used inside a class", ty.span),
+                    },
                     n => {
                         if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
                             alias
@@ -429,13 +450,33 @@ impl<'a> Checker<'a> {
                 StmtKind::Pub(inner) => &**inner,
                 _ => stmt,
             };
-            match &inner.kind {
-                StmtKind::Use(_) => {
-                    self.stmt(stmt)?;
-                    early.insert(i);
-                }
-                StmtKind::Function(decl) => self.hoist(decl, inner.span)?,
-                _ => {}
+            if let StmtKind::Use(_) = &inner.kind {
+                self.stmt(stmt)?;
+                early.insert(i);
+            }
+        }
+        // Classes get their names first, so their fields and methods can use any of them
+        let mut classes = Vec::new();
+        for stmt in stmts {
+            let (inner, public) = match &stmt.kind {
+                StmtKind::Pub(inner) => (&**inner, true),
+                _ => (stmt, false),
+            };
+            if let StmtKind::Class(decl) = &inner.kind {
+                let class = self.declare_class(decl, inner.span)?;
+                classes.push((decl.clone(), class, public, inner.span));
+            }
+        }
+        for (decl, class, _, span) in &classes {
+            self.class_body(decl, class, *span)?;
+        }
+        for stmt in stmts {
+            let inner = match &stmt.kind {
+                StmtKind::Pub(inner) => &**inner,
+                _ => stmt,
+            };
+            if let StmtKind::Function(decl) = &inner.kind {
+                self.hoist(decl, inner.span)?;
             }
         }
         for (i, stmt) in stmts.iter().enumerate() {
@@ -475,6 +516,7 @@ impl<'a> Checker<'a> {
         let span = stmt.span;
         self.guard(span)?;
         match &stmt.kind {
+            StmtKind::Class(decl) => self.class(decl, span)?,
             StmtKind::Let { constant, name, ty, value } => {
                 let declared = match ty {
                     Some(t) => Some(self.ty(t)?),
@@ -790,12 +832,17 @@ impl<'a> Checker<'a> {
                             None => return self.fail(format!("`{}` has no `pub` constant named `${}`", module.path, item.name), span),
                         }
                     } else {
-                        if let Some(f) = module.functions.get(&item.name) {
-                            self.scopes.last_mut().unwrap().funcs.insert(local, f.clone());
-                        } else if let Some(t) = module.types.get(&item.name) {
-                            self.scopes.last_mut().unwrap().types.insert(local, t.clone());
-                        } else {
+                        let function = module.functions.get(&item.name).cloned();
+                        let ty = module.types.get(&item.name).cloned();
+                        if function.is_none() && ty.is_none() {
                             return self.fail(format!("`{}` has no `pub` function or type named `{}`", module.path, item.name), span);
+                        }
+                        // A class is both: a type, and a function that creates its objects
+                        if let Some(f) = function {
+                            self.scopes.last_mut().unwrap().funcs.insert(local.clone(), f);
+                        }
+                        if let Some(t) = ty {
+                            self.scopes.last_mut().unwrap().types.insert(local, t);
                         }
                     }
                 }
@@ -850,11 +897,13 @@ impl<'a> Checker<'a> {
         checker.file = Some(shown.clone());
         let mut public_fns = Vec::new();
         let mut public_consts = Vec::new();
+        let mut public_types = Vec::new();
         for stmt in &program {
             if let StmtKind::Pub(inner) = &stmt.kind {
                 match &inner.kind {
                     StmtKind::Function(d) => public_fns.push(d.name.clone()),
                     StmtKind::Let { name, .. } => public_consts.push(name.clone()),
+                    StmtKind::Class(d) => public_types.push(d.name.clone()),
                     _ => {}
                 }
             }
@@ -866,11 +915,11 @@ impl<'a> Checker<'a> {
             };
             let declaration = matches!(
                 inner.kind,
-                StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::Let { .. }
+                StmtKind::Use(_) | StmtKind::Function(_) | StmtKind::Let { .. } | StmtKind::Class(_)
             );
             if !declaration {
                 return Err(located(Diagnostic::new(
-                    "an imported module can only have declarations at its top level: functions, `const`, `let` and `type`",
+                    "an imported module can only have declarations at its top level: functions, `const`, `let`, classes, interfaces and enums",
                     stmt.span,
                 )));
             }
@@ -879,6 +928,14 @@ impl<'a> Checker<'a> {
         let globals = &checker.scopes[1];
         let mut sig = ModuleSig { path: shown, ..Default::default() };
         for name in public_fns {
+            if let Some(f) = globals.funcs.get(&name) {
+                sig.functions.insert(name, f.clone());
+            }
+        }
+        for name in public_types {
+            if let Some(t) = globals.types.get(&name) {
+                sig.types.insert(name.clone(), t.clone());
+            }
             if let Some(f) = globals.funcs.get(&name) {
                 sig.functions.insert(name, f.clone());
             }
@@ -969,6 +1026,43 @@ impl<'a> Checker<'a> {
         let span = e.span;
         self.guard(span)?;
         Ok(match &e.kind {
+            ExprKind::This => match self.this.last() {
+                Some(this) if !this.is_static => Ty::Object(this.class.clone()),
+                Some(_) => return self.fail("a static method has no `@`: it belongs to the class, not to an object", span),
+                None => return self.fail("`@` can only be used in the methods and the constructor of a class", span),
+            },
+            ExprKind::Field { target, name } => self.field(target, name, span)?,
+            ExprKind::Static { class, name, variable } => self.static_member(class, name, *variable, span)?,
+            ExprKind::SuperNew(args) => {
+                let Some(this) = self.this.last().cloned().filter(|t| t.constructor) else {
+                    return self.fail("`@super(...)` can only be used in a constructor", span);
+                };
+                let parent = this.class.0.body.borrow().parent.clone();
+                let Some(parent) = parent else {
+                    return self.fail(format!("`{}` has no superclass for `@super(...)`", this.class.0.name), span);
+                };
+                let ctor = parent.0.body.borrow().constructor.clone();
+                match ctor {
+                    Some(sig) => {
+                        self.call(&sig, &HashMap::new(), args, &parent.0.name, span)?;
+                    }
+                    None => self.args_loosely(args)?,
+                }
+                Ty::Void
+            }
+            ExprKind::SuperMethod { method, args } => {
+                let Some(this) = self.this.last().cloned().filter(|t| !t.is_static) else {
+                    return self.fail("`@super` can only be used in the methods and the constructor of a class", span);
+                };
+                let parent = this.class.0.body.borrow().parent.clone();
+                let Some(parent) = parent else {
+                    return self.fail(format!("`{}` has no superclass for `@super`", this.class.0.name), span);
+                };
+                let Some((m, _)) = parent.find(|b| b.methods.get(method).cloned()) else {
+                    return self.fail(format!("`{}` has no method `{method}`", parent.0.name), span);
+                };
+                self.call(&m.ty, &HashMap::new(), args, method, span)?
+            }
             ExprKind::Int(_) | ExprKind::Float(_) => Ty::Number,
             ExprKind::Str(_) => Ty::Str,
             ExprKind::Bool(_) => Ty::Bool,
@@ -1127,7 +1221,7 @@ impl<'a> Checker<'a> {
                 match self.shallow(&callee_ty) {
                     Ty::Func(f) => {
                         let name = match &callee.kind {
-                            ExprKind::Function(n) | ExprKind::ModuleFunction { name: n, .. } => n.clone(),
+                            ExprKind::Function(n) | ExprKind::ModuleFunction { name: n, .. } | ExprKind::Static { name: n, .. } => n.clone(),
                             _ => "the function".into(),
                         };
                         self.call(&f, &HashMap::new(), args, &name, span)?
@@ -1292,6 +1386,9 @@ impl<'a> Checker<'a> {
             }
         }
         let params: Vec<Ty> = sig.params.iter().map(|p| p.substitute(&map)).collect();
+        // The constructor that takes every field names them without `$`
+        let fields = matches!(&sig.ret, Ty::Object(c) if *c.0.name == *name && !c.0.body.borrow().own_constructor);
+        let show = |n: &String| if fields { format!("`{n}`") } else { format!("`${n}`") };
         let fixed = if sig.variadic { params.len() - 1 } else { params.len() };
         let mut given = vec![false; params.len()];
         let mut position = 0;
@@ -1342,14 +1439,14 @@ impl<'a> Checker<'a> {
             let found = self.expr(&arg.value, Some(&expected))?;
             if !self.assignable(&found, &expected) {
                 let (found, expected) = (self.resolve(&found), self.resolve(&expected));
-                let param = sig.names.get(index).map(|n| format!("`${n}`")).unwrap_or_else(|| format!("argument {}", index + 1));
+                let param = sig.names.get(index).map(show).unwrap_or_else(|| format!("argument {}", index + 1));
                 return self.fail(format!("{param} of `{name}` must be {}, but this is {}", a(&expected), a(&found)), arg.value.span);
             }
         }
         if !spread {
             for i in 0..sig.required.min(given.len()) {
                 if !given[i] {
-                    let param = sig.names.get(i).map(|n| format!("`${n}`")).unwrap_or_else(|| format!("argument {}", i + 1));
+                    let param = sig.names.get(i).map(show).unwrap_or_else(|| format!("argument {}", i + 1));
                     return self.fail(format!("`{name}` needs a value for {param}"), span);
                 }
             }
@@ -1368,6 +1465,15 @@ impl<'a> Checker<'a> {
                 );
             }
             r = self.shallow(inner);
+        }
+        if let Ty::Object(class) = &r {
+            if let Some((m, owner)) = class.find(|b| b.methods.get(method).cloned()) {
+                self.check_access(m.public, &owner, &format!("`.{method}()`"), span)?;
+                return self.call(&m.ty, &HashMap::new(), args, method, span);
+            }
+            if !matches!(method, "toString" | "typeName" | "equals") {
+                return self.fail(format!("`{}` has no method `.{method}()`", class.0.name), span);
+            }
         }
         let (key, params): (&str, Vec<Ty>) = match &r {
             Ty::Str => ("string", vec![]),
@@ -1636,7 +1742,17 @@ impl<'a> Checker<'a> {
                     other => return self.fail(format!("{} can't be indexed", a(&other)), target.span),
                 }
             }
-            _ => return self.fail("only variables and indexes can be assigned to", target.span),
+            ExprKind::Field { target: object, name } => {
+                let ty = self.field(object, name, target.span)?;
+                self.check_assignable_target(target)?;
+                ty
+            }
+            ExprKind::Static { class, name, variable: true } => {
+                let ty = self.static_member(class, name, true, target.span)?;
+                self.check_assignable_target(target)?;
+                ty
+            }
+            _ => return self.fail("only variables, indexes and fields can be assigned to", target.span),
         };
         let value_ty = match op {
             None => self.expr(value, Some(&target_ty))?,
@@ -1666,6 +1782,24 @@ impl<'a> Checker<'a> {
     }
 
     fn check_assignable_target(&mut self, target: &Expr) -> Check<()> {
+        if let ExprKind::Field { target: object, name } = &target.kind {
+            let t = self.expr(object, None)?;
+            if let Ty::Object(class) = self.shallow(&t) {
+                if let Some((field, owner)) = class.find(|b| b.fields.iter().find(|f| f.name == *name).cloned()) {
+                    let building = self.this.last().is_some_and(|t| t.constructor && t.class == owner) && matches!(object.kind, ExprKind::This);
+                    if field.constant && !building {
+                        return self.fail(format!("`{name}` is a `const` field of `{}`: it can only be set in its constructor", owner.0.name), target.span);
+                    }
+                }
+            }
+        }
+        if let ExprKind::Static { class, name, variable: true } = &target.kind {
+            if let Some(class) = self.class_named(class) {
+                if class.0.body.borrow().statics.get(name).is_some_and(|f| f.constant) {
+                    return self.fail(format!("`{}::${name}` is a constant, it can't be changed", class.0.name), target.span);
+                }
+            }
+        }
         if let ExprKind::Variable(name) = &target.kind {
             if let Some(info) = self.declared_var(name) {
                 if info.constant {

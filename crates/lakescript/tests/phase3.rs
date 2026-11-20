@@ -492,7 +492,7 @@ fn modules_can_keep_private_variables() {
     dir.file("public.lks", "pub let $x = 1;\n");
     let bad = dir.file("bad2.lks", "use public;\n");
     let message = Engine::with_output(CapturedOutput::new()).run_file(&bad).unwrap_err().message;
-    assert!(message.contains("`pub` goes before functions and constants"), "{message}");
+    assert!(message.contains("`pub` goes before functions, constants"), "{message}");
     dir.file("untyped.lks", "pub const $x = 1;\n");
     let bad = dir.file("bad3.lks", "use untyped;\n");
     let message = Engine::with_output(CapturedOutput::new()).run_file(&bad).unwrap_err().message;

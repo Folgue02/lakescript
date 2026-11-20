@@ -31,6 +31,9 @@ pub enum StringPart {
 pub enum Keyword {
     Let,
     Const,
+    Class,
+    Interface,
+    Enum,
     Use,
     Pub,
     If,
@@ -60,6 +63,9 @@ impl Keyword {
         Some(match word {
             "let" => Let,
             "const" => Const,
+            "class" => Class,
+            "interface" => Interface,
+            "enum" => Enum,
             "use" => Use,
             "pub" => Pub,
             "if" => If,
@@ -90,6 +96,9 @@ impl Keyword {
         match self {
             Let => "let",
             Const => "const",
+            Class => "class",
+            Interface => "interface",
+            Enum => "enum",
             Use => "use",
             Pub => "pub",
             If => "if",
@@ -135,6 +144,10 @@ pub enum TokenKind {
 
     // Names
     Variable(String),
+    /// `@name`: a field or method of the object a method runs on.
+    Field(String),
+    /// `@` alone: the object itself.
+    At,
     Ident(String),
     Keyword(Keyword),
     /// A test operator, without the `-` (`"f"`, `"like"`...).
@@ -228,6 +241,8 @@ impl TokenKind {
             SymbolList(_) => "a %i list",
             Symbol(name) => return format!(":{name}"),
             Variable(name) => return format!("${name}"),
+            Field(name) => return format!("`@{name}`"),
+            At => "`@`",
             Ident(name) => return format!("`{name}`"),
             Keyword(k) => return format!("`{}`", k.as_str()),
             TestOp(op) => return format!("`-{op}`"),

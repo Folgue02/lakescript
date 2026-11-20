@@ -130,6 +130,9 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
             if let Value::Exception(e) = &receiver {
                 return Ok(Value::Str(e.kind.clone()));
             }
+            if let Value::Object(o) = &receiver {
+                return Ok(Value::Str(o.class.name.clone()));
+            }
             return Ok(Value::string(receiver.type_name()));
         }
         _ => {}

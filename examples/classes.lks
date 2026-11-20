@@ -1,0 +1,70 @@
+#!/usr/bin/lks
+// Classes: fields, constructors, methods, static members and inheritance.
+//
+//   lks examples/classes.lks
+
+// Calling a class creates an object. Without a `new`, it takes every field in
+// order, and the fields with a value or a `?` can be left out.
+class Point {
+    pub number @x;
+    pub number @y = 0;
+    pub ?string @label;
+
+    pub number distance(Point $other) = ((@x - $other.x) ** 2 + (@y - $other.y) ** 2) ** 0.5;
+
+    // Static members belong to the class, and are always reached with `::`
+    pub static Point origin() = Point(0, 0, label: 'origin');
+}
+
+const $home = Point(3, 4, label: 'home');
+outln($home);
+outln(f"{$home.label} is {$home.distance(Point::origin())} away");
+outln(Point(x: 1));
+
+// A constructor of its own. `@id` stores the argument in the field
+class Task {
+    pub number $created = 0;
+
+    pub const number @id;
+    pub string @title;
+    list<string> @notes = [];
+
+    pub new(string $title, @id) {
+        @title = $title.trim();
+        Self::$created += 1;
+    }
+
+    pub void note(string $text) {
+        @notes.push($text);
+    }
+
+    pub string summary() = f"#{@id} {@title} ({@notes.length()} notes)";
+}
+
+const $task = Task('  write the docs ', 1);
+$task.note('start with the examples');
+outln($task.summary());
+Task('fix the tests', 2);
+outln(f"{Task::$created} tasks created");
+
+// Subclasses: `override` holds the methods that replace the superclass's,
+// and `@super` reaches the superclass
+class Animal {
+    pub string @name;
+
+    pub string sound() = '...';
+    pub string describe() = f"{@name} says {@sound()}";
+}
+
+class Dog extends Animal {
+    override {
+        pub string sound() = 'woof';
+        pub string describe() = @super.describe() + '!';
+    }
+}
+
+const list<Animal> $pets = [Animal('the fish'), Dog('rex')];
+for ($pet in $pets) {
+    outln($pet.describe());
+}
+outln($pets.filter(($p) -> $p.is(Dog)).length());

@@ -25,6 +25,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [patterns.lks](patterns.lks) | `-like`, regexes with `-match` and `.match()`, path tests |
 | [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result` |
 | [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, function types |
+| [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
 
 ## Scripts that use the system
 

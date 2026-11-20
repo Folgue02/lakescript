@@ -27,6 +27,65 @@ pub enum Value {
     Result(Rc<ResultValue>),
     /// A command from `%x"..."` or `process::command()`. Its setup methods change it.
     Command(Rc<RefCell<crate::command::CommandValue>>),
+    /// A class: called to create objects, and `::` reaches its static members.
+    Class(Rc<Class>),
+    /// An object of a class.
+    Object(Rc<Object>),
+}
+
+/// A class while the script runs *(see `ideas/language/classes.md`)*.
+pub struct Class {
+    pub name: Rc<str>,
+    pub parent: Option<Rc<Class>>,
+    /// Every field of its objects, the superclass's first.
+    pub fields: Vec<FieldSlot>,
+    /// Its methods and the ones it inherits, by name.
+    pub methods: std::collections::HashMap<Rc<str>, Rc<Function>>,
+    pub statics: RefCell<IndexMap<Rc<str>, StaticSlot>>,
+    /// `new`, or `None` for the one that takes every field.
+    pub constructor: Option<Rc<Function>>,
+    /// Gives the fields declared in this class the values written where they're declared.
+    pub init: Option<Rc<Function>>,
+}
+
+#[derive(Clone)]
+pub struct FieldSlot {
+    pub name: Rc<str>,
+    pub constant: bool,
+    /// Whether its type is nullable, so the constructor can leave it as `null`.
+    pub nullable: bool,
+    /// Whether it has a value where it's declared.
+    pub has_value: bool,
+}
+
+pub struct StaticSlot {
+    pub value: Value,
+    pub constant: bool,
+}
+
+pub struct Object {
+    pub class: Rc<Class>,
+    pub fields: RefCell<Vec<Value>>,
+    /// While its constructor runs, its `const` fields can still be set.
+    pub building: std::cell::Cell<bool>,
+}
+
+impl Class {
+    pub fn field(&self, name: &str) -> Option<usize> {
+        self.fields.iter().position(|f| &*f.name == name)
+    }
+
+    /// `true` if it's this class or one of its superclasses.
+    pub fn is_a(&self, other: &Class) -> bool {
+        let mut class = Some(self);
+        while let Some(c) = class {
+            if std::ptr::eq(c, other) {
+                return true;
+            }
+            class = c.parent.as_deref();
+        }
+        false
+    }
 }
 
 pub struct ExceptionValue {
@@ -233,6 +292,16 @@ impl Value {
             Value::Exception(_) => "exception",
             Value::Result(_) => "result",
             Value::Command(_) => "command",
+            Value::Class(_) => "class",
+            Value::Object(_) => "object",
+        }
+    }
+
+    /// The name of its type for messages: the class of an object *(i.e. `Point`)*.
+    pub fn type_label(&self) -> String {
+        match self {
+            Value::Object(o) => o.class.name.to_string(),
+            other => other.type_name().to_string(),
         }
     }
 
@@ -271,6 +340,8 @@ impl Value {
             (Value::Exception(a), Value::Exception(b)) => Rc::ptr_eq(a, b),
             (Value::Result(a), Value::Result(b)) => Rc::ptr_eq(a, b),
             (Value::Command(a), Value::Command(b)) => Rc::ptr_eq(a, b),
+            (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
+            (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -384,6 +455,18 @@ impl fmt::Display for Value {
                 ResultValue::Error(e) => write!(f, "error({e})"),
             },
             Value::Regex(r) => write!(f, "%r\"{}\"{}", r.pattern.replace('"', "\\\""), r.flags),
+            Value::Class(c) => write!(f, "<class {}>", c.name),
+            Value::Object(o) => {
+                write!(f, "{}(", o.class.name)?;
+                for (i, (slot, value)) in o.class.fields.iter().zip(o.fields.borrow().iter()).enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: ", slot.name)?;
+                    value.write_nested(f)?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }

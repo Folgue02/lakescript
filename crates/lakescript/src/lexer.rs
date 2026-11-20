@@ -204,6 +204,19 @@ impl Lexer {
                 }
                 Variable(self.read_name())
             }
+            '@' => {
+                if !self.peek(0).is_some_and(is_name_start) {
+                    At
+                } else {
+                    let mut name = self.read_name();
+                    // `@empty?()`, like a method name
+                    if self.at(0, '?') && self.at(1, '(') {
+                        self.advance();
+                        name.push('?');
+                    }
+                    Field(name)
+                }
+            }
             '\'' => self.lex_single_quoted(start)?,
             '%' => match (self.peek(0), self.peek(1)) {
                 (Some('r'), Some('"')) => {

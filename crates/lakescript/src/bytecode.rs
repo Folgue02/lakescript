@@ -8,7 +8,7 @@
 
 use std::rc::Rc;
 
-use crate::ast::{BinaryOp, PathTestOp, TypeExpr, UnaryOp};
+use crate::ast::{BinaryOp, PathTestOp, TypeExpr, TypeKind, UnaryOp};
 use crate::token::Span;
 use crate::value::Value;
 
@@ -40,6 +40,8 @@ pub enum Op {
     LoadUpvalue(u32),
     StoreUpvalue(u32),
     LoadGlobal(u32),
+    /// Like `LoadGlobal`, but `null` when it isn't declared, for the classes of a type.
+    LoadGlobalOrNull(u32),
     /// Assigns an existing global variable.
     StoreGlobal(u32),
     /// Pops into a global, which must not exist yet.
@@ -123,8 +125,29 @@ pub enum Op {
 
     // ---- Types ----
     /// `.is(type)`. `catch`: the type of a `catch`, whose errors are `TypeError`s.
-    Is { ty: u32, catch: bool },
-    As(u32),
+    /// `classes`: how many classes are on top, the ones the type names *(see `class_names`)*.
+    Is { ty: u32, catch: bool, classes: u8 },
+    As { ty: u32, classes: u8 },
+
+    // ---- Classes ----
+    /// Makes a class, described by `Proto::classes`, from what's on the stack:
+    /// the superclass, `init`, `new`, the methods and the static methods.
+    Class(u32),
+    /// `$object.name`, with the name in `Proto::names`.
+    GetField(u32),
+    /// Pops the value and the object, and pushes the value back.
+    SetField(u32),
+    /// `Class::name` or `Class::$name`: pops the class.
+    Static { name: u32, variable: bool },
+    /// Pops the value and the class, and pushes the value back.
+    SetStatic(u32),
+    /// Gives a class a static field: pops the value and the class.
+    DefineStatic { name: u32, constant: bool },
+    /// `@super(...)`: the class whose superclass's constructor runs, `@` and the arguments are on the stack.
+    SuperNew(u32),
+    SuperNewComplex(u32),
+    /// `@super.name(...)`: the class, `@` and the arguments are on the stack.
+    SuperMethod { name: u32, argc: u32 },
 
     // ---- Functions ----
     Closure(u32),
@@ -214,6 +237,42 @@ pub struct Param {
     pub variadic: bool,
 }
 
+/// What `Op::Class` needs to make a class.
+#[derive(Debug, Clone)]
+pub struct ClassInfo {
+    pub name: Rc<str>,
+    pub parent: bool,
+    pub init: bool,
+    pub constructor: bool,
+    /// The fields declared in the class itself: name, `const`, nullable, has a value.
+    pub fields: Vec<(Rc<str>, bool, bool, bool)>,
+    pub methods: Vec<Rc<str>>,
+    pub static_methods: Vec<Rc<str>>,
+}
+
+/// The names of the classes a type uses, in order and without repeating them
+/// *(i.e. `Point` and `Line` in `map<string, ?Point> | list<Line>`)*. The
+/// compiler pushes their values before `Is` and `As`.
+pub fn class_names(ty: &TypeExpr) -> Vec<&str> {
+    fn walk<'a>(ty: &'a TypeExpr, out: &mut Vec<&'a str>) {
+        match &ty.kind {
+            TypeKind::Named { name, args } => {
+                if crate::types::is_class_name(name) && !out.contains(&name.as_str()) {
+                    out.push(name);
+                }
+                for a in args {
+                    walk(a, out);
+                }
+            }
+            TypeKind::Nullable(inner) => walk(inner, out),
+            TypeKind::Function { .. } => {}
+        }
+    }
+    let mut out = Vec::new();
+    walk(ty, &mut out);
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct Import {
     pub path: Vec<String>,
@@ -236,6 +295,7 @@ pub struct Proto {
     pub protos: Vec<Rc<Proto>>,
     pub calls: Vec<Vec<ArgKind>>,
     pub imports: Vec<Import>,
+    pub classes: Vec<ClassInfo>,
     pub captures: Vec<Capture>,
     /// How many slots and cells a frame of this function needs.
     pub slots: u32,
@@ -261,7 +321,16 @@ impl Proto {
             let span = self.spans[i];
             let detail = match op {
                 Op::Const(c) => format!("  {:?}", self.consts[*c as usize]),
-                Op::CallMethod { name, .. } | Op::CallMethodComplex { name, .. } | Op::ModuleMember { name, .. } | Op::Fail(name) => {
+                Op::CallMethod { name, .. }
+                | Op::CallMethodComplex { name, .. }
+                | Op::ModuleMember { name, .. }
+                | Op::Fail(name)
+                | Op::GetField(name)
+                | Op::SetField(name)
+                | Op::Static { name, .. }
+                | Op::SetStatic(name)
+                | Op::DefineStatic { name, .. }
+                | Op::SuperMethod { name, .. } => {
                     format!("  {}", self.names[*name as usize])
                 }
                 _ => String::new(),
