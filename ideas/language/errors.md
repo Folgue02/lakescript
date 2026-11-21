@@ -17,7 +17,8 @@ Exception
 ├── IndexError          // replacing `$list[$i]` past the end, `.removeAt()` and `.insert()` outside a list (reading `$list[$i]` past the end is `null`)
 ├── ArithmeticError     // % or .div() by zero
 ├── CommandFailed       // a shell command returned an error
-└── AssertionError      // an `assert` whose condition was false
+├── AssertionError      // an `assert` whose condition was false
+└── Interrupted         // Ctrl+C while std/terminal waits for the person (planned, see stdlib/terminal.md)
 ```
 
 - Custom exceptions are classes that extend one of these *(see [classes.md](classes.md))*:

@@ -42,8 +42,9 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
 | [json.lks](json.lks) | `std/format/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
 | [csv.lks](csv.lks) | `std/format/csv`: rows as lists or as maps by the names of the columns, quotes, other separators | |
+| [html.lks](html.lks) | `std/html`: a page, CSS selectors, text and attributes, repaired HTML, the JSON in a `<script>` | |
 | [http.lks](http.lks) | `std/http`: a request, its status and headers, JSON answers, `NetworkError` and downloading | `lks examples/http.lks https://api.github.com/repos/rust-lang/rust` |
-| [templates/templates.lks](templates/templates.lks) | `std/template`: `{{ }}` tags, `for` and `if` blocks, a text template and an HTML file that escapes its values, `raw()` | |
+| [templates/templates.lks](templates/templates.lks) | `std/template`: `{{ }}` tags, `for` and `if` blocks, a text template and an HTML template, `page.html.elks`, that escapes its values, `raw()` | |
 | [testing.lks](testing.lks) | Tests: functions named `test...`, `assert` and `test::throws` | `lks --test examples/testing.lks` |
 | [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
 | [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, typed `pub const`s and a module's private `let` | |

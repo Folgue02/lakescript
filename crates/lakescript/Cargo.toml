@@ -7,8 +7,10 @@ license.workspace = true
 
 [dependencies]
 csv = "1.4.0"
+ego-tree = "0.11.1"
 indexmap = "2.14"
 regex = "1.13"
+scraper = { version = "0.29.0", default-features = false, features = ["deterministic"] }
 ureq = "3.5.2"
 
 [target.'cfg(unix)'.dependencies]

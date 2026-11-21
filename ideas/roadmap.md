@@ -41,9 +41,18 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 - Phase 6 added `ferry` *(see [tooling/ferry.md](tooling/ferry.md))*: projects, dependencies from git repositories with exact versions, the lock file, and installed commands. `examples/sizes/` is a project.
 - Phase 8 added `lks-lsp` *(see [tooling/lsp.md](tooling/lsp.md#status))*, released as `v0.8.0`: it sends the errors of the open files while they're typed, answers hover and go to definition, and completes names. Milestones 4 and 5 can come as patch versions.
 - Phase 7 added OOP, in steps *(see [language/classes.md](language/classes.md#status))*: classes, interfaces, enums, generics, operators through interfaces, custom exceptions, type modules, modules that use each other, and `command` for the arguments of a script *(see [language/cli.md](language/cli.md))*. Type aliases are gone, and `pub const` needs its type.
-- The standard library is growing alongside phase 8 *(see [stdlib/planned.md](stdlib/planned.md))*: its modules can be written in Lakescript and declare classes, `std/http`, `std/format/csv` and `std/template` are new, and `std/json` moved to `std/format/json`.
+- The standard library is growing alongside phase 8 *(see [stdlib/planned.md](stdlib/planned.md))*: its modules can be written in Lakescript and declare classes, `std/http`, `std/html`, `std/format/csv` and `std/template` are new, and `std/json` moved to `std/format/json`.
 - Tests: functions named `test...`, the `assert` statement, `std/test`, `ferry test` and `lks --test` *(see [tooling/testing.md](tooling/testing.md))*.
 - `examples/backup/backup.lks` is the phase 3 milestone: a real backup script with a module next to it, a JSON config, commands and files.
+
+## Backlog
+
+Decided, and not built yet.
+
+- **Remove symbols** *(`:active`, `%i[...]`, the type `symbol`)*. Since phase 7, enums do what they were for, and better: the checker catches a typo in an enum's value, checks that a `switch` covers every one, and completes them, while any `:name` is a valid symbol. Strings do the rest. Symbols also gave two ways to write the same key *(`{:a => 1}['a']` is `null`)*, didn't survive JSON or CSV, which write them as strings, and cost syntax next to named arguments, `? :` and `::`.
+    - Fixed sets of values become enums, and loose values strings *(i.e. `case :admin` becomes `case 'admin'`, or an enum)*.
+    - `process::platform()` gives a string or an enum instead of `:linux`, `:macos` and `:windows`. Which one is decided when it's built.
+    - It touches the lexer, the parser, the checker, the methods of `symbol`, `std/format/json` and `std/format/csv`, the examples and the notes *(i.e. [types/symbol.md](stdlib/types/symbol.md))*, and the grammars of editors, like farsub's.
 
 ## Notes
 

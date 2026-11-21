@@ -21,16 +21,20 @@ Templates in the style of Ruby's ERB, in `crates/lakescript/src/stdlib/template.
 ```
 use std/template;
 
-const $page = template::renderFile('page.html', {'title' => 'Shop', 'items' => $items});
+const $page = template::renderFile('page.html.elks', {'title' => 'Shop', 'items' => $items});
 const $text = template::render('Hello {{ $name.upper() }}!', {'name' => 'Ana'});
 ```
+
+## Files
+
+**Templates end in `.elks`**, for "embedded Lakescript", like Ruby's `.erb`: `page.html.elks` is a template that gives HTML, `notes.md.elks` one that gives Markdown. So editors know which files have `{{ }}` tags with Lakescript inside: farsub highlights them as HTML with Lakescript in its tags. `renderFile` takes any file, with this extension or not.
 
 ## Functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `render(string $text, map<string, any> $values = {}, bool $html = false)` | `string` | The template `$text` with `$values`. With `$html`, the values it writes are escaped for HTML |
-| `renderFile(string $path, map<string, any> $values = {}, ?bool $html = null)` | `string` | The template in the file `$path`. It's escaped for HTML when the file ends in `.html` or `.htm`, unless `$html` says otherwise |
+| `renderFile(string $path, map<string, any> $values = {}, ?bool $html = null)` | `string` | The template in the file `$path`. It's escaped for HTML when the file ends in `.html` or `.htm`, also before `.elks` *(i.e. `page.html.elks`)*, unless `$html` says otherwise |
 
 ## Tags
 
@@ -54,7 +58,7 @@ const $text = template::render('Hello {{ $name.upper() }}!', {'name' => 'Ana'});
 
 ## Errors
 
-A template becomes Lakescript code that builds the string, and runs as a script of its own whose variables are the values given. Its errors point at the line and column of the template, also the ones of the language *(i.e. ``page.html:12:9: error: `$nmae` isn't declared``)*, and `$e.line()` is that line. A template made with `render` is `<template>` in its errors.
+A template becomes Lakescript code that builds the string, and runs as a script of its own whose variables are the values given. Its errors point at the line and column of the template, also the ones of the language *(i.e. ``page.html.elks:12:9: error: `$nmae` isn't declared``)*, and `$e.line()` is that line. A template made with `render` is `<template>` in its errors.
 
 - A name that isn't declared is found when its tag runs, not before, since the values only come with the call.
 - A block that isn't closed, an end of another block *(i.e. `{{ endif }}` closing a `{{ for }}`)*, an `{{ else }}` outside an `{{ if }}` and a `{{` without `}}` are errors before anything runs.

@@ -29,6 +29,21 @@ MODULES = {'general': 'general', 'fs': 'std/fs', 'path': 'std/path', 'env': 'std
 # Types described outside ideas/stdlib, and the Rust parts of the modules
 # written in Lakescript, which aren't documented since scripts never use them
 EXTRA = '''
+module std/html/native
+any parse(string $text);
+list<any> select(any $node, string $css);
+any first(any $node, string $css);
+string tag(any $node);
+string text(any $node);
+?string attr(any $node, string $name);
+map<string, string> attrs(any $node);
+string html(any $node);
+string outerHtml(any $node);
+list<any> children(any $node);
+any parent(any $node);
+string escape(string $text);
+string unescape(string $text);
+
 module std/http/native
 map<string, any> send(string $method, string $url, any $body, map<string, string> $headers, ?number $timeout, ?string $path);
 

@@ -1,0 +1,74 @@
+// `std/html`: reading HTML pages and finding their parts with CSS selectors
+// *(see ideas/stdlib/html.md)*. Its Rust part, `std/html/native`, parses them.
+
+use std/html/native;
+
+/// A page of HTML, from `html::parse()`.
+pub class Document {
+    const any @node;
+
+    /// Every element that matches the CSS selector, in the order of the page
+    /// *(i.e. `$page.select('a.title')`)*. Throws a `ValueError` if the selector isn't valid.
+    pub list<Element> select(string $css) = elements(native::select(@node, $css));
+
+    /// The first element that matches the CSS selector, or `null`.
+    pub ?Element first(string $css) = element(native::first(@node, $css));
+
+    /// The text of the page's `<title>`, or `null` when it has none.
+    pub ?string title() = @first('title')?.text();
+
+    /// The text of the page as a browser shows it, with its spaces collapsed.
+    /// Scripts and styles aren't text.
+    pub string text() = native::text(@node);
+
+    /// The whole page as HTML, as it was read: broken HTML comes out repaired.
+    pub string html() = native::html(@node);
+}
+
+/// An element of a page *(i.e. a `<a href="...">`)*, found with `select()` or `first()`.
+pub class Element {
+    const any @node;
+    /// The name of its tag, in lowercase *(i.e. `a` or `div`)*.
+    pub const string @tag;
+
+    /// Every element inside this one that matches the CSS selector.
+    pub list<Element> select(string $css) = elements(native::select(@node, $css));
+
+    /// The first element inside this one that matches the CSS selector, or `null`.
+    pub ?Element first(string $css) = element(native::first(@node, $css));
+
+    /// Its text as a browser shows it, with its spaces collapsed *(i.e. `Hello world`
+    /// for `<p>Hello <b>world</b></p>`)*. Scripts and styles inside it aren't text.
+    pub string text() = native::text(@node);
+
+    /// An attribute by its name, or `null` when it doesn't have it *(i.e. `$link.attr('href')`)*.
+    pub ?string attr(string $name) = native::attr(@node, $name);
+
+    /// Every attribute, by its name.
+    pub map<string, string> attrs() = native::attrs(@node);
+
+    /// The HTML inside it, without its own tag.
+    pub string html() = native::html(@node);
+
+    /// Its HTML, with its own tag.
+    pub string outerHtml() = native::outerHtml(@node);
+
+    /// The elements right inside it, without text.
+    pub list<Element> children() = elements(native::children(@node));
+
+    /// The element it's inside, or `null` at the top of the page.
+    pub ?Element parent() = element(native::parent(@node));
+}
+
+/// Reads a page of HTML. It never fails: broken HTML is repaired the way browsers do.
+pub Document parse(string $text) = Document(native::parse($text));
+
+/// The text with `&`, `<`, `>`, `"` and `'` written as entities, to put it in HTML.
+pub string escape(string $text) = native::escape($text);
+
+/// The text with its entities turned back into characters *(i.e. `&amp;` into `&`)*.
+pub string unescape(string $text) = native::unescape($text);
+
+?Element element(any $node) = $node == null ? null : Element($node, native::tag($node));
+
+list<Element> elements(list<any> $nodes) = $nodes.map(($n) -> Element($n, native::tag($n)));

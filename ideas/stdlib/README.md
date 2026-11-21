@@ -30,6 +30,9 @@ A module is written in Rust, in Lakescript, or both:
 
 Errors in an embedded module name it as `<std>/http.lks`.
 
+- **Rust data in a value**: a native part can give the Lakescript part data of its own, like a parsed page, as a value scripts never see *(a `Value::Handle`)*. It's kept in a field of a class that isn't `pub`, and freed when nothing uses it anymore *(i.e. `html::Element`, see [html.md](html.md))*. Printing an object leaves those fields out.
+- **Functions that run Lakescript code**: most native functions only get their arguments, but some get the VM, to run code they're given or make *(a `Function::Vm`, i.e. `template::render`, `test::throws`)*.
+
 ## Files
 
 What's coming next is in [planned.md](planned.md).
@@ -58,6 +61,7 @@ What's coming next is in [planned.md](planned.md).
 | [time.md](time.md) | `std/time`: the current time |
 | [io.md](io.md) | `std/io`: reading stdin |
 | [process.md](process.md) | `std/process`: arguments, the current folder, finding and running programs |
+| [html.md](html.md) | `std/html`: reading HTML and finding its parts with CSS selectors |
 | [http.md](http.md) | `std/http`: requests to web servers |
 | [format/json.md](format/json.md) | `std/format/json`: reading and writing JSON |
 | [format/csv.md](format/csv.md) | `std/format/csv`: reading and writing CSV |
@@ -68,7 +72,7 @@ What's coming next is in [planned.md](planned.md).
 
 | File          | Contents |
 |---------------|----------|
-| `terminal.md` | Colors, the size of the terminal, asking the user for input |
+| [terminal.md](terminal.md) | `std/terminal`: prompts, styles, progress and ready-made interactive pieces |
 | `time.md`     | Dates, times and durations |
 
 ## Backlog

@@ -146,6 +146,16 @@ fn http() {
 }
 
 #[test]
+fn html() {
+    let out = run_ok(&["examples/html.lks"]);
+    assert_eq!(
+        out,
+        "The Lake Shop\nToday's specials\nGreen tea: 3.50 -> /tea\nCake & cream: 4.20 -> /cake\nApple pie: 5.00 (sold out) -> /pie\n\
+         Available: Green tea, Cake & cream\n{\"name\": \"The Lake Shop\", \"rating\": 4.8}\nOpen every day\n&lt;b&gt;Tom &amp; Jerry&lt;/b&gt;\n"
+    );
+}
+
+#[test]
 fn testing() {
     let out = run_ok(&["--test", "examples/testing.lks"]);
     assert!(out.starts_with("          ok testSlug\n"), "{out}");

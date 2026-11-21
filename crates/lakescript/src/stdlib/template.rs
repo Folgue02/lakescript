@@ -33,9 +33,16 @@ fn render_file(vm: &mut Interpreter, values: Vec<Value>, span: Span) -> Exec<Val
     let path = a.str(0).map_err(|e| native_error(e, span))?;
     let file = vm.host.state.resolve(&path);
     let text = std::fs::read_to_string(&file).map_err(|e| native_error(io_error("read", &path, e), span))?;
-    let extension = file.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    let html = flag(&a, 2, extension == "html" || extension == "htm").map_err(|e| native_error(e, span))?;
+    let html = flag(&a, 2, html_file(&file)).map_err(|e| native_error(e, span))?;
     run(vm, &text, &file.display().to_string(), &a.value(1), html, span)
+}
+
+/// A file whose values are escaped for HTML: `.html` or `.htm`, also before
+/// `.elks`, the extension of templates *(i.e. `page.html.elks`)*.
+fn html_file(file: &std::path::Path) -> bool {
+    let name = file.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let name = name.strip_suffix(".elks").unwrap_or(&name);
+    name.ends_with(".html") || name.ends_with(".htm")
 }
 
 /// A `bool` argument that can be left out.
@@ -128,7 +135,7 @@ fn run(vm: &mut Interpreter, text: &str, name: &str, values: &Value, html: bool,
     Ok(Value::string(&written))
 }
 
-fn escape_html(text: &str, out: &mut String) {
+pub(crate) fn escape_html(text: &str, out: &mut String) {
     for c in text.chars() {
         match c {
             '&' => out.push_str("&amp;"),

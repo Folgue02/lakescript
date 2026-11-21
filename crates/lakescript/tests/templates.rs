@@ -80,14 +80,18 @@ fn html_escaping() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("page.html"), "<h1>{{ $title }}</h1>\n").unwrap();
     std::fs::write(dir.join("notes.txt"), "<{{ $title }}>\n").unwrap();
+    std::fs::write(dir.join("page.html.elks"), "<p>{{ $title }}</p>\n").unwrap();
+    std::fs::write(dir.join("notes.txt.elks"), "[{{ $title }}]\n").unwrap();
     let out = run(&format!(
         "use std/template;\n\
          out(template::renderFile('{d}/page.html', {{'title' => 'A & B'}}));\n\
          out(template::renderFile('{d}/notes.txt', {{'title' => 'A & B'}}));\n\
-         out(template::renderFile('{d}/page.html', {{'title' => 'A & B'}}, html: false));\n",
+         out(template::renderFile('{d}/page.html', {{'title' => 'A & B'}}, html: false));\n\
+         out(template::renderFile('{d}/page.html.elks', {{'title' => 'A & B'}}));\n\
+         out(template::renderFile('{d}/notes.txt.elks', {{'title' => 'A & B'}}));\n",
         d = dir.display()
     ));
-    assert_eq!(out, "<h1>A &amp; B</h1>\n<A & B>\n<h1>A & B</h1>\n");
+    assert_eq!(out, "<h1>A &amp; B</h1>\n<A & B>\n<h1>A & B</h1>\n<p>A &amp; B</p>\n[A & B]\n");
     let e = error(&format!("use std/template;\ntemplate::renderFile('{}/page.html', {{}});", dir.display()));
     assert!(e.starts_with(&format!("{}/page.html:1:8: error: `$title` isn't declared", dir.display())), "{e}");
     let _ = std::fs::remove_dir_all(&dir);

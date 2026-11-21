@@ -1,0 +1,47 @@
+#!/usr/bin/lks
+// Scraping HTML with `std/html`: a page, CSS selectors, text and attributes.
+// Pages usually come from `std/http` *(i.e. `http::get($url).body`)*; this
+// one is written here, so the example works without the internet.
+
+use std/html;
+
+const $page = html::parse("""
+    <html>
+    <head><title>The  Lake Shop</title></head>
+    <body>
+      <h1>Today's <em>specials</em></h1>
+      <table id="prices">
+        <tr><th>Item</th><th>Price</th></tr>
+        <tr class="item"><td><a href="/tea">Green tea</a></td><td>3.50</td></tr>
+        <tr class="item"><td><a href="/cake">Cake &amp; cream</a></td><td>4.20</td></tr>
+        <tr class="item sold-out"><td><a href="/pie">Apple pie</a></td><td>5.00</td></tr>
+      </table>
+      <p>Open <b>every</b> day
+      <script type="application/ld+json">{"name": "The Lake Shop", "rating": 4.8}</script>
+    </body>
+    </html>
+    """);
+
+// The title, and any text as a browser shows it
+outln($page.title());
+outln($page.first('h1')?.text());
+
+// Rows with CSS selectors, then their parts
+for ($row in $page.select('#prices tr.item')) {
+    const $cells = $row.select('td');
+    const $link = $row.first('a');
+    const $sold = $row.attr('class')?.contains('sold-out') ?? false;
+    outln(f"{$cells[0]?.text()}: {$cells[1]?.text()}{$sold ? ' (sold out)' : ''} -> {$link?.attr('href')}");
+}
+
+// Any selector browsers know
+const $available = $page.select('tr.item:not(.sold-out) a').map(($a) -> $a.text());
+outln(f"Available: {$available.join(', ')}");
+
+// The text of a script can still be read, i.e. data as JSON
+outln($page.first('script[type="application/ld+json"]')?.text());
+
+// HTML that's broken is repaired: the <p> above was never closed. Its text
+// leaves the script inside it out
+outln($page.first('p')?.text());
+outln(html::escape('<b>Tom & Jerry</b>'));

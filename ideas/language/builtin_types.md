@@ -141,6 +141,8 @@ let $anything = null;           // OK, `any` can hold null
 
 ### Symbols
 
+*To be removed: enums and strings replace them (see Backlog in [roadmap.md](../roadmap.md)).*
+
 Type: `symbol`
 
 - Written with `:` followed by a name *(i.e. `:oranges`, `:not_found`)*.

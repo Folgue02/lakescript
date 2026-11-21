@@ -31,6 +31,10 @@ pub enum Value {
     Class(Rc<Class>),
     /// An object of a class.
     Object(Rc<Object>),
+    /// Rust data that a module of the standard library keeps in a value,
+    /// which scripts never see *(i.e. an element of a page, for std/html)*.
+    /// It's freed when nothing uses it anymore.
+    Handle(Rc<dyn std::any::Any>),
 }
 
 /// A class while the script runs *(see `ideas/language/classes.md`)*.
@@ -334,6 +338,7 @@ impl Value {
             Value::Command(_) => "command",
             Value::Class(_) => "class",
             Value::Object(_) => "object",
+            Value::Handle(_) => "native",
         }
     }
 
@@ -382,6 +387,7 @@ impl Value {
             (Value::Command(a), Value::Command(b)) => Rc::ptr_eq(a, b),
             (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
             (Value::Object(a), Value::Object(b)) => Rc::ptr_eq(a, b),
+            (Value::Handle(a), Value::Handle(b)) => std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b)),
             _ => false,
         }
     }
@@ -507,10 +513,14 @@ impl fmt::Display for Value {
             },
             Value::Regex(r) => write!(f, "%r\"{}\"{}", r.pattern.replace('"', "\\\""), r.flags),
             Value::Class(c) => write!(f, "<{} {}>", if c.interface { "interface" } else { "class" }, c.name),
+            Value::Handle(_) => write!(f, "<native>"),
             Value::Object(o) if o.enum_name.is_some() => write!(f, "{}::{}", o.class.name, o.enum_name.as_ref().unwrap()),
             Value::Object(o) => {
                 write!(f, "{}(", o.class.name)?;
-                for (i, (slot, value)) in o.class.fields.iter().zip(o.fields.borrow().iter()).enumerate() {
+                // Rust data of the standard library isn't shown *(i.e. the page of an `html::Element`)*
+                let fields = o.fields.borrow();
+                let shown = o.class.fields.iter().zip(fields.iter()).filter(|(_, v)| !matches!(v, Value::Handle(_)));
+                for (i, (slot, value)) in shown.enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
                     }

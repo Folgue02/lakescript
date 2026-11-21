@@ -29,6 +29,8 @@ What the standard library is getting next *(see [README.md](README.md))*. Termin
   $backup.add('photos/', as: 'pictures/');
   $backup.close();
   ```
+- **`std/html`**, built *(see [html.md](html.md))*: `html::parse($text)` gives a `Document`, whose `select($css)` and `first($css)` give `Element`s, with `text()`, `attr()` and the like. On `scraper`, not a selector engine of our own.
+- **`std/terminal`** *(see [terminal.md](terminal.md))*: prompts *(`ask`, `password`, `confirm`, `choose`)*, styles, the size of the terminal, single keys and progress, and ready-made interactive pieces like `filter` *(like `fzf`)*, a pager and `edit` *(`$EDITOR`)*. Styles are one function with the values of an enum, `terminal::style($text, Style::RED, Style::BOLD)`. Prompts write to stderr.
 - **Testing**, built: tests are functions named `test...`, checked with `assert`, a statement of the language that shows both sides of a comparison that failed. `std/test` has only what `assert` can't do *(i.e. `test::throws($fn)`)*. Tests see the `pub` items of the project's modules. `ferry test` runs the files in `tests/`, and `lks --test` the tests of a script *(see [testing.md](../tooling/testing.md))*.
 - **Crates instead of writing our own, when their licenses allow it.** The project is Apache-2.0, so MIT, Apache-2.0, BSD, ISC, Zlib and Unlicense are fine. MPL-2.0 is fine too, as long as its files aren't changed: it's copyleft only for its own files. Checked so far:
   - `ureq` (HTTP) and everything it uses are MIT, Apache-2.0, ISC, BSD or Zlib. Its certificates come from `webpki-roots`, under CDLA-Permissive-2.0, a permissive license for data.
@@ -37,7 +39,11 @@ What the standard library is getting next *(see [README.md](README.md))*. Termin
 
 ## Being discussed
 
-- **`std/html`**, for scraping: a page is parsed with `html5ever`, the parser of Servo, which repairs broken HTML the way browsers do. Its elements are found with CSS selectors *(i.e. `html::parse($page).select('a.title')`)*, then their text and attributes are read. With the `scraper` crate rather than a selector engine of our own.
+Nothing right now.
+
+## Backlog
+
+- **`std/tui`**, for full TUIs: a screen the script draws and an event loop. The idea so far is the Elm architecture: a state, a function that gives the new state for each event, and one that gives what the screen shows, with the library running the loop and always putting the terminal back. Drawn with `ratatui` (MIT) on `crossterm`. It's an experiment, after `std/terminal`.
 
 ## Left out for now
 

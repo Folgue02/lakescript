@@ -3,6 +3,7 @@
 mod csv_format;
 mod env;
 mod fs;
+mod html;
 mod http;
 mod io;
 mod json;
@@ -24,6 +25,7 @@ pub const MODULES: &[&str] = &[
     "std/format/csv",
     "std/format/json",
     "std/fs",
+    "std/html",
     "std/http",
     "std/io",
     "std/path",
@@ -34,10 +36,10 @@ pub const MODULES: &[&str] = &[
 ];
 
 /// The Rust parts of modules written in Lakescript, which only those modules use.
-const NATIVE: &[&str] = &["std/http/native"];
+const NATIVE: &[&str] = &["std/html/native", "std/http/native"];
 
 /// Modules written in Lakescript, which come with the interpreter.
-const SOURCES: &[(&str, &str)] = &[("std/http", include_str!("http.lks"))];
+const SOURCES: &[(&str, &str)] = &[("std/html", include_str!("html.lks")), ("std/http", include_str!("http.lks"))];
 
 /// Where the files of the modules written in Lakescript seem to be, in errors.
 pub const EMBEDDED: &str = "<std>/";
@@ -107,6 +109,7 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/io" => io::register(&mut exports),
         "std/format/csv" => csv_format::register(&mut exports),
         "std/format/json" => json::register(&mut exports),
+        "std/html/native" => html::register(&mut exports),
         "std/http/native" => http::register(&mut exports),
         "std/path" => path::register(&mut exports),
         "std/process" => process::register(&mut exports),
