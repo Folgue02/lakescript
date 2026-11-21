@@ -1,4 +1,6 @@
-// ferry run bytes '1.5 KB' '2 MB'
+//! Reads sizes written as text and writes them in bytes.
+//!
+//! `ferry run bytes '1.5 KB' '2 MB'`
 use std/process;
 use folgue02/sizes/units;
 

@@ -13,6 +13,7 @@ mod cli;
 mod command;
 mod compiler;
 pub mod diagnostic;
+pub mod docs;
 mod engine;
 mod exceptions;
 mod host;

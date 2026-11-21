@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 use lakescript::terminal::{Paint, When};
 
+pub mod doc;
 pub mod home;
 pub mod project;
 pub mod resolve;

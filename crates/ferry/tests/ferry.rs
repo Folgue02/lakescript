@@ -323,6 +323,57 @@ fn test_runs_the_tests_folder() {
 }
 
 #[test]
+fn doc_makes_the_pages_of_a_project() {
+    let w = World::new();
+    w.publish("acme", "lib", "1.0.0", "", &[("src/acme/lib/m.lks", "//! What the library does.\n\n/// Says hi.\npub string hi() = 'hi';\n")]);
+    let dir = w.project(
+        "app",
+        &app("\"local:acme/lib\" = \"1.0.0\"\n"),
+        &[
+            ("src/me/app/module.md", "The app, in **Markdown**.\n"),
+            ("src/me/app/math.lks", "//! Numbers.\n\n/// Twice a number.\n///\n/// $n: the number\n/// returns: `$n * 2`\n/// throws ValueError: never\npub number twice(number $n) = $n * 2;\n\n/// A point.\npub class Point {\n    /// Across.\n    pub number @x;\n}\n\nnumber hidden() = 1;\n"),
+            ("src/me/app/api/module.md", "The endpoints.\n"),
+            ("src/me/app/api/users.lks", "//! Users.\n"),
+            ("bin/app.lks", "//! Runs the app.\n/// Greets people\ncommand Greet {\n    /// Who to greet\n    string @who;\n    /// Louder\n    flag(l) bool @loud;\n}\nconst $args = Greet::parse();\noutln($args.who);\n"),
+            ("bin/plain.lks", "outln(1);\n"),
+        ],
+    );
+    let said = stderr(&w.ferry(&dir, &["--color", "never", "doc"]));
+    assert!(said.contains("Documented local:acme/lib 1.0.0"), "{said}");
+    assert!(said.contains("Documented me/app in .ferry/doc/index.html"), "{said}");
+    let doc = dir.join(".ferry/doc");
+    let read = |name: &str| std::fs::read_to_string(doc.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    let index = read("index.html");
+    assert!(index.contains("The app, in <strong>Markdown</strong>."), "{index}");
+    assert!(index.contains("href=\"math.html\"") && index.contains("href=\"folder.api.html\"") && index.contains("href=\"command.app.html\""));
+    assert!(index.contains("local:acme/lib") && index.contains("file://"), "the dependency links to its docs");
+    let math = read("math.html");
+    assert!(math.contains("<span class=\"n\">twice</span>") && math.contains("the number") && math.contains("ValueError"));
+    assert!(math.contains("href=\"math.Point.html\""));
+    assert!(!math.contains(">hidden<"), "only `pub` items");
+    assert!(read("math.Point.html").contains("Across."));
+    assert!(read("folder.api.html").contains("The endpoints."));
+    let command = read("command.app.html");
+    assert!(command.contains("app [options] &lt;who&gt;") && command.contains("-l, --loud") && command.contains("Who to greet."), "{command}");
+    assert!(read("command.plain.html").contains("ferry run plain [arguments...]"));
+    assert!(read("search.js").contains("\"p\":\"math::twice\""));
+
+    // One thing in the terminal
+    let out = w.ok(&dir, &["doc", "math::twice"]);
+    assert!(out.starts_with("pub number twice(number $n)") && out.contains("math.lks:8"), "{out}");
+    assert!(out.contains("  $n       the number\n  returns  `$n * 2`\n  throws   ValueError never\n"), "{out}");
+    assert!(w.ok(&dir, &["doc", "Point.x"]).contains("Across."));
+    assert!(w.ok(&dir, &["doc", "math"]).starts_with("module me/app/math"));
+    assert!(w.fails(&dir, &["doc", "nothing"]).contains("there's nothing named `nothing`"));
+
+    // A package's docs, and a project with errors gets none
+    let out = w.ok(&w.dir, &["doc", "local:acme/lib@1.0.0"]);
+    assert!(out.trim().ends_with("doc/local/acme/lib/1.0.0/index.html"), "{out}");
+    write(&dir.join("src/me/app/math.lks"), "pub number twice(number $n) = 'no';\n");
+    assert!(w.fails(&dir, &["doc"]).contains("has 1 error, so its docs weren't made"));
+}
+
+#[test]
 fn colors_only_when_asked() {
     let w = World::new();
     let dir = w.project("app", &app(""), &[("bin/app.lks", "outln(1);")]);

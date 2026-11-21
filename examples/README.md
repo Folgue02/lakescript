@@ -55,7 +55,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 
 | Example | Shows | Run it with |
 |---------|-------|-------------|
-| [sizes/](sizes) | A `ferry` project: `ferry.toml`, a module in `src/folgue02/sizes/` shared by two commands in `bin/` | `ferry run human 1536` or `ferry run bytes '1.5 KB'`, from `examples/sizes` |
+| [sizes/](sizes) | A `ferry` project: `ferry.toml`, a module in `src/folgue02/sizes/` shared by two commands in `bin/`, its tests in `tests/`, and its docs: `//!` and `///` comments and a `module.md` | `ferry run human 1536`, `ferry test`, or `ferry doc --open`, from `examples/sizes` |
 
 The tests of `ferry` run it (`crates/ferry/tests/ferry.rs`).
 

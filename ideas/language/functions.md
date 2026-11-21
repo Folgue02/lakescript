@@ -173,7 +173,7 @@ A function or a method describes its parameters, what it returns and what it thr
 pub string greet(string $name, number $times = 1) = ...;
 ```
 
-- `$name:` describes a parameter, `returns:` what it gives back, and `throws ValueError:` when it throws that exception, one line for each exception. A description can go on in the next lines, indented.
+- `$name:` describes a parameter, `returns:` what it gives back, and `throws ValueError:` when it throws that exception, one line for each exception. A description goes on in the next lines, until an empty line or the next of these lines *(the lexer trims the lines of a `///` comment, so their indentation can't tell)*.
 - It's like Javadoc's `@param`, `@return` and `@throws`, but written as the language writes things: `@` is a field in Lakescript *(i.e. `@x`)*, so `@name` in a comment would look like one.
 - *Decided, not built yet.* With these lines:
     - Hover on a parameter shows its line, also on a named argument of a call *(i.e. `times:` in `greet('Ana', times: 2)`)*.

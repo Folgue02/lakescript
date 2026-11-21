@@ -1,8 +1,16 @@
-// Sizes in bytes, shared by both commands in bin/.
+//! Sizes in bytes, read and written the way people do *(i.e. `1.5 KB`)*.
+//!
+//! Both commands of the project use it: `human` turns bytes into text, and
+//! `bytes` reads text back.
 
+/// The units, from the smallest. Each one is 1024 of the one before.
 pub const list<string> $units = ['B', 'KB', 'MB', 'GB', 'TB'];
 
-// 1536 -> "1.5 KB"
+/// Writes a size with the largest unit that keeps it at 1 or more, rounded to
+/// one decimal *(i.e. `1536` is `1.5 KB`)*.
+///
+/// $bytes: the size, in bytes
+/// returns: the size as text, like `1 MB`
 pub string human(number $bytes) {
     let $size = $bytes;
     let $unit = 0;
@@ -13,7 +21,12 @@ pub string human(number $bytes) {
     return f"{$size.round(1)} {$units[$unit]}";
 }
 
-// "1.5 KB" -> 1536
+/// Reads a size written as text, in any case, with or without a unit
+/// *(i.e. `1.5 KB`, `2 mb`, `100`)*.
+///
+/// $text: a number, then one of `$units`. Without a unit, it's bytes
+/// returns: the size in bytes, rounded
+/// throws ValueError: when the unit isn't one of `$units`
 pub number bytes(string $text) {
     const $parts = $text.trim().upper().split(' ');
     const $unit = $parts[1] ?? 'B';

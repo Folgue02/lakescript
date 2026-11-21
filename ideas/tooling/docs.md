@@ -1,6 +1,6 @@
 # Documentation pages
 
-*Decided, not built yet (phase 9, see [roadmap.md](../roadmap.md)).*
+*Built, a first version (phase 9, see [roadmap.md](../roadmap.md)). What's missing is at the end.*
 
 How the pages that `ferry doc` makes from a project, and the page of the standard library, look. They're made from the `//!` and `///` comments of the modules and from the `module.md` of each folder *(see Doc comments in [functions.md](../language/functions.md) and Documenting folders in [modules.md](../language/modules.md))*.
 
@@ -91,6 +91,22 @@ Reads a size written as text, in any case, with or without a unit
   throws   ValueError when the unit isn't one of $units
 ```
 
+## How it's made
+
+- **Reading** is in the library, `lakescript::docs`: `module_doc` parses a module *(never runs it)* and gives its `//!` text and its `pub` items, with the `///` comment of each one split by `parse_doc` into its text and its `$name:`, `returns:` and `throws` lines. The comments are found by place in the tokens, like hover does. `command_doc` gives the command a script parses, from the same `command_info` of the compiler that `--help` uses, with the choices of an enum read from its declaration.
+- **The pages** are made by `ferry/src/doc.rs`: one for the project *(`index.html`)*, one for each module *(i.e. `api.users.html`)*, each class, interface and enum *(i.e. `api.users.User.html`)*, each folder with a `module.md` *(`folder.api.html`)* and each command *(`command.todo.html`)*, plus `style.css` and `search.js`, with the index of search inside.
+- Markdown is read with `pulldown-cmark` (MIT). HTML written in a comment is shown as text, so the docs of a package can't add scripts to the pages.
+- A method of an `implement` block is shown on its class's page under "From `IShape`", with the comment of the interface's method when it has none of its own.
+- `ferry new` writes a `.gitignore` with `.ferry/`.
+
+## Not built yet
+
+- Search only finds the project's own items, not the ones of its dependencies and the standard library.
+- The types of a dependency or of the standard library in a signature aren't links yet: only the project's own types are.
+- `ferry doc <name>` only finds the project's own items, not the standard library's *(i.e. `http::get`)*.
+- The filter above the values of a long enum, and "Gives `+`" for the interfaces of operators.
+
 ## Being discussed
+
 - Searching by type *(i.e. the functions that take a `string` and give a `number`, like Haskell's Hoogle)*, later.
 - Examples in doc comments.

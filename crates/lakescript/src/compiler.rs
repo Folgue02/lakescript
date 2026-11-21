@@ -1316,51 +1316,9 @@ impl<'a> Compiler<'a> {
     /// What `Git::parse()` needs to know of a command's fields. The enums
     /// their types name are pushed, for `Op::Class`.
     fn command_info(&mut self, decl: &ClassDecl) -> CommandInfo {
-        let mut info = CommandInfo {
-            doc: decl.doc.clone(),
-            args: Vec::new(),
-            subcommands: decl.subcommands.iter().map(|s| (Rc::from(s.name.rsplit("::").next().unwrap()), s.doc.clone())).collect(),
-            optional_subcommand: decl.optional_subcommand,
-            enums: 0,
-        };
-        for member in &decl.members {
-            let MemberKind::Field { ty, name, value, flag, variadic, .. } = &member.kind else { continue };
-            let (inner, nullable) = match &ty.kind {
-                TypeKind::Nullable(inner) => (&**inner, true),
-                _ => (ty, false),
-            };
-            let kind = match &inner.kind {
-                TypeKind::Named { name, .. } if name == "string" => ArgType::Str,
-                TypeKind::Named { name, .. } if name == "number" => ArgType::Number,
-                TypeKind::Named { name, .. } if name == "bool" => ArgType::Bool,
-                _ => {
-                    // An enum: its values are the choices
-                    self.load_type(inner);
-                    info.enums += 1;
-                    ArgType::Enum(info.enums - 1)
-                }
-            };
-            let default = value.as_ref().map(|v| match &v.kind {
-                ExprKind::Str(s) => format!("'{s}'"),
-                ExprKind::Int(n) => n.to_string(),
-                ExprKind::Float(n) => n.to_string(),
-                ExprKind::Bool(b) => b.to_string(),
-                ExprKind::Static { name, .. } => name.to_ascii_lowercase().replace('_', "-"),
-                _ => "...".to_string(),
-            });
-            info.args.push(ArgInfo {
-                name: Rc::from(name.as_str()),
-                doc: member.doc.clone(),
-                // `bool` fields are always flags
-                flag: flag.is_some() || kind == ArgType::Bool,
-                short: flag.as_ref().and_then(|f| f.short),
-                count: flag.as_ref().is_some_and(|f| f.count),
-                variadic: *variadic,
-                kind,
-                nullable,
-                has_value: value.is_some(),
-                default,
-            });
+        let (info, enums) = command_info(decl);
+        for ty in enums {
+            self.load_type(ty);
         }
         info
     }
@@ -1910,6 +1868,60 @@ fn dispatcher(name: &str, versions: &[(Vec<Option<TypeExpr>>, String)], class: &
     let error = at(ExprKind::Call { callee: Box::new(at(ExprKind::Function("TypeError".into()))), args: vec![Arg { name: None, value: message, spread: false }] });
     body.push(Stmt { kind: StmtKind::Throw(error), span });
     FunctionDecl { name: name.to_string(), generics: Vec::new(), params, ret: None, body: FunctionBody::Block(body) }
+}
+
+/// What a command's fields are as arguments, for `Git::parse()`, its
+/// `--help` and its page of documentation *(see `ideas/tooling/docs.md`)*,
+/// and the types of the enums they use, in the order of `ArgType::Enum`.
+pub(crate) fn command_info(decl: &ClassDecl) -> (CommandInfo, Vec<&TypeExpr>) {
+    let mut info = CommandInfo {
+        doc: decl.doc.clone(),
+        args: Vec::new(),
+        subcommands: decl.subcommands.iter().map(|s| (Rc::from(s.name.rsplit("::").next().unwrap()), s.doc.clone())).collect(),
+        optional_subcommand: decl.optional_subcommand,
+        enums: 0,
+    };
+    let mut enums = Vec::new();
+    for member in &decl.members {
+        let MemberKind::Field { ty, name, value, flag, variadic, .. } = &member.kind else { continue };
+        let (inner, nullable) = match &ty.kind {
+            TypeKind::Nullable(inner) => (&**inner, true),
+            _ => (ty, false),
+        };
+        let kind = match &inner.kind {
+            TypeKind::Named { name, .. } if name == "string" => ArgType::Str,
+            TypeKind::Named { name, .. } if name == "number" => ArgType::Number,
+            TypeKind::Named { name, .. } if name == "bool" => ArgType::Bool,
+            _ => {
+                // An enum: its values are the choices
+                enums.push(inner);
+                info.enums += 1;
+                ArgType::Enum(info.enums - 1)
+            }
+        };
+        let default = value.as_ref().map(|v| match &v.kind {
+            ExprKind::Str(s) => format!("'{s}'"),
+            ExprKind::Int(n) => n.to_string(),
+            ExprKind::Float(n) => n.to_string(),
+            ExprKind::Bool(b) => b.to_string(),
+            ExprKind::Static { name, .. } => name.to_ascii_lowercase().replace('_', "-"),
+            _ => "...".to_string(),
+        });
+        info.args.push(ArgInfo {
+            name: Rc::from(name.as_str()),
+            doc: member.doc.clone(),
+            // `bool` fields are always flags
+            flag: flag.is_some() || kind == ArgType::Bool,
+            short: flag.as_ref().and_then(|f| f.short),
+            count: flag.as_ref().is_some_and(|f| f.count),
+            variadic: *variadic,
+            kind,
+            nullable,
+            has_value: value.is_some(),
+            default,
+        });
+    }
+    (info, enums)
 }
 
 /// `assert $cond;` as the code that does it: `if (!$cond) __assertFailed('...');`.

@@ -262,7 +262,7 @@ fn shown(arg: &ArgInfo) -> String {
     if arg.flag { format!("`--{}`", kebab(&arg.name)) } else { format!("`<{}>`", kebab(&arg.name)) }
 }
 
-fn usage(info: &CommandInfo, prog: &str) -> String {
+pub(crate) fn usage(info: &CommandInfo, prog: &str) -> String {
     let mut line = format!("Usage: {prog}");
     if info.args.iter().any(|a| a.flag) {
         line.push_str(" [options]");

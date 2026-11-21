@@ -30,6 +30,13 @@ Commands:
                               running it
   test [filter]               Run the tests in tests/: their functions named test...
                               With a filter, only the ones whose name has it
+  doc [--open]                Make the docs of the project in .ferry/doc/, and
+                              open them with --open
+  doc <repository:author/name@version> [--open]
+                              Make the docs of a package
+  doc std [--open]            Show where the page of the standard library is
+  doc <name>                  Write the docs of one thing in the terminal,
+                              i.e. ferry doc units::bytes
   add <repository:author/name@version>
                               Add a dependency, i.e. ferry add github:acme/http@1.4.2
   install [repository:author/name@version]
@@ -96,6 +103,7 @@ fn start() -> ExitCode {
             [] => check(),
             _ => return usage_error("`ferry check` takes no arguments"),
         },
+        "doc" => doc(rest),
         "test" => match rest {
             [] => test(None),
             [filter] => test(Some(filter)),
@@ -152,6 +160,8 @@ fn new(spec: &str, library: bool) -> Result<ExitCode, Fail> {
         format!("[project]\nauthor = \"{author}\"\nname = \"{name}\"\nversion = \"0.1.0\"\nkind = \"{kind}\"\n\n[dependencies]\n"),
     )?;
     write(src.join("greeting.lks"), "pub string greet(string $who) = f\"Hello, {$who}!\";\n".to_string())?;
+    // What ferry makes inside the project, like the docs
+    write(dir.join(".gitignore"), ".ferry/\n".to_string())?;
     if !library {
         write(
             dir.join("bin").join(format!("{name}.lks")),
@@ -250,6 +260,129 @@ fn check_project(project: &Project, dependencies: &[Dependency]) -> Result<usize
         }
     }
     Ok(shown.len())
+}
+
+/// `ferry doc`: the docs of the project, of a package, of the standard
+/// library, or of one thing in the terminal *(see ideas/tooling/docs.md)*.
+fn doc(args: &[String]) -> Result<ExitCode, Fail> {
+    let open = args.iter().any(|a| a == "--open");
+    let targets: Vec<&str> = args.iter().map(String::as_str).filter(|a| *a != "--open").collect();
+    match targets.as_slice() {
+        [] => doc_project(open),
+        ["std"] => doc_std(open),
+        [spec] if spec.contains(":") && !spec.contains("::") => doc_package(spec, open),
+        [name] if !name.starts_with('-') => doc_name(name),
+        _ => Ok(usage_error("`ferry doc` takes a package, `std` or a name, and maybe `--open`")),
+    }
+}
+
+fn doc_project(open: bool) -> Result<ExitCode, Fail> {
+    let (home, project, dependencies) = open_project()?;
+    let errors = check_project(&project, &dependencies)?;
+    if errors > 0 {
+        let what = if errors == 1 { "error" } else { "errors" };
+        return Err(format!("{} has {errors} {what}, so its docs weren't made", project.id).into());
+    }
+    let mut site = ferry::doc::read(&project)?;
+    for dependency in &dependencies {
+        let index = package_docs(&home, &dependency.project, &dependency.package, &dependency.version)?;
+        site.dependencies.push((dependency.package.to_string(), dependency.version.clone(), Some(file_url(&index))));
+    }
+    let out = project.dir.join(".ferry").join("doc");
+    let index = ferry::doc::write(&site, &out)?;
+    status("Documented", &format!("{} in {}", project.id, relative_to_here(&index)));
+    if open {
+        open_page(&index);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The docs of a package in `~/.ferry/doc/`, made once per version.
+fn package_docs(home: &Home, project: &Project, package: &project::Package, version: &str) -> Result<PathBuf, Fail> {
+    let out = home.dir.join("doc").join(&package.repository).join(&package.author).join(&package.name).join(version);
+    let index = out.join("index.html");
+    if !index.is_file() {
+        let site = ferry::doc::read(project)?;
+        ferry::doc::write(&site, &out)?;
+        status("Documented", &format!("{package} {version}"));
+    }
+    Ok(index)
+}
+
+fn doc_package(spec: &str, open: bool) -> Result<ExitCode, Fail> {
+    let (package, version) = project::parse_spec(spec)?;
+    let home = Home::open()?;
+    let (dir, _) = home.fetch(&package, &version)?;
+    let project = Project::read(&dir)?;
+    if project.id != package.id() {
+        return Err(format!("{package} {version} says it's {}, not {}", project.id, package.id()).into());
+    }
+    let index = package_docs(&home, &project, &package, &version)?;
+    if open {
+        open_page(&index);
+    } else {
+        println!("{}", index.display());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The page of the standard library: next to ferry in a release
+/// *(`doc/stdlib.html`)*, or the one `tools/docs/stdlib.py` makes in `target/docs/`.
+fn doc_std(open: bool) -> Result<ExitCode, Fail> {
+    let exe = std::env::current_exe().map_err(|e| format!("can't find where ferry is: {e}"))?;
+    let folder = exe.parent().unwrap_or(Path::new("."));
+    let found = [folder.join("doc").join("stdlib.html"), folder.join("..").join("docs").join("stdlib.html")].into_iter().find(|p| p.is_file());
+    let Some(page) = found else {
+        return Err("this ferry has no page of the standard library: it comes with each release, in doc/stdlib.html next to ferry".into());
+    };
+    let page = page.canonicalize().unwrap_or(page);
+    if open {
+        open_page(&page);
+    } else {
+        println!("{}", page.display());
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn doc_name(name: &str) -> Result<ExitCode, Fail> {
+    let (_, project, _) = open_project()?;
+    let site = ferry::doc::read(&project)?;
+    match ferry::doc::describe(&site, name) {
+        Some(text) => {
+            print!("{text}");
+            Ok(ExitCode::SUCCESS)
+        }
+        None => Err(format!("there's nothing named `{name}` in the docs of {}", project.id).into()),
+    }
+}
+
+fn file_url(path: &Path) -> String {
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    format!("file://{}", path.display().to_string().replace('\\', "/"))
+}
+
+fn relative_to_here(path: &Path) -> String {
+    let here = std::env::current_dir().ok().and_then(|d| d.canonicalize().ok());
+    let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    match here.as_deref().and_then(|h| real.strip_prefix(h).ok()) {
+        Some(short) => short.display().to_string(),
+        None => real.display().to_string(),
+    }
+}
+
+/// Opens a page in the browser. If it can't, says where the page is.
+fn open_page(page: &Path) {
+    let page = page.display().to_string();
+    let opened = if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg(&page).status()
+    } else if cfg!(windows) {
+        std::process::Command::new("cmd").args(["/C", "start", "", &page]).status()
+    } else {
+        std::process::Command::new("xdg-open").arg(&page).status()
+    };
+    if !opened.is_ok_and(|s| s.success()) {
+        note(&format!("couldn't open a browser: the page is {page}"));
+    }
 }
 
 /// `ferry test`: every file in `tests/`, and its tests whose name has `filter`.
