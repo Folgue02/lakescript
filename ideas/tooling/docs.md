@@ -77,7 +77,7 @@ ferry doc units::bytes                     # one thing, in the terminal
     - They have the `pub` items of its modules, the `module.md` of each folder, the `//!` of each module and the commands of `bin/`.
     - The project is type checked first, like `ferry check`: a project with errors gets no docs, since their signatures could be wrong.
 - **The docs of a package** are made from its copy in `~/.ferry/repository/`, once per version, in `~/.ferry/doc/`. A project's pages link to the pages of its dependencies made this way, so everything works without the internet.
-- **The standard library** is the page that comes with each release *(`doc/stdlib.html`, see [roadmap.md](../roadmap.md))*. `ferry doc std --open` opens it, and the links of a project to its types *(i.e. `ValueError`, `http::Response`)* point there.
+- **The standard library** is the page `tools/docs/stdlib.py` makes from `ideas/stdlib`, which ferry has inside *(a copy committed in `crates/ferry/src/stdlib.html`)*, so it works however ferry was installed, also with `cargo install`. `ferry doc std` writes it once per version to `~/.ferry/doc/std/<version>/` and `--open` opens it. Releases also ship it as `doc/stdlib.html`.
 - **In the terminal**, like `go doc` or Ruby's `ri`: `ferry doc` with the name of a function, a class, a method or a module *(i.e. `units::bytes`, `units`, `http::get`)* writes its signature, where it is, its comment, and its parameters, what it returns and what it throws. From the same data as the pages:
 
 ```

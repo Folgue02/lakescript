@@ -6,7 +6,7 @@
 python3 tools/docs/stdlib.py
 ```
 
-It writes `target/docs/stdlib.html`, or the path given as an argument. It only needs Python 3, with no packages. Each release ships that page, inside every archive as `doc/stdlib.html` and on its own *(see `tools/release/package.sh`)*.
+It writes `crates/ferry/src/stdlib.html`, or the path given as an argument. That copy is committed, and ferry has it inside, so `ferry doc std` works however ferry was installed *(i.e. with `cargo install`)*. Run the script after changing the notes of the standard library: a test of ferry says when the copy is out of date. It only needs Python 3, with no packages. Each release ships that page, inside every archive as `doc/stdlib.html` and on its own *(see `tools/release/package.sh`)*.
 
 ## What it reads
 

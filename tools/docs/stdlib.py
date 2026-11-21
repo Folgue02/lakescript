@@ -4,8 +4,12 @@ ideas/stdlib: the README, the types in types/*.md and the modules in *.md
 and format/*.md. A section of a module with a Field table is a class of it
 (i.e. `Response` in http.md).
 
-    python3 tools/docs/stdlib.py                 # writes target/docs/stdlib.html
+    python3 tools/docs/stdlib.py                 # writes crates/ferry/src/stdlib.html
     python3 tools/docs/stdlib.py out.html        # writes out.html
+
+The page is committed in crates/ferry/src/, and ferry has it inside, for
+`ferry doc std`. Run it after changing the notes of the standard library: a
+test of ferry says when the page is out of date.
 """
 import html, json, re, sys
 from pathlib import Path
@@ -13,7 +17,7 @@ from pathlib import Path
 here = Path(__file__).resolve().parent
 repo = here.parent.parent
 root = repo / 'ideas' / 'stdlib'
-out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'target' / 'docs' / 'stdlib.html'
+out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'crates' / 'ferry' / 'src' / 'stdlib.html'
 TYPES = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'symbol', 'regex', 'command']
 # The file of each module, and the name scripts reach it by
 MODULES = [('general', 'general'), ('fs', 'fs'), ('path', 'path'), ('env', 'env'), ('io', 'io'),

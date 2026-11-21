@@ -11,6 +11,10 @@ use lakescript::docs::{self, ArgDoc, CommandDoc, Doc, Item, ItemKind, ModuleDoc}
 use crate::Fail;
 use crate::project::Project;
 
+/// The page of the standard library, made by `tools/docs/stdlib.py` from
+/// `ideas/stdlib`, for `ferry doc std`.
+pub const STDLIB_PAGE: &str = include_str!("stdlib.html");
+
 /// What the pages of a project are made from.
 pub struct Site {
     pub id: String,

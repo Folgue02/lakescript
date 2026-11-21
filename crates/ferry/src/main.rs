@@ -34,7 +34,7 @@ Commands:
                               open them with --open
   doc <repository:author/name@version> [--open]
                               Make the docs of a package
-  doc std [--open]            Show where the page of the standard library is
+  doc std [--open]            The page of the standard library
   doc <name>                  Write the docs of one thing in the terminal,
                               i.e. ferry doc units::bytes
   add <repository:author/name@version>
@@ -326,16 +326,16 @@ fn doc_package(spec: &str, open: bool) -> Result<ExitCode, Fail> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// The page of the standard library: next to ferry in a release
-/// *(`doc/stdlib.html`)*, or the one `tools/docs/stdlib.py` makes in `target/docs/`.
+/// The page of the standard library, which ferry has inside: written once
+/// per version to `~/.ferry/doc/std/<version>/`, so it can be opened.
 fn doc_std(open: bool) -> Result<ExitCode, Fail> {
-    let exe = std::env::current_exe().map_err(|e| format!("can't find where ferry is: {e}"))?;
-    let folder = exe.parent().unwrap_or(Path::new("."));
-    let found = [folder.join("doc").join("stdlib.html"), folder.join("..").join("docs").join("stdlib.html")].into_iter().find(|p| p.is_file());
-    let Some(page) = found else {
-        return Err("this ferry has no page of the standard library: it comes with each release, in doc/stdlib.html next to ferry".into());
-    };
-    let page = page.canonicalize().unwrap_or(page);
+    let home = Home::open()?;
+    let dir = home.dir.join("doc").join("std").join(env!("CARGO_PKG_VERSION"));
+    let page = dir.join("index.html");
+    if std::fs::read_to_string(&page).ok().as_deref() != Some(ferry::doc::STDLIB_PAGE) {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
+        std::fs::write(&page, ferry::doc::STDLIB_PAGE).map_err(|e| format!("can't write {}: {e}", page.display()))?;
+    }
     if open {
         open_page(&page);
     } else {

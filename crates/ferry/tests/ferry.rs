@@ -374,6 +374,30 @@ fn doc_makes_the_pages_of_a_project() {
 }
 
 #[test]
+fn doc_std_has_the_page_inside() {
+    let w = World::new();
+    let out = w.ok(&w.dir, &["doc", "std"]);
+    let page = std::path::PathBuf::from(out.trim());
+    assert!(page.ends_with(format!("doc/std/{}/index.html", env!("CARGO_PKG_VERSION"))), "{out}");
+    assert!(std::fs::read_to_string(&page).unwrap().contains("Lakescript Standard Library"));
+}
+
+/// The page ferry has inside is the one `tools/docs/stdlib.py` makes from the notes.
+#[test]
+fn the_page_of_the_standard_library_is_up_to_date() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fresh = std::env::temp_dir().join(format!("ferry-stdlib-{}.html", std::process::id()));
+    let made = Command::new("python3").arg(root.join("tools/docs/stdlib.py")).arg(&fresh).output();
+    // Without Python there's nothing to compare with
+    let Ok(made) = made else { return };
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let committed = std::fs::read_to_string(root.join("crates/ferry/src/stdlib.html")).unwrap();
+    let fresh_text = std::fs::read_to_string(&fresh).unwrap();
+    let _ = std::fs::remove_file(&fresh);
+    assert!(committed == fresh_text, "crates/ferry/src/stdlib.html is out of date: run `python3 tools/docs/stdlib.py`");
+}
+
+#[test]
 fn colors_only_when_asked() {
     let w = World::new();
     let dir = w.project("app", &app(""), &[("bin/app.lks", "outln(1);")]);
