@@ -16,7 +16,7 @@ pub struct TypeExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeKind {
-    /// `string`, `list<string>`, `map<string, number>`, a type alias...
+    /// `string`, `list<string>`, `map<string, number>`, a class...
     Named { name: String, args: Vec<TypeExpr> },
     /// `?string`
     Nullable(Box<TypeExpr>),

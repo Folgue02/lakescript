@@ -171,7 +171,6 @@ fn types_written_in_the_code() {
     assert!(rejected("outln(1.is(Nope));").contains("unknown type `Nope`"));
     assert_eq!(ok("list<string> $n = ['a'];\noutln($n);"), "['a']\n");
     assert!(rejected("(string) -> bool $c = ($x) -> $x.length();").contains("its value is a (string) -> number"));
-    assert!(rejected("type Names = list<string>;").contains("no type aliases"));
 }
 
 #[test]

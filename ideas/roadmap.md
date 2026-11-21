@@ -27,6 +27,13 @@ Lakescript's own versions follow [semver](https://semver.org), like its packages
     - Windows is a supported platform, like Linux and macOS. Commands run without a shell on every system *(see [builtin_types.md](language/builtin_types.md))*, and on Windows `ferry install` writes `.cmd` launchers. The tests don't run on Windows yet, since many of them run Unix programs like `printf` and `sort`.
 - While it's `0.x`, any version can change the language. `1.0.0` comes once the language is stable, and from then on only a new major version can break scripts.
 
+### While in development
+
+Lakescript has no users but its author yet, so nothing is kept for old code:
+
+- Syntax that's removed is just gone. There are no errors of their own for it *(i.e. "there are no type aliases")*, no warnings and no ways to migrate: old code gets the error any wrong code gets, and the notes say what replaced it.
+- This changes once other people write Lakescript, at the latest with `1.0.0`.
+
 ## Status
 
 - Phases 1 to 7 are done.

@@ -97,6 +97,8 @@ list<(string) -> bool>          // inside generics
 
 There is no `type` to give a type another name. A name for a type always means a real type: a built-in one, a class, an interface or an enum *(see [classes.md](classes.md))*.
 
+- `type X = ...;` isn't valid code, and gets the error any other wrong code gets: there's no message of its own for it *(see [roadmap.md](../roadmap.md#while-in-development))*.
+
 - A type with a name can be told apart at runtime by `.is()`, `.as()` and `catch`, in any module. An alias would be replaced by what it stands for, which makes `$value.is(core::Filter)` impossible to check across modules and lets two aliases refer to each other forever.
 - A long function type is written out *(i.e. `(any) -> list<any>`)*. An interface with a single method can name it when that's clearer.
 

@@ -359,9 +359,6 @@ impl Parser {
                 let name = self.expect_variable("after `const`")?;
                 self.declaration_value(true, name, ty)?
             }
-            TokenKind::Ident(word) if word == "type" && matches!(self.peek_at(1), TokenKind::Ident(_)) && self.peek_at(2) == &TokenKind::Eq => {
-                return self.error_here("there are no type aliases: write the type where it's used, or declare an interface");
-            }
             TokenKind::Keyword(k @ (Keyword::Class | Keyword::Interface | Keyword::Enum)) => {
                 let kind = match *k {
                     Keyword::Class => ClassKind::Class,
@@ -2009,7 +2006,6 @@ mod tests {
         assert_eq!(stmts("void f(?((number) -> number) $p) {}"), "(fn void f ((?((number) -> number) $p)) {})");
         assert_eq!(stmts("void f((number) -> ?number $p) {}"), "(fn void f (((number) -> ?number $p)) {})");
         assert!(error("void f(?(number) -> number $p) {}").contains("ambiguous"));
-        assert!(error("type Predicate = (string) -> bool;").contains("no type aliases"));
     }
 
     #[test]

@@ -512,8 +512,6 @@ impl<'a> Checker<'a> {
                             }
                             let given = (0..expected).map(|i| arg(self, i)).collect::<Check<Vec<_>>>()?;
                             Ty::Object(class, given)
-                        } else if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
-                            alias
                         } else if self.scopes.iter().any(|s| s.generics.contains(n)) {
                             if self.recording() {
                                 self.note(ty.span, ty.span.start, "", n, names::Show::Text(n.to_string()), Some("A type parameter.".into()), None);
