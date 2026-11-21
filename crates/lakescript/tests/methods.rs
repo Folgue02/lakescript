@@ -160,7 +160,8 @@ fn list_basics() {
     assert_eq!(eval("[17, 20, 30].countWhere(($a) -> $a >= 18)"), "2");
     assert_eq!(eval("[].first()"), "null");
     assert_eq!(eval("[1, 2].last()"), "2");
-    assert_eq!(eval("[1, 2].getOrDefault(5, 0)"), "0");
+    // `getOrDefault` is `$list[$i] ?? $default` now
+    assert_eq!(eval("[1, 2][5] ?? 0"), "0");
 }
 
 #[test]

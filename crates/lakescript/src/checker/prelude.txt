@@ -172,7 +172,6 @@ number count(T $value);
 number countWhere((T) -> bool $fn);
 ?T first();
 ?T last();
-T getOrDefault(number $index, T $default);
 ?T random();
 list<T> push(...T $values);
 list<T> prepend(...T $values);

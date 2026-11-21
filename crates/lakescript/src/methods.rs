@@ -1023,12 +1023,6 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
                 Value::list(values)
             }
         }
-        "getOrDefault" => {
-            a.count(2, 2)?;
-            let i = a.whole(0)?;
-            let pos = if i < 0 { len as i64 + i } else { i };
-            if pos >= 0 && (pos as usize) < len { list.borrow()[pos as usize].clone() } else { a.value(1) }
-        }
 
         // Adding and removing
         "push" => {
