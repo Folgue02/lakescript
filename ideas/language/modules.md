@@ -27,6 +27,7 @@ use folgue02/backup/config; // src/folgue02/backup/config.lks in a project
 ```
 
 - A standalone script and the files it uses are moved together, like a project. `use helpers;` keeps working as long as `helpers.lks` stays next to the script.
+- A script only reaches modules in its own folder and below it, never above it: `use` paths have no `..`, and no tool searches the parent folders. A module in a subfolder *(i.e. `shop/store/Customer.lks` with `use store/Order;`)* is written for the module path of the script that uses it *(`shop/`)*, so on its own it doesn't find its neighbours, and that's expected.
 - `std/` is reserved: no folder or dependency can provide a module whose path starts with `std/`, so the standard library can never be replaced.
 - A module found in more than one root is an error that names both places. In Java the first one silently wins, which makes a program behave differently depending on the machine. In a project, `ferry` finds these before anything runs *(see [Packages](#packages))*.
 - A program that embeds Lakescript decides what the module path has. Leaving `std/process` or `std/fs` out of it means scripts can't run commands or touch files.

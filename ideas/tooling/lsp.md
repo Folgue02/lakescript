@@ -9,7 +9,7 @@ Phase 8 *(see [roadmap.md](../roadmap.md))*. `lks-lsp` gives editors what the ch
 - It's built on `lsp-server` and `lsp-types`, the crates of rust-analyzer. They're synchronous, which fits the library: the parser and the checker share data with `Rc`, which can't move between threads.
 - The modules of a file are found like when it runs:
     - In a ferry project, with the module path `ferry run` uses: `src/` and the dependencies from the lock file *(see [ferry.md](ferry.md))*.
-    - For a standalone script, the folder it's in.
+    - For a standalone script, the folder it's in, and never the folders above it *(see [modules.md](../language/modules.md#module-path))*. A module of a subfolder opened alone only knows its own folder.
 - The files open in the editor are read from the editor, not from the disk, so errors follow what's typed, before it's saved.
 
 ## What the library needs
@@ -68,7 +68,7 @@ Each one is usable on its own, with tests that send real protocol messages to th
 ### Checked
 
 - Hover, go to definition and completion were asked at every second character of every example, and every example was typed into the server one character at a time, with completion and hover after each one: no errors, and every answer in under 20 ms *(release build)*.
-- At the 213 places of the examples where a `.` is typed before a method or a field, with the rest of the file below, 192 complete the members. The rest are inside `%w[...]`, after `@super.`, in an `if (` or `switch (` used as a value that isn't closed yet, or in `shop/store`, whose modules are found from `shop/` and not from their own folder.
+- At the 213 places of the examples where a `.` is typed before a method or a field, with the rest of the file below, 192 complete the members. The rest are inside `%w[...]`, after `@super.`, in an `if (` or `switch (` used as a value that isn't closed yet, or in `shop/store`, whose modules are written for the module path of `shop/main.lks`: opened alone, they don't find each other, on purpose.
 
 
 ### How names are found
