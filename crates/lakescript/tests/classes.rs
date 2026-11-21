@@ -609,3 +609,28 @@ fn one_method_can_be_the_method_of_two_interfaces() {
     assert!(rejected("interface IA { string label(); }\ninterface IB { string label(number $n); }\nclass C { implement IA { string label() = 'c'; } implement IB { string label(number $n) = 'x'; } }")
         .contains("so a class can't implement both"));
 }
+
+#[test]
+fn nullable_fields() {
+    let class = "class Node {\n    pub number @value;\n    pub ?Node @next;\n}\n";
+    let out = run(&format!(
+        "{class}?Node $n = Node(1, Node(2, null));\n\
+         outln($n?.value);\n\
+         outln($n?.next?.value);\n\
+         outln($n?.next?.next?.value);\n\
+         outln($n?.next?.next?.value ?? 0);\n\
+         $n = null;\n\
+         outln($n?.value);\n\
+         outln([Node(3, null)].first()?.value);\n"
+    ));
+    assert_eq!(out, "1\n2\nnull\n0\nnull\n3\n");
+    // The checker knows it can be `null`, and says how to read a field that can be
+    assert!(rejected(&format!("{class}?Node $n = Node(1, null);\nnumber $v = $n?.value;")).contains("which can be `null`"));
+    assert!(rejected(&format!("{class}?Node $n = null;\noutln($n.value);")).contains("Use `?.value`, or check for `null` first"));
+    assert!(rejected(&format!("{class}?Node $n = null;\noutln($n?.nope);")).contains("`Node` has no field named `nope`"));
+    // It can't be assigned to
+    assert!(rejected(&format!("{class}?Node $n = null;\n$n?.value = 2;")).contains("`?.` and `?[` can't be assigned to"));
+    assert!(rejected("?list<number> $l = [1];\n$l?[0] = 2;").contains("`?.` and `?[` can't be assigned to"));
+    // Without the checker too
+    assert!(fails(&format!("{class}const $n = null;\noutln($n?.value);\noutln($n.value);")).contains("null"));
+}

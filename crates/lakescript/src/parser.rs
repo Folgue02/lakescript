@@ -1127,8 +1127,11 @@ impl Parser {
             TokenKind::UShrEq => Some(BinaryOp::UShr),
             _ => return Ok(target),
         };
+        if matches!(target.kind, ExprKind::Field { nullable: true, .. } | ExprKind::Index { nullable: true, .. }) {
+            return self.error_here("`?.` and `?[` can't be assigned to, since there may be nothing there: check for `null` first");
+        }
         if !is_assignable(&target) {
-            return self.error_here("only variables and indexes can be assigned to *(i.e. `$x = 1`, `$list[0] = 1`)*");
+            return self.error_here("only variables, fields and indexes can be assigned to *(i.e. `$x = 1`, `$point.x = 1`, `$list[0] = 1`)*");
         }
         self.advance();
         let value = self.assignment()?;
@@ -1274,16 +1277,13 @@ impl Parser {
                     let named = matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Keyword(_)) && self.peek().span.line == dot.span.line;
                     if !named && self.note_error(format!("expected a field or a method after `.`, found {}", self.peek().kind), dot.span) {
                         // Nothing goes on from a name being written: what's after it is the next code
-                        let kind = ExprKind::Field { target: Box::new(expr), name: String::new() };
+                        let kind = ExprKind::Field { target: Box::new(expr), name: String::new(), nullable };
                         self.hole = Some(self.pos);
                         return Ok(Expr { kind, span: self.span_from(start) });
                     } else if matches!(self.peek().kind, TokenKind::Ident(_)) && self.peek_at(1) != &TokenKind::LParen {
-                        // `$point.x`: a field
-                        if nullable {
-                            return self.error_here("`?.` doesn't work with fields yet: check for `null` first");
-                        }
+                        // `$point.x`: a field, or `null` with `?.` when `$point` is
                         let name = self.expect_ident("after `.`")?;
-                        ExprKind::Field { target: Box::new(expr), name }
+                        ExprKind::Field { target: Box::new(expr), name, nullable }
                     } else {
                         self.method(expr, nullable)?
                     }
@@ -1440,7 +1440,7 @@ impl Parser {
                     let this = Expr { kind: ExprKind::This, span: start };
                     ExprKind::MethodCall { receiver: Box::new(this), method: name, args: self.arguments()?, nullable: false }
                 } else {
-                    ExprKind::Field { target: Box::new(Expr { kind: ExprKind::This, span: start }), name }
+                    ExprKind::Field { target: Box::new(Expr { kind: ExprKind::This, span: start }), name, nullable: false }
                 }
             }
             TokenKind::Ident(name) if is_type_name(&name) && self.peek_at(1) == &TokenKind::Lt => {
@@ -1765,7 +1765,7 @@ fn covers_both_bools(cases: &[Case]) -> bool {
 fn is_assignable(expr: &Expr) -> bool {
     matches!(
         expr.kind,
-        ExprKind::Variable(_) | ExprKind::Index { nullable: false, .. } | ExprKind::Field { .. } | ExprKind::Static { variable: true, .. }
+        ExprKind::Variable(_) | ExprKind::Index { nullable: false, .. } | ExprKind::Field { nullable: false, .. } | ExprKind::Static { variable: true, .. }
     )
 }
 
@@ -1916,7 +1916,9 @@ mod tests {
         assert_eq!(expr("$x++"), "(++post $x)");
         assert_eq!(expr("--$x"), "(--pre $x)");
         assert!(error("1 = 2;").contains("only variables"));
-        assert!(error("$a?['x'] = 1;").contains("only variables"));
+        assert!(error("$a?['x'] = 1;").contains("can't be assigned to"));
+        assert!(error("$a?.x = 1;").contains("can't be assigned to"));
+        assert_eq!(expr("$a?.b?.c"), "(?. (?. $a b) c)");
         assert!(error("5++;").contains("only work on variables"));
     }
 

@@ -795,10 +795,10 @@ impl Checker<'_> {
         self.fail(format!("{what} is private to `{}`: only its own code can use it. Mark it `pub` to share it", owner.0.name), span)
     }
 
-    /// `$object.name`
-    pub(super) fn field(&mut self, target: &Expr, name: &str, span: Span) -> Check<Ty> {
+    /// `$object.name`, or `$object?.name`, which is `null` when the object is.
+    pub(super) fn field(&mut self, target: &Expr, name: &str, nullable: bool, span: Span) -> Check<Ty> {
         // What a `switch` on this field proved *(i.e. `case Git::Push ->`)*
-        if let ExprKind::Variable(v) = &target.kind {
+        if let (ExprKind::Variable(v), false) = (&target.kind, nullable) {
             let key = format!("{v}.{name}");
             if let Some(t) = self.scopes.iter().rev().find_map(|s| s.narrowed.get(&key).cloned()) {
                 self.expr(target, None)?;
@@ -811,7 +811,16 @@ impl Checker<'_> {
         if name.is_empty() {
             return Ok(Ty::Any);
         }
-        match self.shallow(&t) {
+        let mut t = self.shallow(&t);
+        if let (Ty::Nullable(inner), true) = (&t, nullable) {
+            t = self.shallow(inner);
+        }
+        let ty = self.field_of(t, target, name, span)?;
+        Ok(if nullable { ty.nullable() } else { ty })
+    }
+
+    fn field_of(&mut self, t: Ty, target: &Expr, name: &str, span: Span) -> Check<Ty> {
+        match t {
             Ty::Object(class, args) => {
                 let Some((field, owner)) = class.find(|b| b.fields.iter().find(|f| f.name == name).cloned()) else {
                     if class.find(|b| b.methods.get(name).cloned()).is_some() {
@@ -831,7 +840,7 @@ impl Checker<'_> {
                 Ok(ty)
             }
             Ty::Any | Ty::Var(_) => Ok(Ty::Any),
-            Ty::Nullable(_) => self.fail(format!("this can be `null`, so `.{name}` can't always be read. Check for `null` first"), target.span),
+            Ty::Nullable(_) => self.fail(format!("this can be `null`, so `.{name}` can't always be read. Use `?.{name}`, or check for `null` first"), target.span),
             other => self.fail(format!("{} has no fields: `.{name}` only works on objects. Methods are called with parentheses: `.{name}()`", a(&other)), span),
         }
     }

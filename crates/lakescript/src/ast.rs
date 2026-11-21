@@ -88,7 +88,8 @@ pub enum ExprKind {
     /// `@`: the object a method runs on.
     This,
     /// `@name` or `$point.x`: a field of an object.
-    Field { target: Box<Expr>, name: String },
+    /// `$point.x`, or `$point?.x`, which is `null` when `$point` is.
+    Field { target: Box<Expr>, name: String, nullable: bool },
     /// `Point::origin` or `Self::$count`: a static member of a class. `class`
     /// is `Self` inside a class.
     Static { class: String, name: String, variable: bool },
@@ -573,9 +574,9 @@ impl fmt::Display for Expr {
             ModuleConstant { module, name } => write!(f, "{module}::${name}"),
             TypeArgs { name, args } => write!(f, "{name}<{}>", join(args, ", ")),
             This => write!(f, "@"),
-            Field { target, name } => match &target.kind {
+            Field { target, name, nullable } => match &target.kind {
                 This => write!(f, "@{name}"),
-                _ => write!(f, "(. {target} {name})"),
+                _ => write!(f, "({} {target} {name})", if *nullable { "?." } else { "." }),
             },
             Static { class, name, variable } => write!(f, "{class}::{}{name}", if *variable { "$" } else { "" }),
             SuperNew(a) => write!(f, "(@super{})", args(a)),

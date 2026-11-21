@@ -1128,7 +1128,7 @@ impl<'a> Compiler<'a> {
             for member in &valued {
                 let MemberKind::Field { name, value: Some(value), .. } = &member.kind else { unreachable!() };
                 let this = Expr { kind: ExprKind::This, span: member.span };
-                let field = Expr { kind: ExprKind::Field { target: Box::new(this), name: name.clone() }, span: member.span };
+                let field = Expr { kind: ExprKind::Field { target: Box::new(this), name: name.clone(), nullable: false }, span: member.span };
                 let assign = ExprKind::Assign { op: None, target: Box::new(field), value: Box::new(value.clone()) };
                 stmts.push(Stmt { kind: StmtKind::Expr(Expr { kind: assign, span: member.span }), span: member.span });
             }
@@ -1575,10 +1575,14 @@ impl<'a> Compiler<'a> {
                 self.patch(to_end);
             }
             ExprKind::This => self.load_this(),
-            ExprKind::Field { target, name } => {
+            ExprKind::Field { target, name, nullable } => {
                 self.expr(target)?;
+                let to_end = nullable.then(|| self.emit(Op::JumpIfNull(0)));
                 let n = self.name(name);
                 self.emit(Op::GetField(n));
+                if let Some(j) = to_end {
+                    self.patch(j);
+                }
             }
             ExprKind::Static { class, name, variable } => {
                 self.load_class(class);
@@ -1759,7 +1763,7 @@ impl<'a> Compiler<'a> {
                     self.emit(Op::Pop);
                 }
             }
-            ExprKind::Field { target: object, name } => {
+            ExprKind::Field { target: object, name, .. } => {
                 self.expr(object)?;
                 let n = self.name(name);
                 if let Some(op) = op {

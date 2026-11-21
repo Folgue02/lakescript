@@ -1391,7 +1391,7 @@ impl<'a> Checker<'a> {
                 Some(_) => return self.fail("a static method has no `@`: it belongs to the class, not to an object", span),
                 None => return self.fail("`@` can only be used in the methods and the constructor of a class", span),
             },
-            ExprKind::Field { target, name } => self.field(target, name, span)?,
+            ExprKind::Field { target, name, nullable } => self.field(target, name, *nullable, span)?,
             ExprKind::Static { class, name, variable } => self.static_member(class, name, *variable, span)?,
             ExprKind::SuperNew(args) => {
                 let Some(this) = self.this.last().cloned().filter(|t| t.constructor) else {
@@ -1777,7 +1777,7 @@ impl<'a> Checker<'a> {
         let subject_var = match &switch.subject.kind {
             ExprKind::Variable(v) => Some(v.clone()),
             // `switch ($args.subcommand)`: the field of a variable is narrowed too
-            ExprKind::Field { target, name } => match &target.kind {
+            ExprKind::Field { target, name, nullable: false } => match &target.kind {
                 ExprKind::Variable(v) => Some(format!("{v}.{name}")),
                 _ => None,
             },
@@ -2289,8 +2289,8 @@ impl<'a> Checker<'a> {
                     other => return self.fail(format!("{} can't be indexed", a(&other)), target.span),
                 }
             }
-            ExprKind::Field { target: object, name } => {
-                let ty = self.field(object, name, target.span)?;
+            ExprKind::Field { target: object, name, .. } => {
+                let ty = self.field(object, name, false, target.span)?;
                 self.check_assignable_target(target)?;
                 ty
             }
@@ -2329,7 +2329,7 @@ impl<'a> Checker<'a> {
     }
 
     fn check_assignable_target(&mut self, target: &Expr) -> Check<()> {
-        if let ExprKind::Field { target: object, name } = &target.kind {
+        if let ExprKind::Field { target: object, name, .. } = &target.kind {
             let t = self.expr(object, None)?;
             if let Ty::Object(class, _) = self.shallow(&t) {
                 if let Some((field, owner)) = class.find(|b| b.fields.iter().find(|f| f.name == *name).cloned()) {
