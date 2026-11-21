@@ -1,0 +1,48 @@
+#!/usr/bin/lks
+// Requests to web servers with `std/http`.
+//
+//   lks examples/http.lks https://api.github.com/repos/rust-lang/rust
+
+use std/http;
+use std/fs;
+use std/path;
+use std/process;
+
+const $url = process::args()[0] ?? 'https://example.com';
+
+// No answer at all is a `NetworkError`: no network, a wrong name, a timeout
+const $result = try http::get($url, headers: {'Accept' => 'application/json'}, timeout: 10);
+if ($result.isError()) {
+    errln(f"No answer: {$result.error()?.message()}");
+    exit(1);
+}
+const $response = $result.throw();
+
+// A 404 or a 500 is an answer too, so the script checks it
+outln(f"{$response.status} from {$response.url}");
+if (!$response.ok?()) {
+    errln(f"The server said {$response.status}");
+    exit(1);
+}
+
+// Headers are found by their name in any case
+const $type = $response.header('Content-Type') ?? 'unknown';
+outln(f"Type: {$type}");
+if ($type.contains('json')) {
+    const $data = $response.json();
+    if ($data.is(map<string, any>)) {
+        outln(f"Keys: {$data.as(map<string, any>).keys().take(5).join(', ')}");
+    }
+} else {
+    outln(f"{$response.body.length()} characters of text");
+}
+
+// Maps and lists are sent as JSON, strings as they are:
+//   http::post('https://example.com/api/notes', {'title' => 'hello'})
+
+// Downloading writes the body to a file, if the status was from 200 to 299
+const $folder = fs::tempDir();
+const $file = path::join($folder, 'download');
+http::download($url, $file);
+outln(f"Downloaded {fs::size($file).formatBytes()}");
+fs::removeAll($folder);

@@ -1036,7 +1036,8 @@ impl<'a> Checker<'a> {
 
     /// The signatures of a module: from the prelude for `std/`, or by checking its file.
     fn module(&mut self, path: &[String], span: Span) -> Check<ModuleSig> {
-        let source = match self.modules.loader.resolve(path) {
+        let importer = self.file.clone().unwrap_or_default();
+        let source = match self.modules.loader.resolve(path, &importer) {
             Ok(s) => s,
             Err(message) => return self.fail(message, span),
         };

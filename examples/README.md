@@ -40,7 +40,9 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [wordcount.lks](wordcount.lks) | Reading piped input | `cat ideas/README.md \| lks examples/wordcount.lks 5` |
 | [commands.lks](commands.lks) | `%x"..."` commands, safe quoting, `process::command()` | |
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
-| [json.lks](json.lks) | `std/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
+| [json.lks](json.lks) | `std/format/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
+| [csv.lks](csv.lks) | `std/format/csv`: rows as lists or as maps by the names of the columns, quotes, other separators | |
+| [http.lks](http.lks) | `std/http`: a request, its status and headers, JSON answers, `NetworkError` and downloading | `lks examples/http.lks https://api.github.com/repos/rust-lang/rust` |
 | [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
 | [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, typed `pub const`s and a module's private `let` | |
 | [shop/main.lks](shop/main.lks) | A file per type: `use store/Customer;` imports the class itself, and `Customer` and `Order` use each other | |

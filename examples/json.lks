@@ -1,7 +1,7 @@
 #!/usr/bin/lks
 // Reading and writing JSON.
 
-use std/json;
+use std/format/json;
 use std/fs;
 
 const $text = """

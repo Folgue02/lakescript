@@ -7,8 +7,9 @@ What comes with Lakescript. Its modules are under `std/` and are imported with `
 - **If people keep writing the same helper in their scripts, the standard library is missing something.** Common operations get a function or a method, even the simple ones *(i.e. `$text.capitalize()`, `$list.unique()`, `$path.removeSuffix('.log')`)*. A script should read as what it does, not as the helpers it needed first.
 - **Methods, not procedural functions.** Operations on a value are methods on that value: `$list.length()`, not `len($list)`, and `$list.push($item)`, not `array_push($list, $item)`. Global functions are only for things that don't belong to a value *(i.e. `outln`, `exit`)*.
 - **Primitive types first.** If a built-in type is enough, it's used, so day-to-day scripts don't need to learn extra types. Paths are strings, the files of a folder are a `list<string>`, an exit code is a `number` *(like Python's `os.listdir()` and `os.path.join()`)*.
-- **A new type only when the built-in ones aren't enough, never a map pretending to be one.** A map with fixed keys used as an object *(i.e. `{'size' => 10, 'modified' => ...}` for a file)* means a real type is missing. Until there are classes, the standard library uses separate functions instead *(i.e. `fs::size()`, `fs::modified()`)*. Maps are only for data whose keys aren't known in advance *(i.e. `env::all()`, JSON)*.
+- **A new type only when the built-in ones aren't enough, never a map pretending to be one.** A map with fixed keys used as an object *(i.e. `{'size' => 10, 'modified' => ...}` for a file)* means a real type is missing. Older modules use separate functions instead *(i.e. `fs::size()`, `fs::modified()`)*, from before the standard library could declare classes. Maps are only for data whose keys aren't known in advance *(i.e. `env::all()`, JSON)*.
 - **Types as specific as possible.** Signatures use generics instead of `any` *(i.e. `sortBy<K>((T) -> K $key)`)*. `any` is only for values whose type really can't be known *(i.e. JSON read without a schema)* or functions that accept every value *(i.e. `outln`)*.
+- **Values, not class hierarchies.** Classes of the standard library are values that functions give back *(i.e. the `http::Response` of `http::get()`)*: scripts read their fields and call their methods, but never have to create them, extend them or implement interfaces to use a module.
 - **Full names.** `length()`, not `len()`. `trimStart()`, not `lstrip()`. Abbreviations are only used when they're the common name of the thing *(i.e. `toJson()`, `max()`)*.
 
 ## Naming conventions
@@ -18,6 +19,16 @@ What comes with Lakescript. Its modules are under `std/` and are imported with `
 - **Lists and maps: verbs change, past participles copy.** `$list.sort()` sorts the list itself, `$list.sorted()` returns a sorted copy and leaves the list as it was. The same goes for `reverse`/`reversed`, `shuffle`/`shuffled` and `merge`/`merged`. Methods that build something new from the values *(i.e. `map`, `filter`, `unique`)* always return a new list or map.
 - **Missing things are `null`, broken things throw.** Searching for something that isn't there returns `null` *(i.e. `'abc'.indexOf('z')`, `[].first()`)*. Asking for something invalid throws *(i.e. `'abc'.toNumber()`, `$list.removeAt(10)`)*.
 - **Errors** are the built-in exceptions *(`ValueError`, `IndexError`, ... see [errors.md](../language/errors.md))*.
+
+## How modules are made
+
+A module is written in Rust, in Lakescript, or both:
+
+- **Rust**, in `crates/lakescript/src/stdlib/`, for what needs the system or speed *(i.e. `std/fs`)*. Their signatures come from the tables in these notes *(see `tools/docs/prelude.py`)*.
+- **Lakescript**, in a `.lks` file embedded in the interpreter, for classes and for what's easier to write in the language itself *(i.e. `std/http`, `stdlib/http.lks`)*. They're checked like any other module, so their types and the `///` comments of their declarations reach the checker and editors.
+- **Both**: the Lakescript part uses its Rust part as `std/<name>/native` *(i.e. `use std/http/native;`)*. Only modules of the standard library can use the `native` modules, and they aren't documented, since scripts never see them.
+
+Errors in an embedded module name it as `<std>/http.lks`.
 
 ## Files
 
@@ -47,7 +58,9 @@ What's coming next is in [planned.md](planned.md).
 | [time.md](time.md) | `std/time`: the current time |
 | [io.md](io.md) | `std/io`: reading stdin |
 | [process.md](process.md) | `std/process`: arguments, the current folder, finding and running programs |
-| [json.md](json.md) | `std/json`: reading and writing JSON |
+| [http.md](http.md) | `std/http`: requests to web servers |
+| [format/json.md](format/json.md) | `std/format/json`: reading and writing JSON |
+| [format/csv.md](format/csv.md) | `std/format/csv`: reading and writing CSV |
 
 ### Still planned
 

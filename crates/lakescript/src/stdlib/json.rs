@@ -1,4 +1,4 @@
-//! `std/json` *(see `ideas/stdlib/json.md`)*: strict JSON, without a schema.
+//! `std/format/json` *(see `ideas/stdlib/format/json.md`)*: strict JSON, without a schema.
 
 use std::cell::RefCell;
 use std::rc::Rc;

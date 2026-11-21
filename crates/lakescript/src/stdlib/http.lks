@@ -1,0 +1,63 @@
+// `std/http`: requests to web servers *(see ideas/stdlib/http.md)*. Its Rust
+// part, `std/http/native`, sends them.
+
+use std/http/native;
+use std/format/json;
+
+/// What a server answered. A 404 or a 500 is an answer too: `ok?()` says if it went well.
+pub class Response {
+    /// The status code *(i.e. `200` or `404`)*.
+    pub const number @status;
+    /// The headers, with their names in lowercase *(i.e. `content-type`)*.
+    pub const map<string, string> @headers;
+    /// The body as text. Empty after `http::download()`, which writes it to a file.
+    pub const string @body;
+    /// The address that answered, after following redirects.
+    pub const string @url;
+
+    /// `true` for a status from 200 to 299.
+    pub bool ok?() = @status >= 200 && @status < 300;
+
+    /// The body read as JSON. Throws a `ValueError` if it isn't JSON.
+    pub any json() = json::parse(@body);
+
+    /// A header by its name, in any case, or `null` *(i.e. `$response.header('Content-Type')`)*.
+    pub ?string header(string $name) = @headers[$name.lower()];
+}
+
+/// Sends a request with any method *(i.e. `'PUT'`)*. A string body is sent as
+/// it is, and other values as JSON. Throws a `NetworkError` if there's no answer.
+pub Response request(string $method, string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30) =
+    answer(native::send($method, $url, $body, $headers, $timeout, null));
+
+/// Gets the page or the data at `$url`.
+pub Response get(string $url, map<string, string> $headers = {}, ?number $timeout = 30) =
+    request('GET', $url, headers: $headers, timeout: $timeout);
+
+/// Sends `$body` to `$url`: a string as it is, and other values as JSON.
+pub Response post(string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30) =
+    request('POST', $url, $body, $headers, $timeout);
+
+/// Sends `$body` to `$url` with the method `PUT`.
+pub Response put(string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30) =
+    request('PUT', $url, $body, $headers, $timeout);
+
+/// Sends `$body` to `$url` with the method `PATCH`.
+pub Response patch(string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30) =
+    request('PATCH', $url, $body, $headers, $timeout);
+
+/// Sends a request with the method `DELETE`.
+pub Response delete(string $url, map<string, string> $headers = {}, ?number $timeout = 30) =
+    request('DELETE', $url, headers: $headers, timeout: $timeout);
+
+/// Writes what's at `$url` to the file `$path`, if the status is from 200 to 299.
+/// Returns the response, whose body is empty when it was written.
+pub Response download(string $url, string $path, map<string, string> $headers = {}, ?number $timeout = 300) =
+    answer(native::send('GET', $url, null, $headers, $timeout, $path));
+
+Response answer(map<string, any> $r) = Response(
+    $r['status'].as(number),
+    $r['headers'].as(map<string, string>),
+    $r['body'].as(string),
+    $r['url'].as(string),
+);

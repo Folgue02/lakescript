@@ -1,5 +1,5 @@
 //! Phase 3: modules, commands, `exit`, and `std/process`, `std/env`,
-//! `std/io`, `std/fs`, `std/path` and `std/json`.
+//! `std/io`, `std/fs`, `std/path` and `std/format/json`.
 
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -521,12 +521,12 @@ fn file_errors_have_types() {
     assert!(err.contains("isn't empty. Use fs::removeAll()"), "{err}");
 }
 
-// ---- std/json ----
+// ---- std/format/json ----
 
 #[test]
 fn json() {
     let out = run(
-        "use std/json;\n\
+        "use std/format/json;\n\
          const $data = json::parse('{\"name\": \"Daniel\", \"tags\": [\"a\", \"b\"], \"age\": 23, \"ratio\": 0.5, \"ok\": true, \"none\": null, \"esc\": \"\\\\u00f1\\\\n\"}');\n\
          outln($data['name'].as(string).upper());\n\
          outln($data['tags'].is(list<string>));\n\
@@ -545,18 +545,18 @@ fn json() {
 
 #[test]
 fn json_errors() {
-    assert!(error("use std/json;\njson::parse('{\"a\": 1,}');").contains("ValueError: invalid JSON at line 1, column 9"));
-    assert!(error("use std/json;\njson::parse('[1, 2');").contains("invalid JSON"));
-    assert!(error("use std/json;\njson::stringify(0 / 0);").contains("TypeError: JSON can't hold NaN"));
-    assert!(error("use std/json;\njson::stringify(%r\"x\");").contains("can't be written as JSON"));
-    assert!(error("use std/json;\nlet $l = []; $l << $l;\njson::stringify($l);").contains("contains itself"));
+    assert!(error("use std/format/json;\njson::parse('{\"a\": 1,}');").contains("ValueError: invalid JSON at line 1, column 9"));
+    assert!(error("use std/format/json;\njson::parse('[1, 2');").contains("invalid JSON"));
+    assert!(error("use std/format/json;\njson::stringify(0 / 0);").contains("TypeError: JSON can't hold NaN"));
+    assert!(error("use std/format/json;\njson::stringify(%r\"x\");").contains("can't be written as JSON"));
+    assert!(error("use std/format/json;\nlet $l = []; $l << $l;\njson::stringify($l);").contains("contains itself"));
 }
 
 #[test]
 fn json_files() {
     let dir = TempDir::new("json");
     let out = run(&format!(
-        "use std/json;\nuse std/fs;\n\
+        "use std/format/json;\nuse std/fs;\n\
          const $p = '{}/config.json';\n\
          json::write($p, {{'port' => 8080}});\n\
          outln(fs::read($p));\n\
@@ -571,14 +571,14 @@ fn json_files() {
 #[test]
 fn json_streams() {
     let out = run(
-        "use std/json;\n\
+        "use std/format/json;\n\
          outln(json::parseAll('{\"a\": 1} {\"a\": 2}'));\n\
          outln(json::parseAll(\"1\\n[2, 3]\\n\\\"x\\\"\\n\"));\n\
          outln(json::parseAll('  '));\n\
          outln(json::parseAll('{\"a\":\\n 1}\\n{}'));\n",
     );
     assert_eq!(out, "[{ 'a' => 1 }, { 'a' => 2 }]\n[1, [2, 3], 'x']\n[]\n[{ 'a' => 1 }, {}]\n");
-    assert!(error("use std/json;\njson::parseAll('{} {');").contains("invalid JSON at line 1"));
+    assert!(error("use std/format/json;\njson::parseAll('{} {');").contains("invalid JSON at line 1"));
 }
 
 #[test]

@@ -1061,7 +1061,8 @@ impl<'a> Interpreter<'a> {
 
                 // ---- Modules ----
                 Op::UseModule { module, path } => {
-                    let source = self.host.loader.resolve(&proto.imports[path as usize].path).map_err(|m| flow_error(m, span!()))?;
+                    let importer = self.host.loader.files.get(span!().file as usize).cloned().unwrap_or_default();
+                    let source = self.host.loader.resolve(&proto.imports[path as usize].path, &importer).map_err(|m| flow_error(m, span!()))?;
                     globals.modules.borrow_mut()[module as usize] = Some(ModuleSlot::Pending(source));
                 }
                 Op::UseItems(i) => {
@@ -1223,7 +1224,8 @@ impl<'a> Interpreter<'a> {
 
     fn use_items(&mut self, proto: &Proto, i: usize, globals: &Rc<Globals>, span: Span) -> Exec<()> {
         let import = &proto.imports[i];
-        let source = self.host.loader.resolve(&import.path).map_err(|m| flow_error(m, span))?;
+        let importer = self.host.loader.files.get(span.file as usize).cloned().unwrap_or_default();
+        let source = self.host.loader.resolve(&import.path, &importer).map_err(|m| flow_error(m, span))?;
         // Importing names needs their values now
         let module = self.load(source, span)?;
         let loading = self.host.loader.in_progress.iter().find(|(_, m)| Rc::ptr_eq(m, &module)).map(|(p, _)| p.clone());

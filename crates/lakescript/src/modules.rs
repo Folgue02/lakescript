@@ -140,23 +140,33 @@ impl Loader {
         Loader { files: vec!["<script>".to_string()], ..Default::default() }
     }
 
-    /// The text of a module: from the overlay, or from the disk.
+    /// The text of a module: from the overlay, or from the disk. Modules of
+    /// the standard library written in Lakescript come with the interpreter.
     pub fn read(&self, path: &std::path::Path) -> std::io::Result<String> {
+        if let Some(text) = path.to_str().and_then(crate::stdlib::embedded) {
+            return Ok(text.to_string());
+        }
         if let Some(text) = self.overlay.get(path) {
             return Ok(text.clone());
         }
         std::fs::read_to_string(path)
     }
 
-    /// Finds the module for a `use` path *(i.e. `["config", "paths"]`)*.
-    pub fn resolve(&self, path: &[String]) -> Result<ModuleSource, String> {
+    /// Finds the module for a `use` path *(i.e. `["config", "paths"]`)*, in
+    /// the file `importer` *(as the engine shows it)*.
+    pub fn resolve(&self, path: &[String], importer: &str) -> Result<ModuleSource, String> {
         let joined = path.join("/");
         if path.first().is_some_and(|p| p == "std") {
-            if !crate::stdlib::exists(&joined) {
+            // The Rust parts of modules of the standard library are only for them
+            let hidden = crate::stdlib::native(&joined) && !importer.starts_with(crate::stdlib::EMBEDDED);
+            if !crate::stdlib::exists(&joined) || hidden {
                 return Err(format!("there's no module `{joined}` in the standard library"));
             }
             if self.disabled.contains(&joined) {
                 return Err(format!("`{joined}` isn't available here"));
+            }
+            if let Some(file) = crate::stdlib::embedded_path(&joined) {
+                return Ok(ModuleSource::File(file));
             }
             return Ok(ModuleSource::Std(joined));
         }

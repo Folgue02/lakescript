@@ -9,7 +9,7 @@
 use std/fs;
 use std/path;
 use std/process;
-use std/json;
+use std/format/json;
 use helpers::{plural, $defaultKeep};
 
 const $args = process::args();

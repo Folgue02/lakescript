@@ -1,9 +1,9 @@
-# std/json
+# std/format/json
 
-Reading and writing JSON. `use std/json;`, then `json::parse($text)`.
+Reading and writing JSON. `use std/format/json;`, then `json::parse($text)`.
 
 ```
-use std/json;
+use std/format/json;
 
 const $data = json::parse('{"name": "Daniel", "tags": ["a", "b"]}');
 const $name = $data['name'].as(string);

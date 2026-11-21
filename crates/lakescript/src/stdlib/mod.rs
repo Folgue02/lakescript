@@ -1,7 +1,9 @@
 //! The modules of the standard library, under `std/` *(see `ideas/stdlib/`)*.
 
+mod csv_format;
 mod env;
 mod fs;
+mod http;
 mod io;
 mod json;
 mod path;
@@ -15,10 +17,45 @@ use crate::exceptions::TYPE_ERROR;
 use crate::modules::{Globals, Module};
 use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeResult, Value};
 
-pub const MODULES: &[&str] = &["std/env", "std/fs", "std/io", "std/json", "std/path", "std/process", "std/time"];
+pub const MODULES: &[&str] = &[
+    "std/env",
+    "std/format/csv",
+    "std/format/json",
+    "std/fs",
+    "std/http",
+    "std/io",
+    "std/path",
+    "std/process",
+    "std/time",
+];
+
+/// The Rust parts of modules written in Lakescript, which only those modules use.
+const NATIVE: &[&str] = &["std/http/native"];
+
+/// Modules written in Lakescript, which come with the interpreter.
+const SOURCES: &[(&str, &str)] = &[("std/http", include_str!("http.lks"))];
+
+/// Where the files of the modules written in Lakescript seem to be, in errors.
+pub const EMBEDDED: &str = "<std>/";
 
 pub fn exists(name: &str) -> bool {
-    MODULES.contains(&name)
+    MODULES.contains(&name) || NATIVE.contains(&name)
+}
+
+/// `true` for the Rust part of a module written in Lakescript *(i.e. `std/http/native`)*.
+pub fn native(name: &str) -> bool {
+    NATIVE.contains(&name)
+}
+
+/// The file a module written in Lakescript seems to be in *(i.e. `<std>/http.lks`)*.
+pub fn embedded_path(name: &str) -> Option<std::path::PathBuf> {
+    SOURCES.iter().any(|(n, _)| *n == name).then(|| format!("{EMBEDDED}{}.lks", &name["std/".len()..]).into())
+}
+
+/// The source of the module written in Lakescript that seems to be in `path`.
+pub fn embedded(path: &str) -> Option<&'static str> {
+    let name = path.strip_prefix(EMBEDDED)?.strip_suffix(".lks")?;
+    SOURCES.iter().find(|(n, _)| n.strip_prefix("std/") == Some(name)).map(|(_, source)| *source)
 }
 
 /// What a module of the standard library provides.
@@ -58,7 +95,9 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/env" => env::register(&mut exports),
         "std/fs" => fs::register(&mut exports),
         "std/io" => io::register(&mut exports),
-        "std/json" => json::register(&mut exports),
+        "std/format/csv" => csv_format::register(&mut exports),
+        "std/format/json" => json::register(&mut exports),
+        "std/http/native" => http::register(&mut exports),
         "std/path" => path::register(&mut exports),
         "std/process" => process::register(&mut exports),
         "std/time" => time::register(&mut exports),

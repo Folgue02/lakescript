@@ -99,11 +99,50 @@ fn system_examples() {
     let json = run_ok(&["examples/json.lks"]);
     assert!(json.contains("lakescript by folgue02, indent 4"));
     assert!(json.contains("['start', 'stop']"));
+    let csv = run_ok(&["examples/csv.lks"]);
+    assert!(csv.contains("Smith, John | 17 | Boston"), "{csv}");
+    assert!(csv.contains("{ 'Lisbon' => 2, 'Boston' => 1 }"), "{csv}");
+    assert!(csv.contains("name,age\n\"Smith, John\",17\nAna,34\nBo,51\n"), "{csv}");
+    assert!(csv.contains("name;score\nAna;9.5\n"), "{csv}");
     assert_eq!(run_ok(&["examples/time.lks"]), "4999950000\ntimed it\n");
     let modules = run_ok(&["examples/modules/main.lks"]);
     assert!(modules.contains("The Module System"));
     assert!(modules.contains("8 4"));
     assert!(modules.contains("math::average ran 2 times"));
+}
+
+/// A server that answers every request with the same JSON, for `examples/http.lks`.
+fn json_server() -> String {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 0) && line.trim() != "" {
+                line.clear();
+            }
+            let body = r#"{"name": "lake", "stars": 3}"#;
+            let answer = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(answer.as_bytes());
+        }
+    });
+    address
+}
+
+#[test]
+fn http() {
+    let url = format!("{}/repo", json_server());
+    let out = run_ok(&["examples/http.lks", &url]);
+    assert_eq!(out, format!("200 from {url}\nType: application/json\nKeys: name, stars\nDownloaded 28 bytes\n"));
+    let output = lks(&["examples/http.lks", "http://127.0.0.1:1/"], None);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("No answer: can't reach"));
 }
 
 #[test]

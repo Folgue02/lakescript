@@ -166,7 +166,7 @@ fn standard_library_modules() {
     assert!(rejected("use std/path;\npath::join(5);").contains("must be a string, but this is a number"));
     assert!(rejected("use std/env;\noutln(env::get('HOME').length());").contains("can be `null`"));
     assert!(rejected("use std/fs;\nfs::nope();").contains("has no `pub` function named `nope`"));
-    assert!(rejected("use std/json;\njson::stringify([1], indent: 'x');").contains("`$indent` of `stringify` must be a ?number"));
+    assert!(rejected("use std/format/json;\njson::stringify([1], indent: 'x');").contains("`$indent` of `stringify` must be a ?number"));
 }
 
 #[test]

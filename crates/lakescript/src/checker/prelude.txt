@@ -345,15 +345,26 @@ void sleep(number $seconds);
 command shell(string $script);
 command command(string $program, ...string $args);
 
-module std/json
+module std/format/json
 any parse(string $text);
 list<any> parseAll(string $text);
 string stringify(any $value, ?number $indent = null);
 any read(string $path);
 void write(string $path, any $value, ?number $indent = 2);
 
+module std/format/csv
+list<list<string>> parse(string $text, string $separator = ',');
+list<map<string, string>> parseMaps(string $text, string $separator = ',');
+string stringify(list<any> $rows, string $separator = ',');
+list<list<string>> read(string $path, string $separator = ',');
+list<map<string, string>> readMaps(string $path, string $separator = ',');
+void write(string $path, list<any> $rows, string $separator = ',');
+
 module std/time
 number now();
+
+module std/http/native
+map<string, any> send(string $method, string $url, any $body, map<string, string> $headers, ?number $timeout, ?string $path);
 
 type result<T, E>
 bool isOk();

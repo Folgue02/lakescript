@@ -1,0 +1,37 @@
+#!/usr/bin/lks
+// Reading and writing CSV with `std/format/csv`.
+
+use std/format/csv;
+use std/fs;
+use std/path;
+
+const $folder = fs::tempDir();
+const $file = path::join($folder, 'people.csv');
+fs::write($file, """
+    name,age,city
+    Ana,34,Lisbon
+    "Smith, John",17,Boston
+    Bo,51,Lisbon
+    """);
+
+// Rows as lists of strings
+for ($row in csv::read($file).skip(1)) {
+    outln($row.join(' | '));
+}
+
+// Or as maps by the names of the columns. Every value is a string
+const $people = csv::readMaps($file);
+const $adults = $people.filter(($p) -> ($p['age']?.toNumber() ?? 0) >= 18);
+outln($adults.map(($p) -> $p['name']).join(', '));
+outln($people.countBy(($p) -> $p['city']));
+
+// Maps write their keys in a first line. Values with commas get quotes
+const $out = path::join($folder, 'by_age.csv');
+const $byAge = $people.sortedBy(($p) -> $p['age']?.toNumber() ?? 0);
+csv::write($out, $byAge.map(($p) -> {'name' => $p['name'], 'age' => $p['age']}));
+out(fs::read($out));
+
+// Other separators: '\t' for TSV, ';' for spreadsheets that write decimals with commas
+out(csv::stringify([['name', 'score'], ['Ana', 9.5]], separator: ';'));
+
+fs::removeAll($folder);

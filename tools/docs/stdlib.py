@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Builds the javadoc-style page of the standard library from the notes in
-ideas/stdlib: the README, the types in types/*.md and the modules in *.md.
+ideas/stdlib: the README, the types in types/*.md and the modules in *.md
+and format/*.md. A section of a module with a Field table is a class of it
+(i.e. `Response` in http.md).
 
     python3 tools/docs/stdlib.py                 # writes target/docs/stdlib.html
     python3 tools/docs/stdlib.py out.html        # writes out.html
@@ -13,9 +15,12 @@ repo = here.parent.parent
 root = repo / 'ideas' / 'stdlib'
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'target' / 'docs' / 'stdlib.html'
 TYPES = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'symbol', 'regex', 'command']
-MODULES = ['general', 'fs', 'path', 'env', 'io', 'process', 'json', 'time']
-PAGES = set(TYPES) | set(MODULES)
-MEMBER_HEADERS = ('Method', 'Function', 'Constant')
+# The file of each module, and the name scripts reach it by
+MODULES = [('general', 'general'), ('fs', 'fs'), ('path', 'path'), ('env', 'env'), ('io', 'io'),
+           ('process', 'process'), ('http', 'http'), ('format/json', 'json'), ('format/csv', 'csv'),
+           ('time', 'time')]
+PAGES = set(TYPES) | {name for _, name in MODULES}
+MEMBER_HEADERS = ('Method', 'Function', 'Constant', 'Field')
 
 
 def inline(text):
@@ -97,9 +102,10 @@ def parse_doc(path):
     while i < len(lines):
         line = lines[i]
         if line.startswith('## '):
-            cur = {'name': line[3:].strip(), 'text': [], 'rows': []}
+            cur = {'name': line[3:].strip(), 'text': [], 'rows': [], 'class': False}
             sections.append(cur)
         elif line.strip().startswith('|') and cells(line)[0] in MEMBER_HEADERS and cur is not None:
+            cur['class'] |= cells(line)[0] == 'Field'
             i += 2  # the header and the `---` line
             while i < len(lines) and lines[i].strip().startswith('|'):
                 cur['rows'].append(cells(lines[i])[:3])
@@ -124,8 +130,8 @@ def sig(member):
 docs = []
 for name in TYPES:
     docs.append((name, 'type', *parse_doc(root / 'types' / f'{name}.md')))
-for name in MODULES:
-    docs.append((name, 'module', *parse_doc(root / f'{name}.md')))
+for file, name in MODULES:
+    docs.append((name, 'module', *parse_doc(root / f'{file}.md')))
 
 readme = (root / 'README.md').read_text().split('\n', 1)[1]
 overview = md_block(readme)
@@ -155,7 +161,12 @@ for name, kind, title, intro, sections in docs:
             mname, signature = sig(member.strip('`'))
             anchor = re.sub(r'[^A-Za-z0-9-]', '', f'{name}-{mname}'.replace('?', 'Q'))
             first = desc.split(' *(')[0]
-            shown = f'{name}::{mname}' if kind == 'module' and name != 'general' else mname
+            if s.get('class'):
+                shown = f'{name}::{s["name"]}.{mname}'
+            elif kind == 'module' and name != 'general':
+                shown = f'{name}::{mname}'
+            else:
+                shown = mname
             rows.append(
                 f'<tr data-cat="{i}">'
                 f'<td class="ret"><code>{inline(returns)}</code></td>'
