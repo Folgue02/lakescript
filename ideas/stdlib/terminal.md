@@ -38,7 +38,7 @@ const $port = terminal::ask('Port?', check: ($s) -> $s.digits?() ? null : 'a num
 - **Prompts are written to stderr**, so what the script writes to stdout can still be piped or captured *(i.e. `name=$(lks script.lks)`)*, like `gum` and `fzf` do.
 - **Without a person at the terminal** *(stdin piped, CI)*, prompts read their answer from stdin, a line each, so `echo y | script.lks` works. `choose` takes a line with one of the options, and `chooseMany` one with options separated by commas. When stdin has nothing more, the default is the answer, and without a default it's an error.
     - **Except `password`**, which never reads from a pipe: without a terminal it throws an `IOError`, so a secret never comes from a file or a command by accident.
-- **Ctrl+C** while a prompt or a ready-made piece waits throws an `Interrupted`, a new built-in exception, after putting the terminal back as it was. The script can catch it *(i.e. to clean up, or to take it as a "no")*. Not caught, the script stops with the code 130, like shells do, without the message of an error.
+- **Ctrl+C** throws an `Interrupted`, like it does anywhere in a script *(see Ctrl+C in [errors.md](../language/errors.md))*. While a prompt or a ready-made piece waits, the terminal is in raw mode, so Ctrl+C arrives as a key: the terminal is put back as it was first, then it's thrown.
 
 ## Styles
 
@@ -87,17 +87,22 @@ for ($f in $files) {
 }
 $bar.finish();
 
-terminal::spinner('Downloading', () -> http::download($url, 'x.tgz'));
+// Without a total, it's a spinner that turns with each `advance()`
+const $pages = terminal::progress(null, 'Reading pages');
+while ($next != null) {
+    $next = scrape($next);
+    $pages.advance();
+}
+$pages.finish();
 ```
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `progress(?number $total, string $label = '')` | `Progress` | A bar that fills up to `$total`. With `null`, it only shows that something is happening, without a percentage |
-| `spinner(string $label, () -> T $code)` | `T` | Runs `$code` with a spinner next to `$label`, and gives what it returned |
+| `progress(?number $total, string $label = '')` | `Progress` | A bar that fills up to `$total`. With `null`, a spinner that shows that something is happening, without a percentage |
 
 A `Progress` has `advance(number $n = 1)`, which moves it forward, and `finish()`, which leaves it full and goes to the next line.
 
-- A spinner turns while the code runs. Lakescript has no concurrency, so a thread in Rust draws it while the VM runs the code.
+- **No spinner that turns on its own** while the script's code runs *(i.e. `spinner('Downloading', () -> ...)`)*. It would need a thread drawing while the VM runs, which collides with what the script prints, with the commands it runs and with Ctrl+C: a small concurrency system hidden in one function, in a language without concurrency. `progress(null)` turns with each `advance()` instead, which covers loops. For one long call, a line like `Downloading...` is enough. It can come back if the language gets concurrency.
 
 ## Ready-made pieces
 
@@ -118,7 +123,7 @@ A `Progress` has `advance(number $n = 1)`, which moves it forward, and `finish()
 - A rendering engine of our own, or an API like curses.
 - Widgets as hierarchies of classes.
 - The mouse and images in the terminal, at first.
-- Async or concurrency: the spinner's thread is inside the module.
+- Async or concurrency, and so a spinner that turns on its own.
 
 ## Later
 

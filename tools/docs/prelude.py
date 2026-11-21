@@ -61,6 +61,7 @@ type exception
 string message();
 string typeName();
 number line();
+list<string> trace();
 '''
 
 

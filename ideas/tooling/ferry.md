@@ -82,6 +82,7 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 | `ferry new <author/name>` | Creates a project in a new folder. `--lib` makes a library |
 | `ferry run [command] [arguments...]` | Runs one of the project's commands from `bin/`, with its dependencies on the module path. The name can be left out when there's only one |
 | `ferry check` | Type checks the whole project without running it, its tests too |
+| `ferry doc [package\|std\|name] [--open]` | Makes the docs of the project, of a package or of the standard library, and opens them with `--open`. With a name *(i.e. `units::bytes`)*, writes its docs in the terminal *(see [docs.md](docs.md))* |
 | `ferry test [filter]` | Runs the tests in `tests/`, or only the ones whose name has `filter` *(see [testing.md](testing.md))* |
 | `ferry add <repository:author/name@version>` | Adds a dependency to `ferry.toml` and downloads it *(i.e. `ferry add github:acme/http@1.4.2`)* |
 | `ferry install [repository:author/name@version]` | Installs the commands of an application into `~/.ferry/bin`: the project in the current folder, or one downloaded from a repository |

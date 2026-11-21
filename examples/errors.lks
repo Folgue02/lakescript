@@ -93,3 +93,19 @@ try {
 } catch (ValueError $e) {
     outln(f"{$e.typeName()}: {$e.message()}");
 }
+
+// `$e.trace()` gives the calls an exception was thrown through, the first
+// one first and where it was thrown last. A caught exception prints nothing on
+// its own; one that isn't caught shows these calls above the error
+number portNumber(string $value) = $value.toNumber();
+number portOf(map<string, string> $config) = portNumber($config['port'] ?? '');
+
+try {
+    portOf({'port' => 'eighty'});
+} catch (ValueError $e) {
+    outln(f"{$e.message()}, through {$e.trace().length()} calls:");
+    for ($call in $e.trace()) {
+        // Only the name of the file, without its folders
+        outln('  ' + $call.replaceMatches(%r"\(.*/", '('));
+    }
+}

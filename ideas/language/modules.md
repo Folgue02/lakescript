@@ -126,6 +126,27 @@ string _read(string $path) = readFile($path);   // only usable in this file
     - Anything else at the top level of an imported module is an error *(i.e. `outln('loaded');`)*. Only the script being run can have statements at its top level.
 - `use` lines go at the top of the file, before any other statement. A `use` inside a function, an `if` or a loop is an error, so all the modules a file needs can be seen at a glance.
 
+## Documenting folders
+
+*Decided, not built yet.*
+
+A module documents itself with the `///` comments of its declarations *(see Doc comments in [functions.md](functions.md))*. A folder of modules is documented by a `module.md` in it, in Markdown: what the folder holds, or is meant to hold.
+
+```
+src/folgue02/web/
+├── module.md            // what folgue02/web is: the front page of the library
+├── server.lks
+└── api/
+    ├── module.md        // what goes in api/: the endpoints, one module each
+    ├── users.lks
+    └── orders.lks
+```
+
+- `module.md` rather than `README.md`: the name says what it's for, and it doesn't mix with the `README.md` files a repository has for the people who read it. GitHub and GitLab don't show it on their own, which is the cost.
+- `ferry doc` gives each folder a page with its `module.md` first and then its modules. The one in `src/<author>/<name>/` is the front page of the library *(see phase 9 in [roadmap.md](../roadmap.md))*.
+- Editors show its first paragraph on hover over a part of a `use` path *(i.e. `api` in `use folgue02/web/api/users;`)*, and its first line next to each folder while a `use` path is completed.
+- `ferry` already leaves the files of `src/` that aren't `.lks` alone, so a `module.md` there changes nothing for it.
+
 ## Rules
 
 - `::` is a single token, so it's never confused with a symbol *(`:name`)*.

@@ -19,7 +19,7 @@
     - See [errors.md](errors.md) for the built-in exceptions, `catch`, `finally` and `throw`.
 - Support for shebangs `#!/usr/bin/lks`
 - Comments: `// until the end of the line` and `/* block comments */`, which can span several lines.
-    - Doc comments start with `///` and go before what they document, so editors can show them *(still to be discussed)*.
+    - Doc comments start with `///` and go before what they document, so editors can show them *(see Doc comments in [functions.md](functions.md))*.
 - Blocks used as values end with `};`, since they're part of a statement: maps, anonymous functions, `switch` and `if` expressions *(i.e. `const $scores = { ... };`)*. Blocks of statements like `if`, `for`, `while` or function definitions end with just `}`.
 - Trailing commas are allowed in lists, maps, function parameters and arguments *(i.e. `['a', 'b',]`)*, so multi-line lists can be reordered and extended without touching the other lines.
 - Scripts run from top to bottom. A function can be called by the statements after its declaration, and by other functions from anywhere *(see [functions.md](functions.md))*.

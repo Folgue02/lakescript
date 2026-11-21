@@ -71,8 +71,12 @@ impl Engine {
             self.host.error = error;
             let failure = match result {
                 Ok(_) => None,
-                Err(Flow::Throw(e)) if &*e.kind == exceptions::ASSERTION_ERROR => Some(Diagnostic::new(e.message.clone(), e.span)),
-                Err(Flow::Throw(e)) => Some(uncaught(&e)),
+                Err(Flow::Throw(e)) if &*e.kind == exceptions::ASSERTION_ERROR => {
+                    let mut failure = Diagnostic::new(e.message.clone(), e.span);
+                    failure.trace = uncaught(&e, &self.host.loader.files).trace;
+                    Some(failure)
+                }
+                Err(Flow::Throw(e)) => Some(uncaught(&e, &self.host.loader.files)),
                 Err(Flow::Exit(code)) => Some(Diagnostic::new(format!("the test called `exit({code})`"), Default::default())),
             };
             results.push(TestResult { name, failure: failure.map(|d| self.locate(d)), output: captured.text(), seconds });
@@ -91,6 +95,10 @@ pub fn render_result(result: &TestResult, file: &str, paint: Paint) -> String {
         return format!("{} {}\n", paint.good(&format!("{:>12}", "ok")), result.name);
     };
     let mut text = format!("{} {}\n", paint.error(&format!("{:>12}", "FAIL")), result.name);
+    // The calls that led to it, like an uncaught error shows them
+    for call in &failure.trace {
+        text.push_str(&format!("{indent}{} {}\n", paint.dim("at"), &call.render(file)[3..]));
+    }
     let place = match failure.span.line {
         0 => String::new(),
         line => format!("{}:{line}:{}: ", failure.file.as_deref().unwrap_or(file), failure.span.column),

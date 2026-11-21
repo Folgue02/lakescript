@@ -120,6 +120,19 @@ pub struct ExceptionValue {
     pub message: String,
     /// Where it was thrown.
     pub span: Span,
+    /// The calls it was thrown through, taken the first time it's thrown, so
+    /// throwing it again keeps them. `None` before it's thrown.
+    pub trace: RefCell<Option<Rc<Vec<TraceEntry>>>>,
+}
+
+/// A call that hadn't finished when an exception was thrown: the function
+/// it was in, and where it was in it *(see Tracebacks in ideas/language/errors.md)*.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraceEntry {
+    pub function: Rc<str>,
+    pub span: Span,
+    /// More than 1 for a function that called itself from the same place.
+    pub times: u32,
 }
 
 pub enum ResultValue {

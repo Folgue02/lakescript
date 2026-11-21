@@ -115,6 +115,10 @@ pub struct Compiler<'a> {
     declared: HashSet<String>,
     /// Compiling a module imported with `use`: only declarations at its top level.
     module: bool,
+    /// `report::` for the functions of the module `report`, for tracebacks.
+    prefix: String,
+    /// How tracebacks name the top level, when it isn't a script or a module *(i.e. `the template`)*.
+    top_shown: Option<String>,
     /// What a module makes available with `pub`.
     pub public: HashSet<String>,
     /// The classes being compiled, the innermost last, for `Self`.
@@ -132,6 +136,8 @@ impl<'a> Compiler<'a> {
             functions: Vec::new(),
             declared: HashSet::new(),
             module: false,
+            prefix: String::new(),
+            top_shown: None,
             public: HashSet::new(),
             classes: Vec::new(),
             span: Span::default(),
@@ -148,14 +154,24 @@ impl<'a> Compiler<'a> {
     /// Compiles a module imported with `use`, and what it makes public.
     pub fn module(mut self, program: &[Stmt], name: &str) -> Compiled<(Rc<Proto>, HashSet<String>)> {
         self.module = true;
+        let stem = std::path::Path::new(name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        self.prefix = format!("{stem}::");
+        self.top_shown = Some(format!("the module {stem}"));
         let proto = self.top(program, name)?;
         Ok((proto, self.public))
+    }
+
+    /// Names the top level in tracebacks *(i.e. `the template`)*.
+    pub fn shown_as(mut self, name: &str) -> Self {
+        self.top_shown = Some(name.to_string());
+        self
     }
 
     fn top(&mut self, program: &[Stmt], name: &str) -> Compiled<Rc<Proto>> {
         let mut captured = HashSet::new();
         collect_stmts(program, false, &mut captured);
         self.functions.push(FnState::new(name, captured, true));
+        self.f().proto.shown = Rc::from(self.top_shown.clone().unwrap_or_else(|| "the script".to_string()));
         self.hoist(program);
         for stmt in program {
             if self.module {
@@ -892,7 +908,13 @@ impl<'a> Compiler<'a> {
         }
         let mut captured = HashSet::new();
         collect_function(decl, false, &mut captured);
+        // Lambdas have no name: they're named by the function they're in
+        let shown = match self.functions.last() {
+            Some(outer) if decl.name == "anonymous" => format!("a lambda in {}", outer.proto.shown),
+            _ => format!("{}{}", self.prefix, decl.name),
+        };
         self.functions.push(FnState::new(&decl.name, captured, false));
+        self.f().proto.shown = Rc::from(shown);
         let n = decl.params.len() as u32;
         self.f().next_slot = n;
         self.f().proto.slots = n;

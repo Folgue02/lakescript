@@ -175,6 +175,13 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
         Value::Exception(e) => match method {
             "message" => Some(string(&e.message)),
             "line" => Some(Value::Int(e.span.line as i64)),
+            // The calls it was thrown through, the first one first, with where it was thrown last
+            "trace" => {
+                let files = &interp.host.loader.files;
+                let script = files.first().cloned().unwrap_or_default();
+                let lines = crate::interpreter::calls(e, files, true).iter().map(|c| Value::string(&c.render(&script))).collect();
+                Some(Value::list(lines))
+            }
             _ => None,
         },
         Value::Result(r) => result_method(interp, r, &args)?,

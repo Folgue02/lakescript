@@ -81,6 +81,7 @@ fn language_examples() {
         ("examples/errors.lks", "ConfigError: the port must be a number"),
         ("examples/errors.lks", "Bad port '99999': 99999 isn't a valid port"),
         ("examples/errors.lks", "https\ntrue"),
+        ("examples/errors.lks", "'eighty' isn't a number, through 3 calls:\n  at the script (errors.lks:104:5)\n  at portOf (errors.lks:101:46)\n  at portNumber (errors.lks:100:36)\n"),
         ("examples/types.lks", "the string 'hi'"),
     ] {
         let out = run_ok(&[script]);

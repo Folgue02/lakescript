@@ -334,6 +334,8 @@ pub struct Import {
 #[derive(Debug, Default)]
 pub struct Proto {
     pub name: Rc<str>,
+    /// How tracebacks name it *(i.e. `report::build`, `a lambda in build`, `the script`)*.
+    pub shown: Rc<str>,
     pub params: Vec<Param>,
     pub code: Vec<Op>,
     /// The place in the source of each instruction, for errors.

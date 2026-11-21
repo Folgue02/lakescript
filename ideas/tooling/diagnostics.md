@@ -12,6 +12,8 @@ error: $age is a number, can't assign a string
 
 `lks` shows errors this way: syntax errors, type errors and exceptions that aren't caught. A program that embeds Lakescript gets the message, the file, the line and the column, and can show them however it wants *(`Diagnostic::render` for one line, `Diagnostic::render_with_source` for this format)*.
 
+An exception that isn't caught also shows the calls that led to it, a line each above the error *(i.e. `  at report::build (/home/ana/report.lks:2:19)`, see Tracebacks in [errors.md](../language/errors.md))*. Both renders write them, and `Diagnostic::trace` has them for a program that shows errors its own way.
+
 ## Colors
 
 On a terminal, errors have colors like Rust's: `error:` and the marker under the code in red, the message in bold, and the frame around the code *(`-->`, the line number and `|`)* in blue. The help texts of `lks` and `ferry` have their headings in green and their commands and options in cyan.

@@ -93,14 +93,23 @@ fn html_escaping() {
     ));
     assert_eq!(out, "<h1>A &amp; B</h1>\n<A & B>\n<h1>A & B</h1>\n<p>A &amp; B</p>\n[A & B]\n");
     let e = error(&format!("use std/template;\ntemplate::renderFile('{}/page.html', {{}});", dir.display()));
-    assert!(e.starts_with(&format!("{}/page.html:1:8: error: `$title` isn't declared", dir.display())), "{e}");
+    assert!(e.contains(&format!("\n{}/page.html:1:8: error: `$title` isn't declared", dir.display())), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
     assert!(error("use std/template;\ntemplate::renderFile('/nonexistent/t.html');").contains("FileNotFound"));
 }
 
 #[test]
 fn errors_point_at_the_template() {
-    let fails = |template: &str| error(&format!("use std/template;\ntemplate::render({});", quoted(template)));
+    // The error, without the calls that led to it
+    let fails = |template: &str| {
+        let e = error(&format!("use std/template;\ntemplate::render({});", quoted(template)));
+        e.lines().filter(|l| !l.starts_with("  at ")).collect::<Vec<_>>().join("\n")
+    };
+    // An error while it runs: the script called `template::render`
+    assert_eq!(
+        error("use std/template;\ntemplate::render('a\\n  {{ $x.upper() }}');"),
+        "  at the script (test.lks:2:1)\n<template>:2:6: error: `$x` isn't declared"
+    );
     assert_eq!(fails("a\n  {{ $x.upper() }}"), "<template>:2:6: error: `$x` isn't declared");
     assert_eq!(fails("{{ 5.upper() }}"), "<template>:1:4: error: TypeError: a number has no method `.upper()`");
     // Columns count characters, also after ones of several bytes
@@ -116,7 +125,9 @@ fn errors_point_at_the_template() {
     assert_eq!(fails("{{ }}"), "<template>:1:1: error: there's nothing inside this `{{ }}`");
     // Errors of the script stay in the script
     assert!(error("use std/template;\ntemplate::render('{{ $x }}', {'a b' => 1});").contains("test.lks:2:1: error: ValueError: 'a b' can't be the name"));
-    assert!(error("use std/template;\ntemplate::render('{{ $f() }}', {'f' => () -> 5.upper()});").starts_with("test.lks:2:"));
+    // A function of the script that fails inside the template: the template called it
+    let e = error("use std/template;\ntemplate::render('{{ $f() }}', {'f' => () -> [1].removeAt(3)});");
+    assert!(e.starts_with("  at the script (test.lks:2:1)\n  at the template (<template>:1:4)\ntest.lks:2:"), "{e}");
     // A template can catch nothing, but the script can
     assert_eq!(
         run("use std/template;\ntry {\n    template::render('{{ $x }}');\n} catch ($e) {\n    outln($e.line());\n}"),

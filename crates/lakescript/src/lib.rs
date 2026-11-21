@@ -33,7 +33,7 @@ pub mod value;
 
 pub use checker::complete::{Completion, Item as CompletionItem, ItemKind as CompletionKind};
 pub use checker::names::{Definition, Name};
-pub use diagnostic::Diagnostic;
+pub use diagnostic::{Call, Diagnostic};
 pub use engine::{CapturedOutput, Engine, Outcome};
 pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use value::{NativeContext, NativeError, NativeResult, Value};

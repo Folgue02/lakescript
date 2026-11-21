@@ -156,3 +156,40 @@ createFile(extension: "jpg", name: "daniel");
 // Or
 createFile('daniel', 'jpg');
 ```
+
+## Doc comments
+
+`///` comments go on the lines right before a declaration: a function, a class, an interface, an enum, a field, a method or a `const`. Editors show them on hover, and `command`s use them as their `--help` *(see [cli.md](cli.md))*.
+
+A function or a method describes its parameters, what it returns and what it throws with lines that start with their name, after its description. A parameter is written as in the code, with its `$`:
+
+```
+/// Greets someone, as many times as asked.
+///
+/// $name: who to greet
+/// $times: how many times, at least 1
+/// returns: the greeting, one line per time
+/// throws ValueError: when `$times` is less than 1
+pub string greet(string $name, number $times = 1) = ...;
+```
+
+- `$name:` describes a parameter, `returns:` what it gives back, and `throws ValueError:` when it throws that exception, one line for each exception. A description can go on in the next lines, indented.
+- It's like Javadoc's `@param`, `@return` and `@throws`, but written as the language writes things: `@` is a field in Lakescript *(i.e. `@x`)*, so `@name` in a comment would look like one.
+- *Decided, not built yet.* With these lines:
+    - Hover on a parameter shows its line, also on a named argument of a call *(i.e. `times:` in `greet('Ana', times: 2)`)*.
+    - Editors show what the argument being written is for while a call is typed *(signature help, in `lks-lsp`)*.
+    - The checker warns about a `$name` that the function doesn't have, so comments don't go stale after a rename.
+    - `ferry doc` shows the parameters, what it returns and what it throws as tables *(see phase 9 in [roadmap.md](../roadmap.md))*.
+- A folder of modules is documented by a `module.md` in it *(see Documenting folders in [modules.md](modules.md))*.
+- **The text is Markdown** *(i.e. `` `code` ``, `*emphasis*`, lists and links)*, which editors and `ferry doc` show formatted. The lines `$name:`, `returns:` and `throws ...:` are the only syntax of their own, and their descriptions are Markdown too.
+- **A module documents itself with `//!`** at the top of its file, before its `use` lines, like Rust's: what the module is for, in Markdown. Its `///` comments are for what it declares, and a folder of modules has a `module.md` *(see Documenting folders in [modules.md](modules.md))*.
+
+```
+//! Sizes in bytes, read and written the way people do *(i.e. `1.5 KB`)*.
+//! Both commands of the project use it.
+
+use std/format/json;
+```
+
+- Still open: examples in comments.
+

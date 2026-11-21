@@ -14,7 +14,7 @@ use crate::exceptions::{TYPE_ERROR, VALUE_ERROR};
 use crate::interpreter::{Exec, Flow, Interpreter, flow_error, flow_error_as, native_error};
 use crate::modules::Globals;
 use crate::token::Span;
-use crate::value::{ExceptionValue, Function, Key, NativeError, NativeFunction, Value};
+use crate::value::{ExceptionValue, Function, Key, NativeError, NativeFunction, TraceEntry, Value};
 
 pub fn register(m: &mut Exports) {
     m.vm_function("render", &["text", "values", "html"], render);
@@ -123,10 +123,24 @@ fn run(vm: &mut Interpreter, text: &str, name: &str, values: &Value, html: bool,
     })?;
     match vm.call(&function, Vec::new(), Vec::new(), span) {
         Ok(_) => {}
-        // An error inside the template points at the template
-        Err(Flow::Throw(e)) if e.span.file == file => {
+        Err(Flow::Throw(e)) => {
+            // Its calls inside the template point at the template
+            let at = |s: Span| {
+                let (_, start, end) = moved("", s.start, s.end, &template.code, map);
+                place(text, start, end, file)
+            };
+            let trace = e.trace.borrow().clone().map(|t| {
+                let moved: Vec<TraceEntry> = t.iter().map(|c| TraceEntry { span: if c.span.file == file { at(c.span) } else { c.span }, ..c.clone() }).collect();
+                Rc::new(moved)
+            });
+            if e.span.file != file {
+                *e.trace.borrow_mut() = trace;
+                return Err(Flow::Throw(e));
+            }
+            // An error inside the template points at the template
             let (message, start, end) = moved(&e.message, e.span.start, e.span.end, &template.code, map);
-            let e = ExceptionValue { kind: e.kind.clone(), base: e.base.clone(), object: e.object.clone(), message, span: place(text, start, end, file) };
+            let span = place(text, start, end, file);
+            let e = ExceptionValue { kind: e.kind.clone(), base: e.base.clone(), object: e.object.clone(), message, span, trace: RefCell::new(trace) };
             return Err(Flow::Throw(Rc::new(e)));
         }
         Err(other) => return Err(other),

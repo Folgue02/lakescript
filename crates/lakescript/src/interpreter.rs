@@ -71,14 +71,36 @@ fn index_error(message: String, span: Span) -> Flow {
     flow_error_as(kind, message, span)
 }
 
-/// How an uncaught exception is reported.
-pub fn uncaught(exception: &ExceptionValue) -> Diagnostic {
+/// How an uncaught exception is reported: its message, where it was thrown,
+/// and the calls that led there. `files` are the names of the files, by number.
+pub fn uncaught(exception: &ExceptionValue, files: &[String]) -> Diagnostic {
     let message = if &*exception.kind == "Exception" {
         exception.message.clone()
     } else {
         format!("{}: {}", exception.kind, exception.message)
     };
-    Diagnostic::new(message, exception.span)
+    let mut diagnostic = Diagnostic::new(message, exception.span);
+    diagnostic.trace = calls(exception, files, false);
+    diagnostic
+}
+
+/// The calls an exception was thrown through, the first one first. With
+/// `last`, also the one where it was thrown, which an uncaught exception shows
+/// as the error itself. The script being run has no file: its calls name it
+/// when they're shown.
+pub fn calls(exception: &ExceptionValue, files: &[String], last: bool) -> Vec<crate::diagnostic::Call> {
+    let Some(trace) = exception.trace.borrow().clone() else { return Vec::new() };
+    let shown = if last { trace.len() } else { trace.len().saturating_sub(1) };
+    trace[..shown]
+        .iter()
+        .map(|t| crate::diagnostic::Call {
+            function: t.function.to_string(),
+            file: if t.span.file == 0 { None } else { files.get(t.span.file as usize).cloned() },
+            line: t.span.line,
+            column: t.span.column,
+            times: t.times,
+        })
+        .collect()
 }
 
 const TOO_DEEP: &str = "too many nested calls. Is there a recursion that never ends?";
@@ -187,7 +209,7 @@ impl<'a> Interpreter<'a> {
         match self.call(&script, Vec::new(), Vec::new(), Span::default()) {
             Ok(_) => Ok(Outcome::Finished),
             Err(Flow::Exit(code)) => Ok(Outcome::Exit(code)),
-            Err(Flow::Throw(exception)) => Err(uncaught(&exception)),
+            Err(Flow::Throw(exception)) => Err(uncaught(&exception, &self.host.loader.files)),
         }
     }
 
@@ -366,6 +388,9 @@ impl<'a> Interpreter<'a> {
     /// there's none in the frames of this run, they're dropped and the error
     /// goes back to the Rust code that started it.
     fn unwind(&mut self, flow: Flow, entry: usize) -> Exec<()> {
+        if let Flow::Throw(e) = &flow {
+            self.keep_trace(e);
+        }
         while let Some(handler) = self.handlers.last() {
             if handler.frame < entry {
                 break;
@@ -392,6 +417,29 @@ impl<'a> Interpreter<'a> {
         self.frames.truncate(entry);
         self.stack.truncate(base - 1);
         Err(flow)
+    }
+
+    /// Takes the calls an exception is thrown through, the first time it's
+    /// thrown: from the frames, which are all still there. Each frame is at
+    /// the call it made, and the last one where the exception was thrown. A
+    /// function that called itself from the same place is one entry.
+    fn keep_trace(&self, e: &ExceptionValue) {
+        if e.trace.borrow().is_some() {
+            return;
+        }
+        let mut entries: Vec<crate::value::TraceEntry> = Vec::new();
+        let last = self.frames.len().saturating_sub(1);
+        for (i, frame) in self.frames.iter().enumerate() {
+            let Function::User(user) = &*frame.function else { continue };
+            let span = if i == last { e.span } else { user.proto.spans.get(frame.ip.wrapping_sub(1)).copied().unwrap_or_default() };
+            let function = if user.proto.shown.is_empty() { user.proto.name.clone() } else { user.proto.shown.clone() };
+            // Where it was thrown is always an entry of its own: the error itself
+            match entries.last_mut() {
+                Some(prev) if i != last && prev.function == function && prev.span == span => prev.times += 1,
+                _ => entries.push(crate::value::TraceEntry { function, span, times: 1 }),
+            }
+        }
+        *e.trace.borrow_mut() = Some(Rc::new(entries));
     }
 
     fn pop(&mut self) -> Value {
@@ -1084,6 +1132,7 @@ impl<'a> Interpreter<'a> {
                             object: exception.object.clone(),
                             message: exception.message.clone(),
                             span: span!(),
+                            trace: Default::default(),
                         })
                     } else {
                         exception
@@ -1296,7 +1345,7 @@ impl<'a> Interpreter<'a> {
     /// as a script of the file `file`, whose top level is `globals`.
     pub(crate) fn compile_generated(&mut self, code: &str, file: u32, globals: &Rc<Globals>) -> Result<Rc<Function>, Diagnostic> {
         let program = crate::parse_budgeted(code, file, self.stack_budget)?;
-        let proto = Compiler::new(globals, &self.host.builtin_names, self.stack_budget).script(&program)?;
+        let proto = Compiler::new(globals, &self.host.builtin_names, self.stack_budget).shown_as("the template").script(&program)?;
         Ok(Rc::new(Function::User(UserFunction { proto, upvalues: Vec::new(), globals: globals.clone() })))
     }
 
@@ -1523,7 +1572,7 @@ impl Interpreter<'_> {
                 Value::Str(s) => s.to_string(),
                 other => other.to_string(),
             };
-            return Ok(Value::Exception(Rc::new(ExceptionValue { kind: class.name.clone(), base: base.clone(), object: Some(object), message, span: Span::default() })));
+            return Ok(Value::Exception(Rc::new(ExceptionValue { kind: class.name.clone(), base: base.clone(), object: Some(object), message, span: Span::default(), trace: Default::default() })));
         }
         Ok(value)
     }
