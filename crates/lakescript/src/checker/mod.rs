@@ -1068,8 +1068,9 @@ impl<'a> Checker<'a> {
             return Ok(sig.clone());
         }
         let shown = file.display().to_string();
+        // An error of a module it uses already names that module
         let located = |mut d: Diagnostic| {
-            d.file = Some(shown.clone());
+            d.file.get_or_insert_with(|| shown.clone());
             d
         };
         let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
@@ -1185,8 +1186,9 @@ impl<'a> Checker<'a> {
 
     fn check_module(&mut self, file: &std::path::Path) -> Check<ModuleSig> {
         let shown = file.display().to_string();
+        // An error of a module it uses already names that module
         let located = |mut d: Diagnostic| {
-            d.file = Some(shown.clone());
+            d.file.get_or_insert_with(|| shown.clone());
             d
         };
         let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;

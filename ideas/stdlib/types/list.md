@@ -50,7 +50,7 @@ These change the list.
 | `sorted()` | `list<T>` | A sorted copy |
 | `sortBy<K>((T) -> K $key)` | `list<T>` | Sorts the list by what `$key` returns *(i.e. `$files.sortBy(($f) -> $f.length())`)* |
 | `sortedBy<K>((T) -> K $key)` | `list<T>` | A copy sorted by what `$key` returns |
-| `sortWith((T, T) -> number $compare)` | `list<T>` | Sorts the list with a comparison function, which returns a negative number if the first value goes first, a positive one if the second does, and `0` if they're equal. For values `<` can't compare, like lists *(i.e. `$rows.sortWith(($a, $b) -> $a[0] - $b[0])`)*. The sort is stable, so equal values keep their order. Returns the list |
+| `sortWith((T, T) -> number $compare)` | `list<T>` | Sorts the list with a comparison function, which returns a negative number if the first value goes first, a positive one if the second does, and `0` if they're equal. For values `<` can't compare, like lists *(i.e. `$words.sortWith(($a, $b) -> $a.length() - $b.length())`)*. To sort by a part of each value, `sortBy` is shorter: `$rows.sortBy(($r) -> $r[0])`. The sort is stable, so equal values keep their order. Returns the list |
 | `sortedWith((T, T) -> number $compare)` | `list<T>` | A copy sorted with a comparison function |
 | `reverse()` | `list<T>` | Reverses the list. Returns the list |
 | `reversed()` | `list<T>` | A reversed copy |

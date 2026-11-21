@@ -153,6 +153,18 @@ fn errors_in_modules_name_their_file() {
 }
 
 #[test]
+fn type_errors_name_the_module_they_are_in() {
+    let dir = TempDir::new("errfile-deep");
+    dir.file("inner.lks", "pub number twice(number $n) {\n    return 'two';\n}\n");
+    dir.file("outer.lks", "use inner;\npub number four() = inner::twice(2);\n");
+    let script = dir.file("main.lks", "use outer;\noutln(outer::four());");
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    let err = engine.check_file(&script).unwrap_err().render("main.lks");
+    // Two modules deep: the module the error is in, not the one that uses it
+    assert!(err.contains("inner.lks:2:"), "{err}");
+}
+
+#[test]
 fn constants_that_need_each_other_are_an_error() {
     let dir = TempDir::new("cycle");
     dir.file("a.lks", "use b;\npub const number $x = b::$y;\n");
