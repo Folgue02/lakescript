@@ -88,4 +88,5 @@ An editor starts `lks-lsp` with no arguments for files ending in `.lks`, and tal
 
 ## Editors
 
-- The first one is farsub, the editor of its own project. Others *(i.e. VS Code, Neovim, Helix)* come later: they only need to be told to start `lks-lsp` for `.lks` files.
+- The first one is farsub, the editor of its own project. It uses `lks-lsp` for errors, hover, go to definition and completion, through the LSP client it already had: `lks-lsp` is found on the `PATH` and never installed, with `ferry.toml` as the root of a project. Without `lks-lsp`, a `.lks` file says once that it wasn't found, and works as before.
+- Others *(i.e. VS Code, Neovim, Helix)* come later: they only need to be told to start `lks-lsp` for `.lks` files.
