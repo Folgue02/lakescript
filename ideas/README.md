@@ -10,7 +10,7 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
 ## Decisions that follow from this
 
 - **Scripts are compiled to bytecode** and run by a VM *(see [tooling/vm.md](tooling/vm.md))*.
-- **Compiled code may be cached, later**: the first run of a script would compile it and save the bytecode, and later runs of the same unchanged script would skip parsing, checking and compiling. It's left for later because startup is already about 2 ms *(close to bash)*, so today a cache would save 1 to 3 ms. It comes back when there's more to save, i.e. with `ferry` projects of many modules.
+- **Compiled code may be cached, later**: the first run of a script would compile it and save the bytecode, and later runs of the same unchanged script would skip parsing, checking and compiling. It's left for later because startup is already about 2 ms *(close to bash)*, so today a cache would save 1 to 3 ms. Measured again for `v0.8.0`: about 1.6 ms of a small script is starting the process, which a cache can't save, up to 1 ms is the checker loading the signatures of the standard library, and a script of 12,000 lines takes 19 ms. It comes back when there's more to save, i.e. with `ferry` projects of many modules.
     - The cache would be stored in a cache folder for the current user *(i.e. `~/.cache/lakescript` on Linux, `~/Library/Caches/lakescript` on macOS)*, not next to the script.
     - Each entry would be keyed by a hash of the script's contents and the interpreter version, so an edited script or a new interpreter version is compiled again.
 - **No JIT**: a JIT makes long programs faster but the first seconds slower, which is the opposite of what scripts need.
