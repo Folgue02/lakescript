@@ -13,13 +13,14 @@ use std/json;
 use helpers::{plural, $defaultKeep};
 
 const $args = process::args();
-if ($args.empty?() || $args.length() > 2) {
+const $folder = $args[0];
+if ($folder == null || $args.length() > 2) {
     errln('usage: backup.lks <folder> [<backups folder>]');
     exit(2);
 }
 
-const $source = path::absolute($args[0]);
-const $target = path::absolute($args.getOrDefault(1, path::join(path::home(), 'backups')));
+const $source = path::absolute($folder);
+const $target = path::absolute($args[1] ?? path::join(path::home(), 'backups'));
 
 if (!-d $source) {
     errln(f"backup: '{$source}' isn't a folder");

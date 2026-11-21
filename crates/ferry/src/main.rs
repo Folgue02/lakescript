@@ -148,7 +148,7 @@ fn new(spec: &str, library: bool) -> Result<ExitCode, Fail> {
         write(
             dir.join("bin").join(format!("{name}.lks")),
             format!(
-                "use std/process;\nuse {id}/greeting;\n\nconst $args = process::args();\noutln(greeting::greet(if ($args.empty?()) 'world' else $args[0]));\n"
+                "use std/process;\nuse {id}/greeting;\n\noutln(greeting::greet(process::args()[0] ?? 'world'));\n"
             ),
         )?;
     }

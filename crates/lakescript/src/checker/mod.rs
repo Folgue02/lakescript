@@ -2061,14 +2061,16 @@ impl<'a> Checker<'a> {
                 let i = self.expr(index, None)?;
                 match self.shallow(&i) {
                     Ty::Range => t.clone(),
-                    Ty::Number | Ty::Any | Ty::Var(_) => (**e).clone(),
+                    // Past the end it's `null`, like a missing key
+                    Ty::Number | Ty::Any | Ty::Var(_) => (**e).clone().nullable(),
                     other => return self.fail(format!("list indexes are numbers, not {}", a(&other)), index.span),
                 }
             }
             Ty::Str => {
                 let i = self.expr(index, None)?;
                 match self.shallow(&i) {
-                    Ty::Number | Ty::Range | Ty::Any | Ty::Var(_) => Ty::Str,
+                    Ty::Range => Ty::Str,
+                    Ty::Number | Ty::Any | Ty::Var(_) => Ty::Str.nullable(),
                     other => return self.fail(format!("string indexes are numbers, not {}", a(&other)), index.span),
                 }
             }

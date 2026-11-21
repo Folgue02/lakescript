@@ -16,5 +16,6 @@ outln($book.label());
 outln($ana.pending().map(($o) -> $o.label()));
 outln(f"{$ana.name} spent {$ana.spent() / 100}");
 
-Order $first = $ana.pending()[0];
-outln($first.customer.name);
+// An index past the end is `null`, so the order is checked first
+const $first = $ana.pending()[0];
+if ($first != null) outln($first.customer.name);

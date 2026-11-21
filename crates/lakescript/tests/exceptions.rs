@@ -57,7 +57,7 @@ fn parents_catch_their_children() {
 fn catch_everything_and_order() {
     let script = "
         try {
-            [1][5];
+            [1].removeAt(5);
         } catch (ValueError $e) {
             outln('wrong one');
         } catch ($e) {
@@ -119,8 +119,9 @@ fn errors_have_types() {
         ("1 % 0;", "ArithmeticError"),
         ("5.div(0);", "ArithmeticError"),
         ("'a' + 1;", "TypeError"),
-        ("[1][3];", "IndexError"),
-        ("'a'[3];", "IndexError"),
+        ("[1].removeAt(3);", "IndexError"),
+        ("let $l = [1]; $l[3] = 2;", "IndexError"),
+        ("'a'.codePoint(3);", "IndexError"),
         ("'abc'.toNumber();", "ValueError"),
         ("const $m = {'a' => 1}; $m['a'].as(string);", "TypeError"),
         ("'a'.padStart('x');", "TypeError"),

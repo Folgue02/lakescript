@@ -167,7 +167,7 @@ Operands: a variable declared with `let`. `$x op= $y` is the same as `$x = $x op
 | Operator | Name           | Example             | Behaviour |
 |----------|----------------|---------------------|-----------|
 | `?.`     | Nullable call  | `$user?.name()`     | If `$user` is `null`, the whole expression is `null` and `name()` isn't called |
-| `??`     | Coalesce       | `$nickname ?? $name`| The left side, or the right side if the left side is `null`. The right side is only evaluated when needed |
+| `??`     | Coalesce       | `$nickname ?? $name`| The left side, or the right side if the left side is `null`. The right side is only evaluated when needed. Indexes past the end of a list or a string and missing keys of a map are `null`, so `$args[0] ?? 'world'` gives a default |
 | `?[]`    | Nullable index | `$data?['user']?['name']` | If the left side is `null`, the whole expression is `null` and the index isn't used |
 
 **NOTE**: Like with `?(` in method names, `?[` written without a space is the nullable index. The ternary operator needs a space before a list: `$ok ? ['a'] : ['b']`, not `$ok ?['a'] : ['b']`.

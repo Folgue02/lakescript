@@ -138,7 +138,12 @@ fn lists() {
     assert_eq!(eval("[1, 2] == [1, 2]"), "false");
     assert_eq!(eval("[1, 2].equals([1, 2])"), "true");
     assert_eq!(eval("%w[a b].join('-')"), "a-b");
-    assert!(error("outln([1, 2][5]);").contains("outside the list"));
+    // Reading past either end gives `null`, writing there is an error
+    assert_eq!(eval("[1, 2][5]"), "null");
+    assert_eq!(eval("[1, 2][-3]"), "null");
+    assert_eq!(eval("[1, 2][-1]"), "2");
+    assert_eq!(eval("[1, 2][5] ?? 0"), "0");
+    assert_eq!(eval("'ab'[2] ?? '-'"), "-");
     assert!(error("let $l = [1]; $l[3] = 1;").contains("outside the list"));
 }
 

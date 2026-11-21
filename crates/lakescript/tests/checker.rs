@@ -82,9 +82,13 @@ fn functions_and_calls() {
 
 #[test]
 fn generics() {
-    let first = "T first<T>(list<T> $items) = $items[0];\n";
-    assert_eq!(ok(&format!("{first}outln(first(['a', 'b']).upper());")), "A\n");
-    assert!(rejected(&format!("{first}outln(first([1, 2]).upper());")).contains("a number has no method `.upper()`"));
+    let first = "T first<T>(list<T> $items, T $default) = $items[0] ?? $default;\n";
+    assert_eq!(ok(&format!("{first}outln(first(['a', 'b'], 'z').upper());")), "A\n");
+    assert!(rejected(&format!("{first}outln(first([1, 2], 0).upper());")).contains("a number has no method `.upper()`"));
+    // An index can be past the end, so it can be `null`
+    assert!(rejected("const $l = ['a'];\noutln($l[0].upper());").contains("can be `null`"));
+    assert!(rejected("string $s = 'ab'[0];").contains("can be `null`"));
+    assert_eq!(ok("const $l = ['a'];\noutln(($l[1] ?? 'b').upper());"), "B\n");
 }
 
 #[test]
@@ -92,7 +96,7 @@ fn methods_of_built_in_types() {
     assert_eq!(ok("outln('hello'.padStart(7, '*').upper());"), "**HELLO\n");
     assert!(rejected("'a'.nope();").contains("a string has no method `.nope()`"));
     assert!(rejected("'a'.padStart('x');").contains("must be a number, but this is a string"));
-    assert!(rejected("const $n = [1, 2].map(($x) -> $x * 2);\n$n[0].upper();").contains("a number has no method `.upper()`"));
+    assert!(rejected("const $n = [1, 2].map(($x) -> $x * 2);\n($n[0] ?? 0).upper();").contains("a number has no method `.upper()`"));
     assert!(rejected("'a1'.replace(%r\"\\d\", 'x');").contains("For a regex, use `.replaceMatches()`"));
     assert!(rejected("'a1'.replaceMatches('1', 'x');").contains("For a string, use `.replace()`"));
     assert_eq!(ok("outln(%w[b a].sorted().join('-'));"), "a-b\n");

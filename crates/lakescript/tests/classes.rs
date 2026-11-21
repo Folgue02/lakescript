@@ -472,7 +472,7 @@ class Version {
 class Bag {
     list<string> @items;
     implement IContains<string> { bool contains(string $v) = @items.contains($v); }
-    implement IIndex<number, string> { string get(number $i) = @items[$i]; }
+    implement IIndex<number, ?string> { ?string get(number $i) = @items[$i]; }
 }
 ";
 

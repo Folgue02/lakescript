@@ -47,8 +47,9 @@ outln([Money(500), Money(100), Money(300)].sorted().map(($m) -> $m.show()));
 class Playlist {
     list<string> @songs;
 
-    implement IIndex<number, string> {
-        string get(number $position) = @songs[$position - 1];
+    // Like a list's, it's `null` past the end
+    implement IIndex<number, ?string> {
+        ?string get(number $position) = @songs[$position - 1];
     }
 
     implement IContains<string> {

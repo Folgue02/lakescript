@@ -88,7 +88,7 @@ void help() {
 - Strings are concatenated with `+` *(i.e. `'Hello ' + $name`)*. Both sides must be strings, so `'Age: ' + 5` is an error. Use interpolation instead: `f"Age: {$age}"`.
 - Strings are made of characters (Unicode code points, like Rust's `char`):
     - `.length()` counts characters, not bytes: `'año'.length()` is `3`.
-    - They can be indexed and sliced like lists, with negative indexes and ranges. Each element is a one-character string: `'hello'[0]` is `'h'`, `'hello'[-3..]` is `'llo'`. An index outside the string throws an `Exception`.
+    - They can be indexed and sliced like lists, with negative indexes and ranges. Each element is a one-character string: `'hello'[0]` is `'h'`, `'hello'[-3..]` is `'llo'`. An index outside the string gives `null`, like with lists, so `$text[$i]` is a `?string`.
     - `for ($c in $text)` loops over the characters.
     - `<`, `>`, `<=` and `>=` compare strings alphabetically, character by character *(i.e. `'apple' < 'banana'` is `true`)*.
 - Internally, strings are stored like in Python (PEP 393): every character of a string takes the same number of bytes, chosen by the widest character in it. This is never visible to the user:
@@ -199,7 +199,17 @@ When a range is used as an index, its ends are positions: negative ends are turn
 
 Elements are added at the end with `<<` *(i.e. `$fruits << 'Pears';`)*, and replaced with an index *(i.e. `$fruits[0] = 'Lemons';`)*.
 
-Using an index outside the list throws an `Exception`, both to read and to replace *(i.e. `$fruits[10]` with 3 elements)*. Use `<<` to add elements.
+Reading an index outside the list gives `null`, like a missing key of a map, so `$fruits[0]` is a `?string` and `??` gives a default:
+
+```
+const $first = $args[0] ?? 'world';     // `null` when there are no arguments
+$fruits[10]                             // null, with 3 elements
+```
+
+- The checker knows it can be `null`: `$args[0].toNumber()` is an error, and `$args[0]?.toNumber()`, `??` or a check for `null` are what work.
+- Replacing an index outside the list throws an `IndexError` *(i.e. `$fruits[10] = 'Kiwis';` with 3 elements)*. Use `<<` to add elements.
+- Ranges never give `null`: a slice outside the list is shorter or empty.
+- A class's `[]` *(`IIndex<K, V>`, see [classes.md](classes.md))* decides for itself: `V` is `?string` when it can be missing, like lists.
 
 ### Map
 

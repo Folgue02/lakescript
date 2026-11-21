@@ -8,7 +8,8 @@ use std/io;
 use std/process;
 
 const $args = process::args();
-const $top = if ($args.empty?()) 5 else $args[0].toNumber();
+// An index past the end is `null`, so `??` gives the default
+const $top = $args[0]?.toNumber() ?? 5;
 
 const $text = if (io::piped?()) io::readAll() else 'the cat and the dog and the bird and a cat';
 

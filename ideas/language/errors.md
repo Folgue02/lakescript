@@ -13,7 +13,7 @@ Exception
 │   └── PermissionDenied
 ├── ValueError          // '5a'.toNumber(), invalid JSON
 ├── TypeError           // .as() failed, `'a' + 5`, a wrong argument
-├── IndexError          // list or string index out of bounds
+├── IndexError          // replacing `$list[$i]` past the end, `.removeAt()` and `.insert()` outside a list (reading `$list[$i]` past the end is `null`)
 ├── ArithmeticError     // % or .div() by zero
 └── CommandFailed       // a shell command returned an error
 ```

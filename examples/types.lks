@@ -18,10 +18,11 @@ number add(number $a, number $b = 1) = $a + $b;
 $total = add($total, 41);
 outln($total);
 
-// Generics: the type parameter is inferred at each call
-T last<T>(list<T> $items) = $items[-1];
-outln(last($names).upper());
-outln(last([1, 2, 3]) * 10);
+// Generics: the type parameter is inferred at each call. An index past the
+// end of a list is `null`, so the result can be `null`
+?T last<T>(list<T> $items) = $items[-1];
+outln(last($names)?.upper());
+outln((last([1, 2, 3]) ?? 0) * 10);
 
 // Anonymous functions take their parameter types from where they go
 outln($names.map(($n) -> $n.length()));

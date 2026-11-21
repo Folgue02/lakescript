@@ -1867,7 +1867,15 @@ fn index_value(container: Value, index: Value, span: Span) -> Exec<Value> {
             if let Value::Range(range) = index {
                 return slice(&container, range, len).map_err(|m| index_error(m, span));
             }
-            let pos = list_position(&index, len).map_err(|m| index_error(m, span))?;
+            let Some(i) = index.as_whole() else {
+                return Err(index_error(format!("indexes must be whole numbers, and this is {}", describe(&index)), span));
+            };
+            // Past either end, reading gives `null`, like a missing key of a map
+            let pos = if i < 0 { len as i64 + i } else { i };
+            if pos < 0 || pos >= len as i64 {
+                return Ok(Value::Null);
+            }
+            let pos = pos as usize;
             Ok(match &container {
                 Value::List(l) => l.borrow()[pos].clone(),
                 Value::Str(s) => Value::string(&s.chars().nth(pos).unwrap().to_string()),
