@@ -8,12 +8,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use lakescript::{CapturedOutput, Diagnostic, Engine};
-use lsp_server::{Connection, Message, Notification, Response};
+use lakescript::{CapturedOutput, Diagnostic, Engine, Name};
+use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::notification::{DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Notification as _, PublishDiagnostics};
+use lsp_types::request::{GotoDefinition, HoverRequest, Request as _};
 use lsp_types::{
-    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, Position, PublishDiagnosticsParams, Range,
-    ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverContents, HoverParams, HoverProviderCapability, Location, MarkupContent, MarkupKind, OneOf, Position, PublishDiagnosticsParams, Range,
+    ServerCapabilities, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 
 /// Checks run on a thread with a big stack, like `lks`'s scripts.
@@ -36,6 +38,8 @@ fn run() -> Result<(), String> {
     let capabilities = ServerCapabilities {
         // The editor sends the whole text on every change
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        definition_provider: Some(OneOf::Left(true)),
         ..Default::default()
     };
     let capabilities = serde_json::to_value(capabilities).map_err(|e| e.to_string())?;
@@ -47,8 +51,7 @@ fn run() -> Result<(), String> {
                 if connection.handle_shutdown(&request).map_err(|e| e.to_string())? {
                     break;
                 }
-                let response = Response::new_err(request.id, lsp_server::ErrorCode::MethodNotFound as i32, format!("`{}` isn't supported yet", request.method));
-                let _ = connection.sender.send(Message::Response(response));
+                let _ = connection.sender.send(Message::Response(server.answer(request)));
             }
             Message::Notification(notification) => {
                 if server.handle(notification) {
@@ -68,6 +71,8 @@ struct Server {
     documents: HashMap<PathBuf, String>,
     /// The files that have errors in the editor now, to clear them when they're fixed.
     published: HashSet<PathBuf>,
+    /// What the checker found about the names of each open file, for hover and go to definition.
+    names: HashMap<PathBuf, Vec<Name>>,
 }
 
 impl Server {
@@ -93,6 +98,7 @@ impl Server {
                 let Ok(params) = notification.extract::<DidCloseTextDocumentParams>(DidCloseTextDocument::METHOD) else { return false };
                 if let Some(path) = uri_to_path(&params.text_document.uri) {
                     self.documents.remove(&path);
+                    self.names.remove(&path);
                 }
                 true
             }
@@ -109,7 +115,12 @@ impl Server {
         let paths: Vec<PathBuf> = self.documents.keys().filter(|p| p.extension().is_some_and(|e| e == "lks")).cloned().collect();
         for path in &paths {
             found.entry(path.clone()).or_default();
-            if let Err(error) = self.check(path) {
+            let (result, names) = self.check(path);
+            // A file that doesn't parse has no names: the last ones stay, for hover while it's being written
+            if !names.is_empty() || result.is_ok() {
+                self.names.insert(path.clone(), names);
+            }
+            if let Err(error) = result {
                 let file = error.file.as_ref().map(PathBuf::from).unwrap_or_else(|| path.clone());
                 let file = file.canonicalize().unwrap_or(file);
                 let text = self.text_of(&file);
@@ -139,16 +150,43 @@ impl Server {
 
     /// Checks one file like `lks` or `ferry` would: a module of a ferry
     /// project with the project's module path, any other file as a script.
-    fn check(&self, path: &Path) -> Result<(), Diagnostic> {
+    /// Checks one file, and returns what was found about its names.
+    fn check(&self, path: &Path) -> (Result<(), Diagnostic>, Vec<Name>) {
         let mut engine = Engine::with_output(CapturedOutput::new());
         engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
+        engine.set_names(true);
+        let (result, as_module) = self.run_check(&mut engine, path);
+        let shown = path.display().to_string();
+        let names = engine
+            .names()
+            .into_iter()
+            .filter_map(|mut name| {
+                // The script checked is the file itself, unless the file was checked as a module
+                match name.file.take() {
+                    None if !as_module => {}
+                    Some(file) if file == shown => {}
+                    _ => return None,
+                }
+                if let Some(d) = &mut name.definition
+                    && d.file.is_none()
+                {
+                    d.file = Some(shown.clone());
+                }
+                Some(name)
+            })
+            .collect();
+        (result, names)
+    }
+
+    /// Checks one file like `lks` or `ferry` would. Returns whether it was checked as a module.
+    fn run_check(&self, engine: &mut Engine, path: &Path) -> (Result<(), Diagnostic>, bool) {
         for (open, text) in &self.documents {
             engine.set_file_text(open, text.clone());
         }
         let text = self.documents.get(path).cloned().unwrap_or_default();
         let folder = path.parent().unwrap_or(Path::new("."));
         let Ok(project) = ferry::project::Project::find(folder) else {
-            return engine.check_text(path, &text);
+            return (engine.check_text(path, &text), false);
         };
         let module_path = match ferry::home::Home::open() {
             Ok(home) => ferry::resolve::installed_module_path(&home, &project),
@@ -161,7 +199,7 @@ impl Server {
         let src = project.src().canonicalize().unwrap_or_else(|_| project.src());
         if let Ok(relative) = path.strip_prefix(&src) {
             let module: Vec<String> = relative.with_extension("").iter().map(|p| p.to_string_lossy().into_owned()).collect();
-            return engine.check_source(&format!("use {} as module;\n", module.join("/"))).map_err(|mut e| {
+            let result = engine.check_source(&format!("use {} as module;\n", module.join("/"))).map_err(|mut e| {
                 // An error of the `use` line itself is the module's
                 if e.file.is_none() {
                     e.file = Some(path.display().to_string());
@@ -169,8 +207,62 @@ impl Server {
                 }
                 e
             });
+            return (result, true);
         }
-        engine.check_text(path, &text)
+        (engine.check_text(path, &text), false)
+    }
+
+    /// Answers a request of the editor.
+    fn answer(&self, request: Request) -> Response {
+        let id = request.id.clone();
+        let result = match request.method.as_str() {
+            HoverRequest::METHOD => match request.extract::<HoverParams>(HoverRequest::METHOD) {
+                Ok((_, params)) => serde_json::to_value(self.hover(&params.text_document_position_params)),
+                Err(e) => return Response::new_err(id, lsp_server::ErrorCode::InvalidParams as i32, format!("{e:?}")),
+            },
+            GotoDefinition::METHOD => match request.extract::<GotoDefinitionParams>(GotoDefinition::METHOD) {
+                Ok((_, params)) => serde_json::to_value(self.definition(&params.text_document_position_params)),
+                Err(e) => return Response::new_err(id, lsp_server::ErrorCode::InvalidParams as i32, format!("{e:?}")),
+            },
+            other => return Response::new_err(id, lsp_server::ErrorCode::MethodNotFound as i32, format!("`{other}` isn't supported yet")),
+        };
+        match result {
+            Ok(value) => Response::new_ok(id, value),
+            Err(e) => Response::new_err(id, lsp_server::ErrorCode::InternalError as i32, e.to_string()),
+        }
+    }
+
+    /// The name under the cursor, and the text of its file.
+    fn name_at(&self, at: &TextDocumentPositionParams) -> Option<(&Name, String)> {
+        let path = uri_to_path(&at.text_document.uri)?;
+        let text = self.text_of(&path)?;
+        let offset = offset(&text, at.position);
+        let names = self.names.get(&path)?;
+        // The innermost name, also with the cursor right after it
+        let name = names.iter().filter(|n| n.start <= offset && offset <= n.end).min_by_key(|n| (n.end - n.start, n.end == offset))?;
+        Some((name, text))
+    }
+
+    fn hover(&self, at: &TextDocumentPositionParams) -> Option<Hover> {
+        let (name, text) = self.name_at(at)?;
+        let mut value = format!("```lakescript\n{}\n```", name.code);
+        for part in [&name.about, &name.doc].into_iter().flatten() {
+            value.push_str("\n\n");
+            value.push_str(part);
+        }
+        Some(Hover {
+            contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value }),
+            range: Some(Range { start: position(&text, name.start), end: position(&text, name.end) }),
+        })
+    }
+
+    fn definition(&self, at: &TextDocumentPositionParams) -> Option<GotoDefinitionResponse> {
+        let (name, _) = self.name_at(at)?;
+        let d = name.definition.as_ref()?;
+        let file = PathBuf::from(d.file.as_ref()?);
+        let text = self.text_of(&file)?;
+        let range = Range { start: position(&text, d.start), end: position(&text, d.end) };
+        Some(GotoDefinitionResponse::Scalar(Location { uri: path_to_uri(&file)?, range }))
     }
 }
 
@@ -203,6 +295,24 @@ fn position(text: &str, offset: usize) -> Position {
         }
     }
     Position { line, character: column }
+}
+
+/// The character at a line and column of the protocol, the opposite of `position`.
+fn offset(text: &str, at: Position) -> usize {
+    let (mut line, mut column, mut index) = (0u32, 0u32, 0usize);
+    for c in text.chars() {
+        if line == at.line && (column >= at.character || c == '\n') || line > at.line {
+            break;
+        }
+        if c == '\n' {
+            line += 1;
+            column = 0;
+        } else {
+            column += c.len_utf16() as u32;
+        }
+        index += 1;
+    }
+    index
 }
 
 /// The path of a `file://` URI.
@@ -257,6 +367,9 @@ mod tests {
         assert_eq!(position(text, 3), Position { line: 1, character: 0 });
         // `𝄞` is two UTF-16 units
         assert_eq!(position(text, 6), Position { line: 1, character: 4 });
+        for i in 0..=text.chars().count() {
+            assert_eq!(offset(text, position(text, i)), i);
+        }
     }
 
     #[test]

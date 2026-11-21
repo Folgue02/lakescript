@@ -39,6 +39,16 @@ Each one is usable on its own, with tests that send real protocol messages to th
 - Milestone 1 is done. `lks-lsp` takes the whole text of a file on every change, checks every open file with it, and sends each error to the file it's in: an error in a module goes to the module, also when only a file that uses it is open. A module of a ferry project is checked as a module, with the project's module path *(`src/` and the packages of the lock file that are already downloaded: `lks-lsp` never downloads)*, and any other file as a script.
 - Every file the editor has open is checked again on each change, since a change in a module can break the files that use it. It takes a few milliseconds.
 - `lks-lsp --version` says its version, and it's in every release archive.
+- Milestone 2 is done. Hover shows a name's declaration as Lakescript code *(i.e. `list<number> $count`, `string greet(string $name, number $times = …)`, `class Dog extends Animal`)*, a sentence on what it is *(i.e. "A method of `list`.", "A parameter of `greet`.", "From `math.lks`.")* and the `///` comment of its declaration. Go to definition jumps to where it's declared, in the file or in a module.
+    - It works on variables, parameters, functions, the functions and constants of modules, classes *(in types and in calls)*, fields, methods, static members and enum values. The types are the ones the checker found, also narrowed *(i.e. not `null` after `$x != null`)*.
+    - The built-in functions and methods have their signature, but no comment yet: `prelude.txt` only has the signatures. Their comments are in `ideas/stdlib`, and can be added to it later.
+    - The checker stops at the first error, so only the names before it are known. A file that doesn't parse keeps the names of its last good version, until milestone 3.
+
+### How names are found
+
+- The library has it, for any program that embeds Lakescript: `Engine::set_names(true)` makes the checks note each name, and `Engine::names()` gives them after a check, each with its file, place, code, sentence, `///` comment and definition.
+- The syntax tree only has the place of whole expressions, so the checker notes the text of the name and where to look for it *(i.e. `area` after the end of `$square` in `$square.area()`)*, and the engine finds it in the text once the check is done. Types are written out then too, when the types found out later are known *(i.e. the elements of `[]`)*.
+- A `///` comment is the one before the first token of the declaration, or before its `pub`. A parameter doesn't take its function's comment.
 
 ## Using it
 

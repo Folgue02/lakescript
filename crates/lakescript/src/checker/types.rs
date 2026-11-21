@@ -167,6 +167,19 @@ pub struct ClassSig {
     pub generics: Vec<Rc<str>>,
     /// Filled once every class of the block has a name, so they can use each other.
     pub body: RefCell<ClassBody>,
+    /// Where it and its members are declared, for editors.
+    pub places: RefCell<Places>,
+}
+
+/// Where a class and its members are declared *(see `checker/names.rs`)*.
+#[derive(Default, Clone)]
+pub struct Places {
+    /// `None` for the script being checked.
+    pub file: Option<String>,
+    pub class: Option<crate::token::Span>,
+    /// By name: `name` for fields and methods, `$name` for static fields,
+    /// `::name` for static methods and enum values, `new` for the constructor.
+    pub members: HashMap<String, crate::token::Span>,
 }
 
 #[derive(Default)]

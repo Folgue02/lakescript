@@ -42,13 +42,17 @@ impl Checker<'_> {
             let generics = decl.generics.iter().map(|g| Rc::from(g.as_str())).collect();
             let interface = decl.kind == ClassKind::Interface;
             let is_enum = decl.kind == ClassKind::Enum;
-            ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, command: decl.kind == ClassKind::Command, generics, body: RefCell::new(ClassBody::default()) }))
+            ClassRef(Rc::new(ClassSig { name: Rc::from(decl.name.as_str()), interface, is_enum, command: decl.kind == ClassKind::Command, generics, body: RefCell::new(ClassBody::default()), places: Default::default() }))
         };
-        match &self.path {
+        let class = match &self.path {
             // Only the top level of a module: classes in functions are new every time
             Some(path) if self.scopes.len() == 2 => self.modules.classes.entry((path.clone(), decl.name.clone())).or_insert_with(make).clone(),
             _ => make(),
+        };
+        if !self.declaring {
+            self.set_places(&class, decl);
         }
+        class
     }
 
     /// The types of a class's fields and methods, and what calling it takes.
@@ -303,6 +307,7 @@ impl Checker<'_> {
                 command: false,
                 generics: Vec::new(),
                 body: RefCell::new(ClassBody { subcommands: subs, ..ClassBody::default() }),
+                places: Default::default(),
             }));
             let ty = Ty::Object(base, Vec::new());
             let ty = if decl.optional_subcommand { ty.nullable() } else { ty };
@@ -432,6 +437,9 @@ impl Checker<'_> {
                 }
             }
         }
+        if self.recording() {
+            self.note_members(decl, &class, span);
+        }
         for member in &decl.members {
             match &member.kind {
                 MemberKind::Field { name, value: Some(value), .. } => {
@@ -489,6 +497,46 @@ impl Checker<'_> {
             }
         }
         Ok(())
+    }
+
+    /// Notes the names of a class and of its members where they're declared.
+    fn note_members(&mut self, decl: &ClassDecl, class: &ClassRef, span: Span) {
+        use super::names::{Show, class_place};
+        self.note_class(class, span, span.start, &decl.name);
+        let name = class.0.name.clone();
+        for member in &decl.members {
+            let s = member.span;
+            match &member.kind {
+                MemberKind::Field { constant, ty, name: field, .. } => {
+                    let found = if member.is_static {
+                        class.0.body.borrow().statics.get(field).map(|f| f.ty.clone())
+                    } else {
+                        class.0.body.borrow().fields.iter().find(|f| f.name == *field).map(|f| f.ty.clone())
+                    };
+                    let (prefix, key, what) = if member.is_static { ("$", format!("${field}"), "A static field") } else { ("@", field.clone(), "A field") };
+                    let shown = if member.is_static { format!("{name}::$") } else { "@".into() };
+                    let show = Show::Field { constant: *constant, prefix: shown, name: field.clone(), ty: found.unwrap_or(Ty::Any) };
+                    let needle = format!("{prefix}{field}");
+                    let place = class_place(class, Some(&key), &needle);
+                    self.note(s, ty.span.end, "", &needle, show, Some(format!("{what} of `{name}`.")), place);
+                }
+                MemberKind::Method { decl: method, .. } => {
+                    let table = if member.is_static { "::" } else { "" };
+                    let sig = {
+                        let b = class.0.body.borrow();
+                        let t = if member.is_static { &b.static_methods } else { &b.methods };
+                        t.get(&method.name).map(|m| m.ty.clone())
+                    };
+                    let Some(sig) = sig else { continue };
+                    let shown = if member.is_static { format!("{name}::{}", method.name) } else { method.name.clone() };
+                    let show = Show::Func { name: shown, ty: Ty::Func(sig) };
+                    let place = class_place(class, Some(&format!("{table}{}", method.name)), &method.name);
+                    let what = if member.is_static { "A static method" } else { "A method" };
+                    self.note(s, s.start, "", &method.name, show, Some(format!("{what} of `{name}`.")), place);
+                }
+                MemberKind::Constructor(_) => {}
+            }
+        }
     }
 
     /// A method in an `override` block must replace one of the superclass,
@@ -767,7 +815,15 @@ impl Checker<'_> {
                     return self.fail(format!("`{}` has no field named `{name}`", class.0.name), span);
                 };
                 self.check_access(field.public, &owner, &format!("the field `{name}`"), span)?;
-                Ok(field.ty.substitute(&class.member_map(&args, &owner)))
+                let ty = field.ty.substitute(&class.member_map(&args, &owner));
+                if self.recording() {
+                    let show = super::names::Show::Field { constant: field.constant, prefix: "@".into(), name: name.to_string(), ty: ty.clone() };
+                    let place = super::names::class_place(&owner, Some(name), &format!("@{name}"));
+                    // `@name` is one token, and `$object.name` has the name after the object
+                    let (from, needle) = if matches!(target.kind, ExprKind::This) { (span.start, format!("@{name}")) } else { (target.span.end, name.to_string()) };
+                    self.note(span, from, "", &needle, show, Some(format!("A field of `{}`.", owner.0.name)), place);
+                }
+                Ok(ty)
             }
             Ty::Any | Ty::Var(_) => Ok(Ty::Any),
             Ty::Nullable(_) => self.fail(format!("this can be `null`, so `.{name}` can't always be read. Check for `null` first"), target.span),
@@ -783,7 +839,14 @@ impl Checker<'_> {
             }
             return self.fail(format!("there's no class named `{class}`"), span);
         };
+        self.note_class(&c, span, span.start, class);
+        let lead = format!("{class}::");
         if !variable && c.0.body.borrow().values.iter().any(|v| v == name) {
+            if self.recording() {
+                let show = super::names::Show::Text(format!("{}::{name}", c.0.name));
+                let place = super::names::class_place(&c, Some(&format!("::{name}")), name);
+                self.note(span, span.start, &lead, name, show, Some(format!("A value of the enum `{}`.", c.0.name)), place);
+            }
             return Ok(Ty::Object(c, Vec::new()));
         }
         if variable {
@@ -792,6 +855,11 @@ impl Checker<'_> {
                 return self.fail(format!("`{}` has no static field named `${name}`", c.0.name), span);
             };
             self.check_access(field.public, &c, &format!("`{}::${name}`", c.0.name), span)?;
+            if self.recording() {
+                let show = super::names::Show::Field { constant: field.constant, prefix: format!("{}::$", c.0.name), name: name.to_string(), ty: field.ty.clone() };
+                let place = super::names::class_place(&c, Some(&format!("${name}")), &format!("${name}"));
+                self.note(span, span.start, &lead, &format!("${name}"), show, Some(format!("A static field of `{}`.", c.0.name)), place);
+            }
             Ok(field.ty)
         } else {
             let method = c.0.body.borrow().static_methods.get(name).cloned();
@@ -806,6 +874,11 @@ impl Checker<'_> {
                 return self.fail(format!("`{}` has no static method named `{name}`", c.0.name), span);
             };
             self.check_access(method.public, &c, &format!("`{}::{name}()`", c.0.name), span)?;
+            if self.recording() {
+                let show = super::names::Show::Func { name: format!("{}::{name}", c.0.name), ty: Ty::Func(method.ty.clone()) };
+                let place = super::names::class_place(&c, Some(&format!("::{name}")), name);
+                self.note(span, span.start, &lead, name, show, Some(format!("A static method of `{}`.", c.0.name)), place);
+            }
             Ok(Ty::Func(method.ty))
         }
     }
@@ -854,7 +927,7 @@ pub(super) fn operator_interfaces() -> Vec<(String, Ty)> {
         };
         let mut body = ClassBody::default();
         body.methods.insert(method.to_string(), MemberSig { ty: Rc::new(sig), public: true, has_body: false });
-        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(*name), interface: true, is_enum: false, command: false, generics, body: RefCell::new(body) }));
+        let class = ClassRef(Rc::new(ClassSig { name: Rc::from(*name), interface: true, is_enum: false, command: false, generics, body: RefCell::new(body), places: Default::default() }));
         out.push((name.to_string(), Ty::Object(class, Vec::new())));
     }
     out

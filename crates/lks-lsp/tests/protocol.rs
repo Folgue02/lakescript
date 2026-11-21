@@ -89,6 +89,12 @@ impl Server {
         self.notify("textDocument/didChange", json!({ "textDocument": { "uri": uri(path), "version": version }, "contentChanges": [{ "text": text }] }));
     }
 
+    fn at(&mut self, method: &str, path: &Path, line: u32, character: u32) -> Value {
+        let response = self.request(method, json!({ "textDocument": { "uri": uri(path) }, "position": { "line": line, "character": character } }));
+        assert!(response["error"].is_null(), "{response}");
+        response["result"].clone()
+    }
+
     fn stop(mut self) {
         let response = self.request("shutdown", Value::Null);
         assert!(response["error"].is_null(), "{response}");
@@ -155,7 +161,63 @@ fn errors_go_to_the_module_they_are_in() {
 #[test]
 fn it_answers_requests_it_does_not_know_and_shuts_down() {
     let mut server = Server::start();
-    let response = server.request("textDocument/hover", json!({ "textDocument": { "uri": "file:///x.lks" }, "position": { "line": 0, "character": 0 } }));
+    let response = server.request("textDocument/completion", json!({ "textDocument": { "uri": "file:///x.lks" }, "position": { "line": 0, "character": 0 } }));
     assert!(!response["error"].is_null(), "{response}");
+    server.stop();
+}
+
+#[test]
+fn hover_shows_the_type_and_the_comment() {
+    let dir = temp("hover");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    let text = "/// Says hello\nstring greet(string $name) = f\"hi {$name}\";\nlet $words = ['a'];\noutln(greet($words.first() ?? 'ñ'));\n";
+    server.open(&script, text);
+    assert!(server.diagnostics_for(&script).is_empty());
+    // On `greet`, and right after it
+    for character in [6, 11] {
+        let hover = server.at("textDocument/hover", &script, 3, character);
+        let value = hover["contents"]["value"].as_str().unwrap();
+        assert_eq!(value, "```lakescript\nstring greet(string $name)\n```\n\nSays hello", "{hover}");
+        assert_eq!(hover["range"], json!({ "start": { "line": 3, "character": 6 }, "end": { "line": 3, "character": 11 } }));
+    }
+    let hover = server.at("textDocument/hover", &script, 3, 14);
+    assert!(hover["contents"]["value"].as_str().unwrap().contains("list<string> $words"), "{hover}");
+    let hover = server.at("textDocument/hover", &script, 3, 21);
+    assert!(hover["contents"]["value"].as_str().unwrap().contains("A method of `list`."), "{hover}");
+    // Nothing there
+    assert!(!server.at("textDocument/hover", &script, 3, 0).is_null());
+    assert!(server.at("textDocument/hover", &script, 3, 32).is_null());
+    server.stop();
+}
+
+#[test]
+fn definitions_are_found_in_the_file_and_in_modules() {
+    let dir = temp("definition");
+    std::fs::write(dir.join("ferry.toml"), "[project]\nname = \"demo\"\nauthor = \"ana\"\nversion = \"0.1.0\"\nkind = \"application\"\n").unwrap();
+    std::fs::create_dir_all(dir.join("src/ana/demo")).unwrap();
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    let module = dir.join("src/ana/demo/Shape.lks");
+    let script = dir.join("bin/demo.lks");
+    std::fs::write(&module, "/// A shape\npub class Shape {\n    pub number @side;\n\n    pub number area() = @side * @side;\n}\n").unwrap();
+    let text = "use ana/demo/Shape;\nconst $square = Shape(2);\noutln($square.area());\n";
+    std::fs::write(&script, text).unwrap();
+    let mut server = Server::start();
+    server.open(&script, text);
+    assert!(server.diagnostics_for(&script).is_empty());
+    // A variable of the file
+    let found = server.at("textDocument/definition", &script, 2, 8);
+    assert_eq!(found["uri"], uri(&script));
+    assert_eq!(found["range"], json!({ "start": { "line": 1, "character": 6 }, "end": { "line": 1, "character": 13 } }));
+    // A method of a class in a module
+    let found = server.at("textDocument/definition", &script, 2, 15);
+    assert_eq!(found["uri"], uri(&module));
+    assert_eq!(found["range"]["start"], json!({ "line": 4, "character": 15 }));
+    let hover = server.at("textDocument/hover", &script, 1, 17);
+    assert_eq!(hover["contents"]["value"], "```lakescript\nclass Shape\n```\n\nA shape");
+    // In the module itself, `@side` goes to the field
+    server.open(&module, &std::fs::read_to_string(&module).unwrap());
+    let found = server.at("textDocument/definition", &module, 4, 25);
+    assert_eq!(found["range"]["start"], json!({ "line": 2, "character": 15 }));
     server.stop();
 }

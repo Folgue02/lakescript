@@ -59,6 +59,11 @@ pub struct Engine {
     /// Functions registered by the program embedding Lakescript. The checker knows nothing about their types.
     host_functions: Vec<String>,
     builtins_ready: bool,
+    /// Whether checks note what they find about each name *(see `set_names`)*.
+    record_names: bool,
+    found: Vec<crate::checker::names::Found>,
+    /// The script of the last check, to find its names in.
+    checked_source: String,
 }
 
 impl Default for Engine {
@@ -111,6 +116,9 @@ impl Engine {
             check_declared: HashMap::new(),
             host_functions: Vec::new(),
             builtins_ready: false,
+            record_names: false,
+            found: Vec::new(),
+            checked_source: String::new(),
         };
         engine.register_builtins();
         engine.builtins_ready = true;
@@ -235,8 +243,31 @@ impl Engine {
 
     /// Type checks a script given as text without running it.
     pub fn check_source(&mut self, source: &str) -> Result<(), Diagnostic> {
+        self.found.clear();
+        if self.record_names {
+            self.checked_source = source.to_string();
+        }
         let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
         self.check(&program).map_err(|d| self.locate(d))
+    }
+
+    /// Makes the checks note what they find about each name: its type, where
+    /// it's declared and its `///` comment, for editors. `names` gives them.
+    /// It's off by default. A module already checked by this engine isn't
+    /// checked again, so its names are only in the first check that uses it.
+    pub fn set_names(&mut self, record: bool) {
+        self.record_names = record;
+    }
+
+    /// The names the last check found, up to its first error, when `set_names` is on.
+    pub fn names(&mut self) -> Vec<crate::checker::names::Name> {
+        let found = std::mem::take(&mut self.found);
+        let loader = &self.host.loader;
+        let script = &self.checked_source;
+        crate::checker::names::locate(found, |file| match file {
+            None => Some(script.clone()),
+            Some(path) => loader.read(Path::new(path)).ok(),
+        })
     }
 
     /// Uses this text for a file instead of what's on the disk, for every
@@ -285,6 +316,7 @@ impl Engine {
             classes: &mut self.check_classes,
             declared: &mut self.check_declared,
             declaring: Vec::new(),
+            names: if self.record_names { Some(&mut self.found) } else { None },
         };
         let mut checker = crate::checker::Checker::new(&prelude, modules, &mut self.check_state, &self.host_functions);
         checker.stack_budget = self.stack_budget;

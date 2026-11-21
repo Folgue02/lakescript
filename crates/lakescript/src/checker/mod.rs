@@ -7,6 +7,7 @@
 //! elements of `[]`)*.
 
 mod classes;
+pub mod names;
 pub mod prelude;
 pub mod types;
 
@@ -41,6 +42,8 @@ pub struct Modules<'a> {
     /// checking their code, for modules that import each other.
     pub declared: &'a mut HashMap<PathBuf, ModuleSig>,
     pub declaring: Vec<PathBuf>,
+    /// Where the names the checkers find go, when an editor wants them *(see `names.rs`)*.
+    pub names: Option<&'a mut Vec<names::Found>>,
 }
 
 #[derive(Default, Clone)]
@@ -59,12 +62,17 @@ struct Scope {
     /// How many functions deep the statements of this scope are *(see
     /// `Checker::returns`)*, set when its functions are declared.
     depth: usize,
+    /// Where its functions are declared.
+    places: HashMap<String, names::Place>,
 }
 
 #[derive(Clone)]
 struct VarInfo {
     ty: Ty,
     constant: bool,
+    place: Option<names::Place>,
+    /// What it is, for editors *(i.e. "A parameter of `greet`.")*.
+    about: Option<String>,
 }
 
 /// The class whose method or constructor is being checked.
@@ -108,6 +116,8 @@ pub struct Checker<'a> {
     /// Where the stack was when checking started, so deeply nested code is an error instead of a crash.
     stack_base: usize,
     pub stack_budget: usize,
+    /// The names found, when they're wanted.
+    names: Option<Vec<names::Raw>>,
 }
 
 type Check<T> = Result<T, Diagnostic>;
@@ -136,6 +146,7 @@ impl<'a> Checker<'a> {
             builtins.types.insert(name, interface);
         }
         let globals = std::mem::take(&mut state.globals);
+        let names = modules.names.is_some().then(Vec::new);
         Checker {
             prelude,
             modules,
@@ -150,12 +161,14 @@ impl<'a> Checker<'a> {
             this: Vec::new(),
             stack_base: crate::stack::position(),
             stack_budget: crate::stack::DEFAULT_BUDGET,
+            names,
         }
     }
 
     /// Checks a whole script. The globals it declares are kept for the next run.
     pub fn check_program(mut self, program: &[Stmt]) -> Check<()> {
         let result = self.block(program);
+        self.finish_names();
         let globals = self.scopes.remove(1);
         self.state.globals = globals;
         result
@@ -383,10 +396,20 @@ impl<'a> Checker<'a> {
     }
 
     fn declare(&mut self, name: &str, ty: Ty, constant: bool, span: Span) -> Check<()> {
+        self.declare_at(name, ty, constant, span, span)
+    }
+
+    /// Declares a variable whose name is written in `at`.
+    fn declare_at(&mut self, name: &str, ty: Ty, constant: bool, span: Span, at: Span) -> Check<()> {
         if self.declared_var(name).is_some() {
             return self.fail(format!("`${name}` already exists. Variables can't be declared twice"), span);
         }
-        self.scopes.last_mut().unwrap().vars.insert(name.to_string(), VarInfo { ty, constant });
+        let place = self.recording().then(|| self.here(at, format!("${name}"), true));
+        if let Some(place) = &place {
+            let show = names::Show::Var { constant, name: name.to_string(), ty: ty.clone() };
+            self.note(at, at.start, "", &place.needle.clone(), show, None, Some(place.clone()));
+        }
+        self.scopes.last_mut().unwrap().vars.insert(name.to_string(), VarInfo { ty, constant, place, about: None });
         Ok(())
     }
 
@@ -461,6 +484,7 @@ impl<'a> Checker<'a> {
                     },
                     n => {
                         if let Some(Ty::Object(class, _)) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
+                            self.note_class(&class, ty.span, ty.span.start, n);
                             let expected = class.0.generics.len();
                             if !args.is_empty() && args.len() != expected {
                                 let s = if expected == 1 { "" } else { "s" };
@@ -569,8 +593,15 @@ impl<'a> Checker<'a> {
         let sig = self.signature(decl, span);
         self.pop();
         let depth = self.returns.len();
+        let sig = Rc::new(sig?);
+        let place = self.here(span, decl.name.clone(), true);
+        if self.recording() {
+            let show = names::Show::Func { name: decl.name.clone(), ty: Ty::Func(sig.clone()) };
+            self.note(span, span.start, "", &decl.name, show, None, Some(place.clone()));
+        }
         let scope = self.scopes.last_mut().unwrap();
-        scope.funcs.insert(decl.name.clone(), Rc::new(sig?));
+        scope.funcs.insert(decl.name.clone(), sig);
+        scope.places.insert(decl.name.clone(), place);
         scope.pending.insert(decl.name.clone());
         scope.depth = depth;
         Ok(())
@@ -695,7 +726,7 @@ impl<'a> Checker<'a> {
                 self.loop_depth += 1;
                 let result = self.scoped(&Vec::new(), |c| {
                     for (name, ty) in vars {
-                        c.declare(&name, ty, false, iterable.span)?;
+                        c.declare_at(&name, ty, false, iterable.span, span)?;
                     }
                     match &body.kind {
                         StmtKind::Block(stmts) => c.block(stmts),
@@ -845,7 +876,13 @@ impl<'a> Checker<'a> {
             if self.declared_var(&p.name).is_some() {
                 return self.fail(format!("the parameter `${}` of `{}` has the name of a variable that already exists", p.name, decl.name), span);
             }
-            self.scopes.last_mut().unwrap().vars.insert(p.name.clone(), VarInfo { ty, constant: false });
+            let place = self.recording().then(|| self.here(span, format!("${}", p.name), false));
+            let about = if decl.name.is_empty() || decl.name == "anonymous" { "A parameter.".to_string() } else { format!("A parameter of `{}`.", decl.name) };
+            if let Some(place) = &place {
+                let show = names::Show::Var { constant: false, name: p.name.clone(), ty: ty.clone() };
+                self.note(span, span.start, "", &place.needle.clone(), show, Some(about.clone()), Some(place.clone()));
+            }
+            self.scopes.last_mut().unwrap().vars.insert(p.name.clone(), VarInfo { ty, constant: false, place, about: Some(about) });
         }
         self.returns.push(ret);
         let loops = std::mem::take(&mut self.loop_depth);
@@ -923,7 +960,12 @@ impl<'a> Checker<'a> {
                     let local = item.alias.clone().unwrap_or_else(|| item.name.clone());
                     if item.variable {
                         match module.constants.get(&item.name) {
-                            Some(t) => self.declare(&local, t.clone(), true, span)?,
+                            Some(t) => {
+                                self.declare(&local, t.clone(), true, span)?;
+                                if let (Some(place), Some(info)) = (module.places.get(&format!("${}", item.name)), self.scopes.last_mut().unwrap().vars.get_mut(&local)) {
+                                    info.place = Some(place.clone());
+                                }
+                            }
                             None => return self.fail(format!("`{}` has no `pub` constant named `${}`", module.path, item.name), span),
                         }
                     } else {
@@ -935,6 +977,9 @@ impl<'a> Checker<'a> {
                         // A class is both: a type, and a function that creates its objects
                         if let Some(f) = function {
                             self.scopes.last_mut().unwrap().funcs.insert(local.clone(), f);
+                            if let Some(place) = module.places.get(&item.name) {
+                                self.scopes.last_mut().unwrap().places.insert(local.clone(), place.clone());
+                            }
                         }
                         if let Some(t) = ty {
                             if self.scopes.last().unwrap().types.contains_key(&local) {
@@ -1009,6 +1054,7 @@ impl<'a> Checker<'a> {
                         command: decl.kind == ClassKind::Command,
                         generics: decl.generics.iter().map(|g| Rc::from(g.as_str())).collect(),
                         body: std::cell::RefCell::new(types::ClassBody::default()),
+                        places: Default::default(),
                     }))
                 });
                 sig.types.insert(decl.name.clone(), Ty::Object(class.clone(), Vec::new()));
@@ -1027,6 +1073,7 @@ impl<'a> Checker<'a> {
                 d.push(file.to_path_buf());
                 d
             },
+            names: None,
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1104,6 +1151,7 @@ impl<'a> Checker<'a> {
             classes: &mut *self.modules.classes,
             declared: &mut *self.modules.declared,
             declaring: self.modules.declaring.clone(),
+            names: self.modules.names.as_deref_mut(),
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1139,12 +1187,17 @@ impl<'a> Checker<'a> {
                 )));
             }
         }
-        checker.block(&program).map_err(located)?;
+        let result = checker.block(&program);
+        checker.finish_names();
+        result.map_err(located)?;
         let globals = &checker.scopes[1];
         let mut sig = ModuleSig { path: shown, ..Default::default() };
         for name in public_fns {
             if let Some(f) = globals.funcs.get(&name) {
-                sig.functions.insert(name, f.clone());
+                sig.functions.insert(name.clone(), f.clone());
+            }
+            if let Some(p) = globals.places.get(&name) {
+                sig.places.insert(name, p.clone());
             }
         }
         for name in public_types {
@@ -1159,6 +1212,9 @@ impl<'a> Checker<'a> {
             if let Some(v) = globals.vars.get(&name) {
                 // Unknown types can't leave the module: they become `any`
                 let ty = checker.resolve(&v.ty);
+                if let Some(p) = &v.place {
+                    sig.places.insert(format!("${name}"), p.clone());
+                }
                 sig.constants.insert(name, forget_vars(&ty));
             }
         }
@@ -1245,6 +1301,7 @@ impl<'a> Checker<'a> {
                 let Some(class) = self.class_named(name) else {
                     return self.fail(format!("there's no class named `{name}`"), span);
                 };
+                self.note_class(&class, span, span.start, name);
                 let ctor = class.0.body.borrow().constructor.clone();
                 let Some(ctor) = ctor.filter(|_| !class.0.interface && !class.0.is_enum) else {
                     return self.fail(format!("`{name}` doesn't create objects"), span);
@@ -1306,6 +1363,11 @@ impl<'a> Checker<'a> {
                 let parent_args = this.class.0.body.borrow().parent_args.clone();
                 let mut map = parent.member_map(&parent_args, &owner);
                 map.insert(Rc::from("Self"), this.class.this_type());
+                if self.recording() {
+                    let show = names::Show::Func { name: method.clone(), ty: Ty::Func(m.ty.clone()).substitute(&map) };
+                    let place = names::class_place(&owner, Some(method), method);
+                    self.note(span, span.start, "", method, show, Some(format!("A method of `{}`.", owner.0.name)), place);
+                }
                 self.call(&m.ty, &map, args, method, span)?
             }
             ExprKind::Int(_) | ExprKind::Float(_) => Ty::Number,
@@ -1383,7 +1445,16 @@ impl<'a> Checker<'a> {
                 Ty::Map(Box::new(k), Box::new(v))
             }
             ExprKind::Variable(name) => match self.lookup_var(name) {
-                Some(t) => t,
+                Some(t) => {
+                    if self.recording() {
+                        let info = self.declared_var(name);
+                        let constant = info.as_ref().is_some_and(|i| i.constant);
+                        let show = names::Show::Var { constant, name: name.clone(), ty: t.clone() };
+                        let about = info.as_ref().and_then(|i| i.about.clone());
+                        self.note(span, span.start, "", &format!("${name}"), show, about, info.and_then(|i| i.place));
+                    }
+                    t
+                }
                 None => return self.fail(format!("`${name}` isn't declared"), span),
             },
             // A class's constructor, read when it's used: in modules that use each
@@ -1392,7 +1463,9 @@ impl<'a> Checker<'a> {
                 if !self.not_declared_yet(name)
                     && self.class_named(name).is_some_and(|c| !c.0.interface && !c.0.is_enum && !c.0.command && c.0.body.borrow().constructor.is_some()) =>
             {
-                Ty::Func(self.class_named(name).unwrap().0.body.borrow().constructor.clone().unwrap())
+                let class = self.class_named(name).unwrap();
+                self.note_class(&class, span, span.start, name);
+                Ty::Func(class.0.body.borrow().constructor.clone().unwrap())
             }
             ExprKind::Function(name) => match self.lookup_func(name) {
                 Some(_) if self.not_declared_yet(name) => {
@@ -1401,7 +1474,15 @@ impl<'a> Checker<'a> {
                         span,
                     );
                 }
-                Some(f) => Ty::Func(f),
+                Some(f) => {
+                    if self.recording() {
+                        let place = self.function_place(name);
+                        let show = names::Show::Func { name: name.clone(), ty: Ty::Func(f.clone()) };
+                        let about = place.is_none().then(|| "A built-in function.".to_string());
+                        self.note(span, span.start, "", name, show, about, place);
+                    }
+                    Ty::Func(f)
+                }
                 None if self.class_named(name).is_some_and(|c| c.0.interface) => {
                     return self.fail(format!("`{name}` is an interface: it doesn't create objects, classes implement it"), span);
                 }
@@ -1418,7 +1499,14 @@ impl<'a> Checker<'a> {
                     return self.fail(format!("there's no module named `{module}`. Import it with `use`"), span);
                 };
                 match m.functions.get(name) {
-                    Some(f) => Ty::Func(f.clone()),
+                    Some(f) => {
+                        if self.recording() {
+                            let show = names::Show::Func { name: name.clone(), ty: Ty::Func(f.clone()) };
+                            let place = m.places.get(name).cloned();
+                            self.note(span, span.start, &format!("{module}::"), name, show, Some(format!("From `{}`.", names::module_name(&m.path))), place);
+                        }
+                        Ty::Func(f.clone())
+                    }
                     None => return self.fail(format!("`{}` has no `pub` function named `{name}`", m.path), span),
                 }
             }
@@ -1427,7 +1515,14 @@ impl<'a> Checker<'a> {
                     return self.fail(format!("there's no module named `{module}`. Import it with `use`"), span);
                 };
                 match m.constants.get(name) {
-                    Some(t) => t.clone(),
+                    Some(t) => {
+                        if self.recording() {
+                            let show = names::Show::Var { constant: true, name: name.clone(), ty: t.clone() };
+                            let place = m.places.get(&format!("${name}")).cloned();
+                            self.note(span, span.start, &format!("{module}::"), &format!("${name}"), show, Some(format!("From `{}`.", names::module_name(&m.path))), place);
+                        }
+                        t.clone()
+                    }
                     None => return self.fail(format!("`{}` has no `pub` constant named `${name}`", m.path), span),
                 }
             }
@@ -1779,6 +1874,7 @@ impl<'a> Checker<'a> {
     }
 
     fn method(&mut self, receiver: &Expr, method: &str, args: &[Arg], nullable: bool, span: Span) -> Check<Ty> {
+        let receiver_expr = receiver;
         let r = self.expr(receiver, None)?;
         let mut r = self.shallow(&r);
         if let Ty::Nullable(inner) = &r {
@@ -1801,6 +1897,11 @@ impl<'a> Checker<'a> {
                     Some(all) => self.pick_overload(&all, &receiver, args)?,
                     None => m,
                 };
+                if self.recording() {
+                    let show = names::Show::Func { name: method.to_string(), ty: Ty::Func(chosen.ty.clone()).substitute(&receiver) };
+                    let place = names::class_place(&owner, Some(method), method);
+                    self.note(span, receiver_expr.span.end, "", method, show, Some(format!("A method of `{}`.", owner.0.name)), place);
+                }
                 return self.call(&chosen.ty, &receiver, args, method, span);
             }
             let exception = class.0.body.borrow().exception.clone();
@@ -1867,6 +1968,10 @@ impl<'a> Checker<'a> {
             }
         }
         let map: HashMap<Rc<str>, Ty> = names.into_iter().zip(params).collect();
+        if self.recording() {
+            let show = names::Show::Func { name: method.to_string(), ty: Ty::Func(sig.clone()).substitute(&map) };
+            self.note(span, receiver_expr.span.end, "", method, show, Some(format!("A method of `{key}`.")), None);
+        }
         let ret = self.call(&sig, &map, args, &format!(".{method}()"), span)?;
         Ok(if nullable { ret.nullable() } else { ret })
     }

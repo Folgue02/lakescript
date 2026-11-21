@@ -24,6 +24,8 @@ pub struct ModuleSig {
     pub constants: HashMap<String, Ty>,
     /// `pub` classes, interfaces and enums *(phase 7)*.
     pub types: HashMap<String, Ty>,
+    /// Where its functions (`name`) and constants (`$name`) are declared, for editors.
+    pub places: HashMap<String, super::names::Place>,
 }
 
 pub struct Prelude {
