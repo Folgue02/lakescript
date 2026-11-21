@@ -18,7 +18,7 @@ TYPES = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'symbol', 'r
 # The file of each module, and the name scripts reach it by
 MODULES = [('general', 'general'), ('fs', 'fs'), ('path', 'path'), ('env', 'env'), ('io', 'io'),
            ('process', 'process'), ('http', 'http'), ('format/json', 'json'), ('format/csv', 'csv'),
-           ('time', 'time')]
+           ('template', 'template'), ('test', 'test'), ('time', 'time')]
 PAGES = set(TYPES) | {name for _, name in MODULES}
 MEMBER_HEADERS = ('Method', 'Function', 'Constant', 'Field')
 

@@ -90,6 +90,15 @@ impl Project {
         commands
     }
 
+    /// The files of tests in `tests/` and its folders, sorted *(see `ideas/tooling/testing.md`)*.
+    pub fn test_files(&self) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        walk(&self.dir.join("tests"), &mut files);
+        files.retain(|f| f.extension().is_some_and(|e| e == "lks"));
+        files.sort();
+        files
+    }
+
     pub fn command_file(&self, command: &str) -> PathBuf {
         self.dir.join("bin").join(format!("{command}.lks"))
     }

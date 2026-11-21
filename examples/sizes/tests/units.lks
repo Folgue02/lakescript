@@ -1,0 +1,27 @@
+// The tests of the project: `ferry test` runs every function named test...
+use folgue02/sizes/units;
+use std/test;
+
+void testBytesToText() {
+    assert units::human(1536) == '1.5 KB';
+    assert units::human(0) == '0 B';
+    assert units::human(1024 ** 3) == '1 GB';
+}
+
+void testTextToBytes() {
+    assert units::bytes('1.5 KB') == 1536;
+    assert units::bytes('  2 mb ') == 2 * 1024 ** 2;
+    assert units::bytes('100') == 100;
+}
+
+void testBothWays() {
+    for ($n in [1, 1024, 1536, 1048576]) {
+        assert units::bytes(units::human($n)) == $n;
+    }
+}
+
+void testUnknownUnits() {
+    const $e = test::throws(() -> units::bytes('3 XB'));
+    assert $e.typeName() == 'ValueError';
+    assert $e.message() == "unknown unit 'XB'";
+}

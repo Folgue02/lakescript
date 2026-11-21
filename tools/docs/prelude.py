@@ -24,7 +24,7 @@ TYPES = {
 # (i.e. std/http) get their types from their own code
 MODULES = {'general': 'general', 'fs': 'std/fs', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
            'process': 'std/process', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
-           'time': 'std/time'}
+           'template': 'std/template', 'test': 'std/test', 'time': 'std/time'}
 
 # Types described outside ideas/stdlib, and the Rust parts of the modules
 # written in Lakescript, which aren't documented since scripts never use them

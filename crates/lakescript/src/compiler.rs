@@ -576,6 +576,7 @@ impl<'a> Compiler<'a> {
                 self.expr(value)?;
                 self.emit_at(Op::Throw, stmt.span);
             }
+            StmtKind::Assert { cond, text } => self.stmt(&assertion(cond, text, stmt.span))?,
             StmtKind::Use(decl) => self.use_decl(decl)?,
             StmtKind::Block(stmts) => self.block(stmts)?,
             StmtKind::Expr(expr) => self.expr_discard(expr)?,
@@ -1885,6 +1886,41 @@ fn dispatcher(name: &str, versions: &[(Vec<Option<TypeExpr>>, String)], class: &
     FunctionDecl { name: name.to_string(), generics: Vec::new(), params, ret: None, body: FunctionBody::Block(body) }
 }
 
+/// `assert $cond;` as the code that does it: `if (!$cond) __assertFailed('...');`.
+/// For a comparison, both sides are kept in variables first, so its message
+/// can show them *(see `ideas/tooling/testing.md`)*.
+fn assertion(cond: &Expr, text: &str, span: Span) -> Stmt {
+    let at = |kind| Expr { kind, span };
+    let stmt = |kind| Stmt { kind, span };
+    let fail = |args: Vec<Expr>| {
+        let mut all = vec![Arg { name: None, value: at(ExprKind::Str(text.to_string())), spread: false }];
+        all.extend(args.into_iter().map(|value| Arg { name: None, value, spread: false }));
+        stmt(StmtKind::Expr(at(ExprKind::Call { callee: Box::new(at(ExprKind::Function("__assertFailed".into()))), args: all })))
+    };
+    let check = |cond: Expr, failed: Stmt| {
+        stmt(StmtKind::If { cond: at(ExprKind::Unary { op: UnaryOp::Not, operand: Box::new(cond) }), then: Box::new(failed), otherwise: None })
+    };
+    match &cond.kind {
+        ExprKind::Binary { op: op @ (BinaryOp::Eq | BinaryOp::NotEq | BinaryOp::Lt | BinaryOp::Gt | BinaryOp::LtEq | BinaryOp::GtEq), left, right } => {
+            let (l, r) = ("__assertLeft", "__assertRight");
+            let side = |name: &str, value: &Expr| stmt(StmtKind::Let { constant: true, name: name.to_string(), ty: None, value: value.clone() });
+            let var = |name: &str| at(ExprKind::Variable(name.to_string()));
+            let compared = Expr { kind: ExprKind::Binary { op: *op, left: Box::new(var(l)), right: Box::new(var(r)) }, span: cond.span };
+            stmt(StmtKind::Block(vec![side(l, left), side(r, right), check(compared, fail(vec![var(l), var(r)]))]))
+        }
+        // `.equals()` compares lists and maps by their values: both sides are shown too
+        ExprKind::MethodCall { receiver, method, args, nullable: false } if method == "equals" && args.len() == 1 && args[0].name.is_none() && !args[0].spread => {
+            let (l, r) = ("__assertLeft", "__assertRight");
+            let side = |name: &str, value: &Expr| stmt(StmtKind::Let { constant: true, name: name.to_string(), ty: None, value: value.clone() });
+            let var = |name: &str| at(ExprKind::Variable(name.to_string()));
+            let arg = vec![Arg { name: None, value: var(r), spread: false }];
+            let compared = Expr { kind: ExprKind::MethodCall { receiver: Box::new(var(l)), method: method.clone(), args: arg, nullable: false }, span: cond.span };
+            stmt(StmtKind::Block(vec![side(l, receiver), side(r, &args[0].value), check(compared, fail(vec![var(l), var(r)]))]))
+        }
+        _ => check(cond.clone(), fail(Vec::new())),
+    }
+}
+
 /// A method of an `implement` block can be called through the interface with
 /// an object of another class. Its `Self` parameters check that they got one
 /// of its own class, and throw a `TypeError` otherwise.
@@ -1997,6 +2033,7 @@ fn collect_stmt(stmt: &Stmt, inside: bool, out: &mut HashSet<String>) {
             }
         }
         StmtKind::Yield(e) | StmtKind::Throw(e) | StmtKind::Expr(e) => collect_expr(e, inside, out),
+        StmtKind::Assert { cond, .. } => collect_expr(cond, inside, out),
         StmtKind::Switch(switch) => collect_switch(switch, inside, out),
         StmtKind::Try { body, catches, finally } => {
             collect_stmts(body, inside, out);

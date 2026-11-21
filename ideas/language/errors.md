@@ -16,7 +16,8 @@ Exception
 ├── TypeError           // .as() failed, `'a' + 5`, a wrong argument
 ├── IndexError          // replacing `$list[$i]` past the end, `.removeAt()` and `.insert()` outside a list (reading `$list[$i]` past the end is `null`)
 ├── ArithmeticError     // % or .div() by zero
-└── CommandFailed       // a shell command returned an error
+├── CommandFailed       // a shell command returned an error
+└── AssertionError      // an `assert` whose condition was false
 ```
 
 - Custom exceptions are classes that extend one of these *(see [classes.md](classes.md))*:
@@ -40,6 +41,10 @@ throw ConfigError('the port must be a number', file: 'app.json');
 - A custom exception gets the field `message` first, a `const string` that's `''` unless it's given. Its constructor takes it like any other field, and a `new` of its own gives it with `@super(message)`.
 - It's thrown and caught like the built-in ones: `catch (ConfigError $e)` catches it and its subclasses, and `catch (ValueError $e)` too. It has their methods *(i.e. `$e.message()`, `$e.line()`)*, and its own fields and methods.
 - Only exceptions can be thrown: an object of a class that doesn't extend one is an error.
+
+## assert
+
+`assert $condition;` throws an `AssertionError` when the condition is `false`. Its message has the code of the condition, and for a comparison the values of both sides *(i.e. `assert failed: $total == 10`, then `left: 9` and `right: 10`)*. It's what tests use, and any script can *(see [testing.md](../tooling/testing.md))*.
 
 ## Catching
 

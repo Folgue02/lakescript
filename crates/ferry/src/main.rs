@@ -26,7 +26,10 @@ Commands:
   new <author/name> [--lib]   Create a project in a new folder. --lib makes a library
   run [command] [args...]     Run one of the project's commands from bin/. The name
                               can be left out when there's only one
-  check                       Type check the whole project without running it
+  check                       Type check the whole project, its tests too, without
+                              running it
+  test [filter]               Run the tests in tests/: their functions named test...
+                              With a filter, only the ones whose name has it
   add <repository:author/name@version>
                               Add a dependency, i.e. ferry add github:acme/http@1.4.2
   install [repository:author/name@version]
@@ -92,6 +95,11 @@ fn start() -> ExitCode {
         "check" => match rest {
             [] => check(),
             _ => return usage_error("`ferry check` takes no arguments"),
+        },
+        "test" => match rest {
+            [] => test(None),
+            [filter] => test(Some(filter)),
+            _ => return usage_error("`ferry test` takes one filter at most, i.e. `ferry test bytes`"),
         },
         "add" => match rest {
             [spec] => add(spec),
@@ -228,6 +236,11 @@ fn check_project(project: &Project, dependencies: &[Dependency]) -> Result<usize
             report(show(&diagnostic, &script));
         }
     }
+    for file in project.test_files() {
+        if let Err(diagnostic) = engine(&module_path).check_file(&file) {
+            report(show_as(&diagnostic, &file, &relative(project, &file)));
+        }
+    }
     // Modules no command uses are checked too
     let modules = project.modules()?;
     if !modules.is_empty() {
@@ -237,6 +250,58 @@ fn check_project(project: &Project, dependencies: &[Dependency]) -> Result<usize
         }
     }
     Ok(shown.len())
+}
+
+/// `ferry test`: every file in `tests/`, and its tests whose name has `filter`.
+fn test(filter: Option<&str>) -> Result<ExitCode, Fail> {
+    let (_, project, dependencies) = open_project()?;
+    let files = project.test_files();
+    status("Testing", &project.id);
+    if files.is_empty() {
+        note("there are no tests: they're the functions named `test...` of the files in tests/");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let module_path = resolve::module_path(&project, &dependencies);
+    let start = std::time::Instant::now();
+    let mut results = Vec::new();
+    let mut broken = 0;
+    for file in &files {
+        let shown = relative(&project, file);
+        match engine(&module_path).run_tests(file, filter) {
+            Ok(found) if found.is_empty() => {}
+            Ok(found) => {
+                eprintln!("{shown}");
+                for result in &found {
+                    eprint!("{}", lakescript::render_result(result, &shown, paint()));
+                }
+                results.extend(found);
+            }
+            Err(diagnostic) => {
+                broken += 1;
+                eprintln!("{}\n", show_as(&diagnostic, file, &shown));
+            }
+        }
+    }
+    eprint!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), paint()));
+    if broken > 0 {
+        let files = if broken == 1 { "file of tests" } else { "files of tests" };
+        return Err(format!("{broken} {files} couldn't run").into());
+    }
+    Ok(if results.iter().all(|r| r.passed()) { ExitCode::SUCCESS } else { ExitCode::FAILURE })
+}
+
+/// A file as seen from the project's folder *(i.e. `tests/units.lks`)*.
+fn relative(project: &Project, file: &Path) -> String {
+    file.strip_prefix(&project.dir).unwrap_or(file).display().to_string()
+}
+
+/// `show`, naming the script `name` in the error.
+fn show_as(diagnostic: &Diagnostic, script: &Path, name: &str) -> String {
+    let file = diagnostic.file.clone().map(PathBuf::from).unwrap_or_else(|| script.to_path_buf());
+    match std::fs::read_to_string(&file) {
+        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(name, &source, paint()),
+        _ => diagnostic.render_painted(name, paint()),
+    }
 }
 
 /// An error with the line of code it points to, read from the file it's in.

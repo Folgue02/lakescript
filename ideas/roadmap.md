@@ -41,7 +41,8 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 - Phase 6 added `ferry` *(see [tooling/ferry.md](tooling/ferry.md))*: projects, dependencies from git repositories with exact versions, the lock file, and installed commands. `examples/sizes/` is a project.
 - Phase 8 is being built *(see [tooling/lsp.md](tooling/lsp.md#status))*: `lks-lsp` sends the errors of the open files while they're typed, answers hover and go to definition, and completes names. Milestones 1 to 3 are done, which makes it `v0.8.0` once released.
 - Phase 7 added OOP, in steps *(see [language/classes.md](language/classes.md#status))*: classes, interfaces, enums, generics, operators through interfaces, custom exceptions, type modules, modules that use each other, and `command` for the arguments of a script *(see [language/cli.md](language/cli.md))*. Type aliases are gone, and `pub const` needs its type.
-- The standard library is growing alongside phase 8 *(see [stdlib/planned.md](stdlib/planned.md))*: its modules can be written in Lakescript and declare classes, `std/http` and `std/format/csv` are new, and `std/json` moved to `std/format/json`.
+- The standard library is growing alongside phase 8 *(see [stdlib/planned.md](stdlib/planned.md))*: its modules can be written in Lakescript and declare classes, `std/http`, `std/format/csv` and `std/template` are new, and `std/json` moved to `std/format/json`.
+- Tests: functions named `test...`, the `assert` statement, `std/test`, `ferry test` and `lks --test` *(see [tooling/testing.md](tooling/testing.md))*.
 - `examples/backup/backup.lks` is the phase 3 milestone: a real backup script with a module next to it, a JSON config, commands and files.
 
 ## Notes

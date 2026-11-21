@@ -276,9 +276,50 @@ fn the_example_project_works() {
     let w = World::new();
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sizes").canonicalize().unwrap();
     w.ok(&example, &["check"]);
+    let out = w.ferry(&example, &["test"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stderr(&out).contains("tests/units.lks\n          ok testBytesToText\n"), "{}", stderr(&out));
+    assert!(stderr(&out).contains("Finished 4 passed, 0 failed"), "{}", stderr(&out));
     assert_eq!(w.ok(&example, &["run", "human", "1536", "1048576"]), "1.5 KB\n1 MB\n");
     assert_eq!(w.ok(&example, &["run", "bytes", "1.5 KB", "2 mb"]), "1536\n2097152\n");
     assert!(w.fails(&example, &["run", "bytes", "1 XB"]).contains("unknown unit 'XB'"));
+}
+
+#[test]
+fn test_runs_the_tests_folder() {
+    let w = World::new();
+    let dir = w.project(
+        "app",
+        &app(""),
+        &[
+            ("src/me/app/math.lks", "pub number twice(number $n) = $n * 2;\nnumber hidden() = 1;\n"),
+            ("tests/math.lks", "use me/app/math;\nvoid testTwice() {\n    assert math::twice(2) == 4;\n}\nvoid testWrong() {\n    outln('checking');\n    assert math::twice(2) == 5;\n}\n"),
+            ("tests/more/other.lks", "void testOther() {\n    assert true;\n}\n"),
+        ],
+    );
+    let out = w.ferry(&dir, &["--color", "never", "test"]);
+    assert_eq!(out.status.code(), Some(1));
+    let said = stderr(&out);
+    assert!(said.starts_with("     Testing me/app\ntests/math.lks\n          ok testTwice\n        FAIL testWrong\n             tests/math.lks:7:5: assert failed: math::twice(2) == 5\n               left:  4\n               right: 5\n             It printed:\n               checking\ntests/more/other.lks\n          ok testOther\n"), "{said}");
+    assert!(said.contains("    Finished 2 passed, 1 failed in "), "{said}");
+    assert_eq!(stdout(&out), "");
+
+    // A filter, also from a folder inside the project
+    let out = w.ferry(&dir.join("tests/more"), &["--color", "never", "test", "Twice"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stderr(&out).contains("tests/math.lks\n          ok testTwice\n    Finished 1 passed, 0 failed"), "{}", stderr(&out));
+
+    // Tests only see what's `pub`, and `ferry check` checks them
+    write(&dir.join("tests/hidden.lks"), "use me/app/math;\nvoid testHidden() {\n    assert math::hidden() == 1;\n}\n");
+    let said = w.fails(&dir, &["--color", "never", "test", "Hidden"]);
+    assert!(said.contains("has no `pub` function named `hidden`\n --> tests/hidden.lks:3:12"), "{said}");
+    assert!(said.contains("error: 1 file of tests couldn't run"), "{said}");
+    assert!(w.fails(&dir, &["--color", "never", "check"]).contains("tests/hidden.lks:3:12"));
+
+    // No tests at all
+    let empty = w.project("empty", &app(""), &[("bin/app.lks", "outln(1);")]);
+    assert!(stderr(&w.ferry(&empty, &["test"])).contains("note: there are no tests"));
+    assert!(w.fails(&dir, &["test", "a", "b"]).contains("one filter at most"));
 }
 
 #[test]

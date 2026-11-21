@@ -1,0 +1,43 @@
+#!/usr/bin/lks
+// Templates with `std/template`: text with `{{ }}` tags and a map of values.
+
+use std/template;
+use std/path;
+use std/process;
+
+const $products = [
+    {'name' => 'Tea', 'price' => 3},
+    {'name' => 'Coffee <decaf>', 'price' => 7.5},
+    {'name' => 'Cake', 'price' => 4},
+];
+
+// A text template: what's inside `{{ }}` is Lakescript. The lines with only
+// a block, a definition or a comment disappear, so there are no empty lines
+const $report = """
+    # {{ $title.upper() }}
+    {{ for ($i, $p in $products) }}
+    {{ $i + 1 }}. {{ $p['name'] }}{{ if ($p['price'] > 5) ' (expensive)' else '' }}
+    {{ endfor }}
+    {{ const $total = $products.map(($p) -> $p['price']).sum() }}
+    Total: {{ $total }} €, {{ $products.length() }} products{{ $note }}
+    """;
+out(template::render($report, {'title' => 'Prices', 'products' => $products, 'note' => null}));
+outln('');
+
+// A file next to the script. An `.html` file escapes the values it writes,
+// and a function can be passed like any value
+const $folder = path::parent(process::scriptPath() ?? '.') ?? '.';
+const $page = template::renderFile(path::join($folder, 'page.html'), {
+    'title' => 'Shop',
+    'products' => $products,
+    'money' => ($n) -> f"{$n} €",
+    'footer' => '<a href="/about">About</a>',
+});
+out($page);
+
+// Errors point at the line of the template
+try {
+    template::render("one\ntwo {{ $missing }}");
+} catch ($e) {
+    outln(f"line {$e.line()}: {$e.message()}");
+}

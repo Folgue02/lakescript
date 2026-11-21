@@ -8,6 +8,8 @@ mod io;
 mod json;
 mod path;
 mod process;
+mod template;
+mod test;
 mod time;
 
 use std::collections::HashSet;
@@ -15,7 +17,7 @@ use std::rc::Rc;
 
 use crate::exceptions::TYPE_ERROR;
 use crate::modules::{Globals, Module};
-use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeResult, Value};
+use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeResult, Value, VmFn, VmFunction};
 
 pub const MODULES: &[&str] = &[
     "std/env",
@@ -26,6 +28,8 @@ pub const MODULES: &[&str] = &[
     "std/io",
     "std/path",
     "std/process",
+    "std/template",
+    "std/test",
     "std/time",
 ];
 
@@ -63,11 +67,12 @@ pub struct Exports {
     name: String,
     functions: Vec<(&'static str, &'static [&'static str], Box<dyn Fn(&mut NativeContext, Vec<Value>) -> NativeResult>)>,
     constants: Vec<(&'static str, Value)>,
+    vm: Vec<(&'static str, &'static [&'static str], VmFn)>,
 }
 
 impl Exports {
     fn new(name: &str) -> Self {
-        Exports { name: name.to_string(), functions: Vec::new(), constants: Vec::new() }
+        Exports { name: name.to_string(), functions: Vec::new(), constants: Vec::new(), vm: Vec::new() }
     }
 
     fn function(&mut self, name: &'static str, f: impl Fn(&mut NativeContext, Vec<Value>) -> NativeResult + 'static) {
@@ -82,6 +87,11 @@ impl Exports {
         f: impl Fn(&mut NativeContext, Vec<Value>) -> NativeResult + 'static,
     ) {
         self.functions.push((name, params, Box::new(f)));
+    }
+
+    /// A function that runs Lakescript code, so it needs the VM.
+    fn vm_function(&mut self, name: &'static str, params: &'static [&'static str], f: VmFn) {
+        self.vm.push((name, params, f));
     }
 
     fn constant(&mut self, name: &'static str, value: Value) {
@@ -100,6 +110,8 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/http/native" => http::register(&mut exports),
         "std/path" => path::register(&mut exports),
         "std/process" => process::register(&mut exports),
+        "std/template" => template::register(&mut exports),
+        "std/test" => test::register(&mut exports),
         "std/time" => time::register(&mut exports),
         _ => return None,
     }
@@ -111,6 +123,12 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         let params = params.iter().map(|p| p.to_string()).collect();
         let function = Value::Function(Rc::new(Function::Native(NativeFunction { name: full, params, func })));
         globals.define(fname, function, true);
+        public.insert(fname.to_string());
+    }
+    for (fname, params, func) in exports.vm {
+        let name = format!("{short}::{fname}");
+        let params = params.iter().map(|p| p.to_string()).collect();
+        globals.define(fname, Value::Function(Rc::new(Function::Vm(VmFunction { name, params, func }))), true);
         public.insert(fname.to_string());
     }
     for (cname, value) in exports.constants {

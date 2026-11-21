@@ -26,6 +26,9 @@ Options:
                    always or never. NO_COLOR also turns them off
   --no-type-check  Run the script without checking its types first,
                    for scripts that were already checked
+  --test           Run the tests of the script, its functions named test...,
+                   instead of the script. An argument after the script
+                   runs only the tests whose name has it
   -h, --help       Show this help
   -V, --version    Show the version of lks
   --               End the options: the next argument is the script,
@@ -51,6 +54,7 @@ fn main() -> ExitCode {
 #[derive(Default)]
 struct Options {
     no_type_check: bool,
+    test: bool,
     show_tokens: bool,
     show_ast: bool,
     show_bytecode: bool,
@@ -82,6 +86,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
         };
         match arg.as_str() {
             "--no-type-check" => options.no_type_check = true,
+            "--test" => options.test = true,
             "--tokens" => options.show_tokens = true,
             "--ast" => options.show_ast = true,
             "--bytecode" => options.show_bytecode = true,
@@ -141,7 +146,7 @@ fn run() -> ExitCode {
 
     let mut engine = Engine::new();
     engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
-    engine.set_args(args);
+    engine.set_args(args.clone());
     engine.set_type_check(!options.no_type_check);
     for folder in options.module_path.drain(..) {
         engine.add_module_root(folder);
@@ -150,6 +155,9 @@ fn run() -> ExitCode {
         for folder in std::env::split_paths(&extra) {
             engine.add_module_root(folder);
         }
+    }
+    if options.test {
+        return test(&mut engine, &script, &args, options.color);
     }
     match engine.run_file(Path::new(&script)) {
         Ok(outcome) => ExitCode::from(outcome.code().clamp(0, 255) as u8),
@@ -167,6 +175,33 @@ fn run() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `lks --test`: the tests of the script, and how many failed. `args` can
+/// have a filter for their names.
+fn test(engine: &mut Engine, script: &str, args: &[String], color: When) -> ExitCode {
+    let filter = match args {
+        [] => None,
+        [filter] => Some(filter.as_str()),
+        _ => {
+            eprintln!("{} `lks --test` takes the script and one filter at most", paint().error("lks:"));
+            return ExitCode::from(2);
+        }
+    };
+    let out = Paint(color.colors(std::io::stdout().is_terminal()));
+    let start = std::time::Instant::now();
+    let results = match engine.run_tests(Path::new(script), filter) {
+        Ok(results) => results,
+        Err(diagnostic) => {
+            eprintln!("{}", show(&diagnostic, script));
+            return ExitCode::FAILURE;
+        }
+    };
+    for result in &results {
+        print!("{}", lakescript::render_result(result, script, out));
+    }
+    print!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), out));
+    if results.iter().all(|r| r.passed()) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
 /// An error with the line of code it points to, read from the file it's in.

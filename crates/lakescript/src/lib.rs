@@ -26,6 +26,7 @@ mod patterns;
 mod stack;
 mod stdlib;
 pub mod terminal;
+mod testing;
 pub mod token;
 mod types;
 pub mod value;
@@ -34,6 +35,7 @@ pub use checker::complete::{Completion, Item as CompletionItem, ItemKind as Comp
 pub use checker::names::{Definition, Name};
 pub use diagnostic::Diagnostic;
 pub use engine::{CapturedOutput, Engine, Outcome};
+pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use value::{NativeContext, NativeError, NativeResult, Value};
 
 /// Reads a whole script into its syntax tree.

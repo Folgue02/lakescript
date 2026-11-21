@@ -231,6 +231,8 @@ pub enum StmtKind {
     Switch(Box<Switch>),
     Try { body: Vec<Stmt>, catches: Vec<Catch>, finally: Option<Vec<Stmt>> },
     Throw(Expr),
+    /// `assert $cond;`, with the code of the condition, for its message.
+    Assert { cond: Expr, text: String },
     /// `use a/b/c;`, `use a/b/c::name;`, `use a/b/c::{x, $y};`
     Use(UseDecl),
     /// `pub` before a function, a `const`, a class, an interface or an enum.
@@ -674,6 +676,7 @@ impl fmt::Display for Stmt {
             }
             Yield(e) => write!(f, "(yield {e})"),
             Throw(e) => write!(f, "(throw {e})"),
+            Assert { cond, .. } => write!(f, "(assert {cond})"),
             Pub(inner) => write!(f, "(pub {inner})"),
             Class(decl) => write!(f, "{decl}"),
             Use(decl) => {

@@ -1,0 +1,53 @@
+#!/usr/bin/lks
+// Tests: functions named test..., checked with `assert`.
+// Run them with `lks --test examples/testing.lks`, or only some with a
+// filter: `lks --test examples/testing.lks Slug`. In a ferry project they go
+// in tests/, and `ferry test` runs them.
+
+use std/test;
+
+// The code being tested
+string slug(string $title) = $title.trim().lower().replaceMatches(%r"[^a-z0-9]+", '-').trimEnd('-');
+
+number average(list<number> $values) {
+    if ($values.empty?()) throw ValueError('there are no values');
+    return $values.sum() / $values.length();
+}
+
+// `assert` checks a condition. When a comparison fails, it shows both sides
+void testSlug() {
+    assert slug('Hello World') == 'hello-world';
+    assert slug('  Lakescript 1.0!  ') == 'lakescript-1-0';
+}
+
+void testSlugOfNothing() {
+    assert slug('') == '';
+}
+
+void testAverage() {
+    assert average([1, 2, 3]) == 2;
+    assert average([5]) == 5;
+}
+
+// `test::throws` runs the code and gives back the exception it threw
+void testAverageOfNothing() {
+    const $e = test::throws(() -> average([]));
+    assert $e.typeName() == 'ValueError';
+    assert $e.message() == 'there are no values';
+}
+
+// Any script can use `assert`, and after it the checker knows the condition holds
+void testAssertNarrows() {
+    ?string $first = ['lake'].first();
+    assert $first != null;
+    assert $first.upper() == 'LAKE';
+}
+
+// Functions whose names don't start with `test` are helpers
+void testHelpers() {
+    checkSlug('A  B', 'a-b');
+}
+
+void checkSlug(string $title, string $expected) {
+    assert slug($title) == $expected;
+}

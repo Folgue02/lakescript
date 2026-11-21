@@ -836,6 +836,11 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Throw(value) => self.thrown(value)?,
+            // After it, the condition holds
+            StmtKind::Assert { cond, .. } => {
+                let (yes, _) = self.condition(cond)?;
+                self.narrow_here(&yes);
+            }
             StmtKind::Use(decl) => self.use_decl(decl, span)?,
             StmtKind::Pub(inner) => self.stmt(inner)?,
             StmtKind::Block(stmts) => self.scoped(&Vec::new(), |c| c.block(stmts))?,

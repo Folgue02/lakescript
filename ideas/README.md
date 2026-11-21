@@ -41,3 +41,4 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
     - [ferry.md](tooling/ferry.md): projects, dependencies, repositories and installed commands.
     - [diagnostics.md](tooling/diagnostics.md): how error messages look.
     - [lsp.md](tooling/lsp.md): `lks-lsp`, the language server for editors *(phase 8)*.
+    - [testing.md](tooling/testing.md): tests, `assert`, `ferry test` and `lks --test`.

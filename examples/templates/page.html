@@ -1,0 +1,14 @@
+<!doctype html>
+<title>{{ $title }}</title>
+<h1>{{ $title }}</h1>
+{{ // The values come escaped, so a name with `<` can't add HTML }}
+{{ if ($products.empty?()) }}
+<p>Nothing for sale.</p>
+{{ else }}
+<ul>
+  {{ for ($p in $products) }}
+  <li>{{ $p['name'] }}: {{ $money($p['price']) }}{{ if ($p['price'] < 5) }} <em>cheap</em>{{ endif }}</li>
+  {{ endfor }}
+</ul>
+{{ endif }}
+<footer>{{ raw($footer) }}</footer>

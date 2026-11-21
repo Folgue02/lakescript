@@ -19,9 +19,11 @@ backup/
 │       └── backup/
 │           ├── config.lks      // use folgue02/backup/config;
 │           └── archive.lks     // use folgue02/backup/archive;
-└── bin/
-    ├── backup.lks              // ferry run backup
-    └── restore.lks             // ferry run restore
+├── bin/
+│   ├── backup.lks              // ferry run backup
+│   └── restore.lks             // ferry run restore
+└── tests/
+    └── config.lks              // ferry test
 ```
 
 - The modules of a project live under `src/author/name/`, like Java's `src/com/acme/project/`. So every module has its full path everywhere, in the project itself and in the projects that depend on it, and two projects can never provide the same module.
@@ -29,6 +31,7 @@ backup/
     - A library is only its modules, for other projects to use.
     - An application also has **entry points**: every script in `bin/` is a command named after its file *(i.e. `bin/restore.lks` is `restore`)*, like Ruby's `bin/`. One project can have as many as it needs.
 - The scripts in `bin/` use the project's modules like any other module *(i.e. `use folgue02/backup/config;`)*.
+- The files in `tests/` have the project's tests, run by `ferry test` *(see [testing.md](testing.md))*.
 
 ## ferry.toml
 
@@ -78,7 +81,8 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 |---------|---------|
 | `ferry new <author/name>` | Creates a project in a new folder. `--lib` makes a library |
 | `ferry run [command] [arguments...]` | Runs one of the project's commands from `bin/`, with its dependencies on the module path. The name can be left out when there's only one |
-| `ferry check` | Type checks the whole project without running it |
+| `ferry check` | Type checks the whole project without running it, its tests too |
+| `ferry test [filter]` | Runs the tests in `tests/`, or only the ones whose name has `filter` *(see [testing.md](testing.md))* |
 | `ferry add <repository:author/name@version>` | Adds a dependency to `ferry.toml` and downloads it *(i.e. `ferry add github:acme/http@1.4.2`)* |
 | `ferry install [repository:author/name@version]` | Installs the commands of an application into `~/.ferry/bin`: the project in the current folder, or one downloaded from a repository |
 

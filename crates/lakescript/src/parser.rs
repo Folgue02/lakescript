@@ -416,6 +416,13 @@ impl Parser {
                 self.expect(&TokenKind::Semicolon, "after `throw`")?;
                 StmtKind::Throw(value)
             }
+            TokenKind::Keyword(Keyword::Assert) => {
+                let text = self.peek().doc.clone().unwrap_or_default();
+                self.advance();
+                let cond = self.expression()?;
+                self.expect(&TokenKind::Semicolon, "after the condition of `assert`")?;
+                StmtKind::Assert { cond, text }
+            }
             TokenKind::Keyword(k @ (Keyword::Catch | Keyword::Finally)) => {
                 return self.error_here(format!("`{}` must come after a `try` block", k.as_str()));
             }

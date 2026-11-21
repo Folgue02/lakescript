@@ -45,9 +45,9 @@ impl Outcome {
 /// assert_eq!(output.text(), "3\n");
 /// ```
 pub struct Engine {
-    globals: Rc<Globals>,
-    host: Host,
-    stack_budget: usize,
+    pub(crate) globals: Rc<Globals>,
+    pub(crate) host: Host,
+    pub(crate) stack_budget: usize,
     /// Whether scripts are type checked before they run.
     check_types: bool,
     /// The signatures of the built-in methods and the standard library, read the first time they're needed.
@@ -315,7 +315,7 @@ impl Engine {
     }
 
     /// Reads a script and makes its folder the first place `use` looks.
-    fn open_file(&mut self, path: &Path) -> Result<String, Diagnostic> {
+    pub(crate) fn open_file(&mut self, path: &Path) -> Result<String, Diagnostic> {
         let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let source = self
             .host
@@ -357,7 +357,7 @@ impl Engine {
     }
 
     /// Fills in the file of an error that happened in a module.
-    fn locate(&self, mut diagnostic: Diagnostic) -> Diagnostic {
+    pub(crate) fn locate(&self, mut diagnostic: Diagnostic) -> Diagnostic {
         let file = diagnostic.span.file as usize;
         if file > 0 && diagnostic.file.is_none() {
             diagnostic.file = self.host.loader.files.get(file).cloned();
@@ -367,6 +367,27 @@ impl Engine {
 
     fn register_builtins(&mut self) {
         self.register("outln", |ctx, args| print(&mut *ctx.output, args, "outln", true));
+        // What a failed `assert` calls *(see `assertion` in compiler.rs)*
+        self.register("__assertFailed", |_, args| {
+            let text = match args.first() {
+                Some(Value::Str(s)) => s.to_string(),
+                _ => String::new(),
+            };
+            let mut message = format!("assert failed: {text}");
+            if let [_, left, right] = args.as_slice() {
+                message.push_str(&format!("\n  left:  {}\n  right: {}", left.nested(), right.nested()));
+                // `==` compares lists and maps by reference
+                let what = match (left, right) {
+                    (Value::List(_), Value::List(_)) => Some("lists"),
+                    (Value::Map(_), Value::Map(_)) => Some("maps"),
+                    _ => None,
+                };
+                if let Some(what) = what.filter(|_| left.equals(right) && !left.same(right)) {
+                    message.push_str(&format!("\n  They're two {what} with the same values: `==` checks if they're the same {}, and `.equals()` compares their values", &what[..what.len() - 1]));
+                }
+            }
+            Err(NativeError::new(crate::exceptions::ASSERTION_ERROR, message))
+        });
         self.register("out", |ctx, args| print(&mut *ctx.output, args, "out", false));
         self.register("errln", |ctx, args| print(&mut *ctx.error, args, "errln", true));
         self.register("err", |ctx, args| print(&mut *ctx.error, args, "err", false));

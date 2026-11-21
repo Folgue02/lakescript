@@ -20,9 +20,12 @@ pub const TREE: &[(&str, Option<&str>)] = &[
     ("IndexError", Some("Exception")),
     ("ArithmeticError", Some("Exception")),
     ("CommandFailed", Some("Exception")),
+    // An `assert` whose condition was false
+    ("AssertionError", Some("Exception")),
 ];
 
 pub const TYPE_ERROR: &str = "TypeError";
+pub const ASSERTION_ERROR: &str = "AssertionError";
 pub const VALUE_ERROR: &str = "ValueError";
 pub const INDEX_ERROR: &str = "IndexError";
 pub const ARITHMETIC_ERROR: &str = "ArithmeticError";

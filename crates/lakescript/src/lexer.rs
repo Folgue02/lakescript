@@ -25,8 +25,36 @@ pub fn tokenize_file(source: &str, file: u32) -> Result<Vec<Token>, Diagnostic> 
         let done = token.kind == TokenKind::Eof;
         tokens.push(token);
         if done {
+            assert_texts(&lexer.chars, &mut tokens);
             return Ok(tokens);
         }
+    }
+}
+
+/// `assert` keeps the code of its condition in `doc`, for its message when it
+/// fails *(see `ideas/tooling/testing.md`)*: what's between it and its `;`.
+fn assert_texts(chars: &[char], tokens: &mut [Token]) {
+    use crate::token::Keyword;
+    for i in 0..tokens.len() {
+        if tokens[i].kind != TokenKind::Keyword(Keyword::Assert) {
+            continue;
+        }
+        let mut depth = 0i32;
+        let mut end = tokens[i].span.end;
+        for t in &tokens[i + 1..] {
+            match t.kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::QuestionBracket => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth -= 1,
+                TokenKind::Semicolon | TokenKind::Eof if depth <= 0 => break,
+                _ => {}
+            }
+            end = t.span.end;
+        }
+        let from = tokens[i].span.end.min(chars.len());
+        let text: String = chars[from..end.clamp(from, chars.len())].iter().collect();
+        // A condition on several lines is shown on one
+        let text: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        tokens[i].doc = Some(text.join(" "));
     }
 }
 
@@ -868,7 +896,7 @@ fn is_name_start(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '_'
 }
 
-fn is_valid_name(word: &str) -> bool {
+pub(crate) fn is_valid_name(word: &str) -> bool {
     let mut chars = word.chars();
     chars.next().is_some_and(is_name_start) && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

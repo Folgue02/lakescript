@@ -360,6 +360,13 @@ list<list<string>> read(string $path, string $separator = ',');
 list<map<string, string>> readMaps(string $path, string $separator = ',');
 void write(string $path, list<any> $rows, string $separator = ',');
 
+module std/template
+string render(string $text, map<string, any> $values = {}, bool $html = false);
+string renderFile(string $path, map<string, any> $values = {}, ?bool $html = null);
+
+module std/test
+exception throws(() -> any $code);
+
 module std/time
 number now();
 

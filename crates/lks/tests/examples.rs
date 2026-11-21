@@ -146,6 +146,47 @@ fn http() {
 }
 
 #[test]
+fn testing() {
+    let out = run_ok(&["--test", "examples/testing.lks"]);
+    assert!(out.starts_with("          ok testSlug\n"), "{out}");
+    assert!(out.contains("          ok testAssertNarrows\n"), "{out}");
+    assert!(out.contains("Finished 6 passed, 0 failed in "), "{out}");
+    let out = run_ok(&["--test", "examples/testing.lks", "Average"]);
+    assert!(out.contains("ok testAverage\n") && out.contains("ok testAverageOfNothing\n") && out.contains("2 passed, 0 failed"), "{out}");
+
+    // A test that fails
+    let dir = std::env::temp_dir().join(format!("lks-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("fails.lks");
+    std::fs::write(&file, "void testOk() {}\nvoid testBad() {\n    outln('looking');\n    assert 'a'.upper() == 'b';\n}\n").unwrap();
+    let output = lks(&["--color", "never", "--test", &file.display().to_string()], None);
+    assert_eq!(output.status.code(), Some(1));
+    let out = String::from_utf8_lossy(&output.stdout);
+    let expected = format!(
+        "          ok testOk\n        FAIL testBad\n             {}:4:5: assert failed: 'a'.upper() == 'b'\n               left:  'A'\n               right: 'b'\n             It printed:\n               looking\n",
+        file.display()
+    );
+    assert!(out.starts_with(&expected), "{out}");
+    assert!(out.contains("Finished 1 passed, 1 failed in "), "{out}");
+    // A file that can't run, and too many arguments
+    std::fs::write(&file, "void testA() {\n    number $n = 'x';\n}\n").unwrap();
+    let output = lks(&["--test", &file.display().to_string()], None);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("`$n` is a number"));
+    assert_eq!(lks(&["--test", &file.display().to_string(), "a", "b"], None).status.code(), Some(2));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn templates() {
+    let out = run_ok(&["examples/templates/templates.lks"]);
+    assert!(out.starts_with("# PRICES\n1. Tea\n2. Coffee <decaf> (expensive)\n3. Cake\nTotal: 14.5 €, 3 products\n"), "{out}");
+    assert!(out.contains("<ul>\n  <li>Tea: 3 € <em>cheap</em></li>\n  <li>Coffee &lt;decaf&gt;: 7.5 €</li>\n"), "{out}");
+    assert!(out.contains("<footer><a href=\"/about\">About</a></footer>\n"), "{out}");
+    assert!(out.ends_with("line 2: `$missing` isn't declared\n"), "{out}");
+}
+
+#[test]
 fn greet() {
     assert_eq!(run_ok(&["examples/greet.lks", "ana", "bo"]), "Hello, Ana!\nHello, Bo!\n");
     let output = lks(&["examples/greet.lks"], None);

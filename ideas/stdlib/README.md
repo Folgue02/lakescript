@@ -61,6 +61,8 @@ What's coming next is in [planned.md](planned.md).
 | [http.md](http.md) | `std/http`: requests to web servers |
 | [format/json.md](format/json.md) | `std/format/json`: reading and writing JSON |
 | [format/csv.md](format/csv.md) | `std/format/csv`: reading and writing CSV |
+| [test.md](test.md) | `std/test`: what tests need besides `assert` *(see [testing.md](../tooling/testing.md))* |
+| [template.md](template.md) | `std/template`: templates with `{{ }}` tags, like Ruby's ERB |
 
 ### Still planned
 

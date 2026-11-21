@@ -219,6 +219,19 @@ pub enum Function {
     Native(NativeFunction),
     /// `Git::parse()` or `Git::help()` of a command.
     Command { class: std::rc::Weak<Class>, help: bool },
+    /// A function of the standard library that runs Lakescript code, so it
+    /// needs the VM *(i.e. `template::render`)*.
+    Vm(VmFunction),
+}
+
+/// What a `Function::Vm` runs: the VM, the arguments, and where it was called.
+pub type VmFn = for<'a, 'b> fn(&'a mut crate::interpreter::Interpreter<'b>, Vec<Value>, crate::token::Span) -> crate::interpreter::Exec<Value>;
+
+pub struct VmFunction {
+    pub name: String,
+    /// The names of the parameters, so they can be given by name.
+    pub params: Vec<String>,
+    pub func: VmFn,
 }
 
 /// A function written in Lakescript: its code, the variables of the functions
@@ -288,6 +301,7 @@ impl Function {
         match self {
             Function::User(f) => &f.proto.name,
             Function::Native(f) => &f.name,
+            Function::Vm(f) => &f.name,
             Function::Command { help: true, .. } => "help",
             Function::Command { .. } => "parse",
         }
@@ -391,6 +405,17 @@ impl Value {
             }
             _ => self.same(other),
         }
+    }
+
+    /// How the value looks inside a list or a map *(i.e. `'a'` for a string)*.
+    pub fn nested(&self) -> String {
+        struct Nested<'a>(&'a Value);
+        impl fmt::Display for Nested<'_> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.write_nested(f)
+            }
+        }
+        Nested(self).to_string()
     }
 
     /// How the value looks inside a list or a map: strings get quotes and

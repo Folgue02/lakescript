@@ -207,6 +207,10 @@ impl<'a> Interpreter<'a> {
         if let Function::Command { class, help } = &**function {
             return self.command_function(class, *help, positional, span);
         }
+        if let Function::Vm(vm) = &**function {
+            let args = bind_named(&vm.name, &vm.params, positional, named, span)?;
+            return (vm.func)(self, args, span);
+        }
         if stack_position().abs_diff(self.stack_base) > self.stack_budget {
             return error(TOO_DEEP, span);
         }
@@ -230,6 +234,12 @@ impl<'a> Interpreter<'a> {
             }
             Function::Command { class, help } => {
                 let value = self.command_function(class, *help, positional, span)?;
+                self.stack.push(value);
+                Ok(false)
+            }
+            Function::Vm(vm) => {
+                let args = bind_named(&vm.name, &vm.params, positional, named, span)?;
+                let value = (vm.func)(self, args, span)?;
                 self.stack.push(value);
                 Ok(false)
             }
@@ -329,23 +339,7 @@ impl<'a> Interpreter<'a> {
         named: Named,
         span: Span,
     ) -> Exec<Value> {
-        let mut args = positional;
-        for (name, value, arg_span) in named {
-            let Some(i) = native.params.iter().position(|p| *p == name) else {
-                return if native.params.is_empty() {
-                    error_as(exceptions::TYPE_ERROR, format!("`{}` doesn't take named arguments", native.name), span)
-                } else {
-                    error_as(exceptions::TYPE_ERROR, format!("`{}` has no parameter named `{name}`", native.name), arg_span)
-                };
-            };
-            if i < args.len() && !matches!(args[i], Value::Null) {
-                return error_as(exceptions::TYPE_ERROR, format!("`{name}` was given twice"), arg_span);
-            }
-            while args.len() <= i {
-                args.push(Value::Null);
-            }
-            args[i] = value;
-        }
+        let args = bind_named(&native.name, &native.params, positional, named, span)?;
         let mut context = self.context();
         let result = (native.func)(&mut context, args);
         let exit = context.exit;
@@ -1286,6 +1280,26 @@ impl<'a> Interpreter<'a> {
         }
     }
 
+    /// The number of the file `name` in errors, giving it one the first time.
+    pub(crate) fn file_number(&mut self, name: &str) -> u32 {
+        let files = &mut self.host.loader.files;
+        match files.iter().position(|f| f == name) {
+            Some(i) if i > 0 => i as u32,
+            _ => {
+                files.push(name.to_string());
+                files.len() as u32 - 1
+            }
+        }
+    }
+
+    /// Compiles code that the standard library wrote *(i.e. from a template)*
+    /// as a script of the file `file`, whose top level is `globals`.
+    pub(crate) fn compile_generated(&mut self, code: &str, file: u32, globals: &Rc<Globals>) -> Result<Rc<Function>, Diagnostic> {
+        let program = crate::parse_budgeted(code, file, self.stack_budget)?;
+        let proto = Compiler::new(globals, &self.host.builtin_names, self.stack_budget).script(&program)?;
+        Ok(Rc::new(Function::User(UserFunction { proto, upvalues: Vec::new(), globals: globals.clone() })))
+    }
+
     /// Loads a module once: later loads give the same one.
     fn load(&mut self, source: ModuleSource, span: Span) -> Exec<Rc<Module>> {
         let path = match source {
@@ -1940,7 +1954,30 @@ fn describe(value: &Value) -> String {
     }
 }
 
-fn native_error(e: NativeError, span: Span) -> Flow {
+/// The arguments of a function of the standard library, with the ones given
+/// by name put in their place.
+fn bind_named(function: &str, params: &[String], positional: Vec<Value>, named: Named, span: Span) -> Exec<Vec<Value>> {
+    let mut args = positional;
+    for (name, value, arg_span) in named {
+        let Some(i) = params.iter().position(|p| *p == name) else {
+            return if params.is_empty() {
+                error_as(exceptions::TYPE_ERROR, format!("`{function}` doesn't take named arguments"), span)
+            } else {
+                error_as(exceptions::TYPE_ERROR, format!("`{function}` has no parameter named `{name}`"), arg_span)
+            };
+        };
+        if i < args.len() && !matches!(args[i], Value::Null) {
+            return error_as(exceptions::TYPE_ERROR, format!("`{name}` was given twice"), arg_span);
+        }
+        while args.len() <= i {
+            args.push(Value::Null);
+        }
+        args[i] = value;
+    }
+    Ok(args)
+}
+
+pub(crate) fn native_error(e: NativeError, span: Span) -> Flow {
     flow_error_as(&e.kind, e.message, span)
 }
 

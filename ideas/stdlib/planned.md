@@ -12,9 +12,24 @@ What the standard library is getting next *(see [README.md](README.md))*. Termin
 - **CSV** in `std/format/csv`, read and written as lists of rows, or as maps by the names of the columns.
 - **`std/random`**: numbers, choosing, shuffling and UUIDs.
 - **Standard library modules can be written in Lakescript**, embedded in the interpreter, with a part in Rust *(see How modules are made in [README.md](README.md))*. So they can declare classes like `http::Response`, checked and shown in editors like any other code.
-- **Templates like Ruby's ERB**: a template and a `map<string, any>` of the values it uses give a string.
+- **Templates like Ruby's ERB**, built in `std/template`: a template and a `map<string, any>` of the values it uses give a string.
   - The tags use double curly braces, and what's inside is Lakescript *(i.e. `{{ $name.upper() }}`)*. The keys of the map become variables.
   - `for`, `if` and the like get a shorter form in templates, so nested blocks don't end in a row of `{{ } }}` like PHP's `<?php } ?>`.
+  - Blocks open without `{` and close with their own end: `{{ endfor }}`, `{{ endif }}`, `{{ endwhile }}`.
+  - `renderFile` escapes HTML for `.html` and `.htm` files, `render` only with `html: true`, and `{{ raw($x) }}` writes a value without escaping. `null` writes nothing. The rest is in [template.md](template.md).
+- **One `std/archive` for every archive format, with objects.** `archive::open($path)` gives an `archive::Archive` to read, and `archive::create($path)` one to write, which is finished with `close()`. An archive has `entries()`, `read($name)`, `extract($dir)`, `add($path, as:)` and `addText($name, $text)`, and its entries are `archive::Entry` values with `name`, `size`, `dir?()` and `modified`. The format comes from the name: `.zip`, `.tar`, `.tar.gz` or `.tgz`. Plain functions *(i.e. `archive::extract($file, $dir)`)* were the other option, but an open archive can do several things without being opened again, and adding files in a loop is natural. The names of the methods can still change when it's built.
+  ```
+  const $zip = archive::open('site.zip');
+  for ($entry in $zip.entries()) {
+      outln(f"{$entry.name}  {$entry.size} bytes");
+  }
+  $zip.extract('out');
+
+  const $backup = archive::create('backup.tar.gz');
+  $backup.add('photos/', as: 'pictures/');
+  $backup.close();
+  ```
+- **Testing**, built: tests are functions named `test...`, checked with `assert`, a statement of the language that shows both sides of a comparison that failed. `std/test` has only what `assert` can't do *(i.e. `test::throws($fn)`)*. Tests see the `pub` items of the project's modules. `ferry test` runs the files in `tests/`, and `lks --test` the tests of a script *(see [testing.md](../tooling/testing.md))*.
 - **Crates instead of writing our own, when their licenses allow it.** The project is Apache-2.0, so MIT, Apache-2.0, BSD, ISC, Zlib and Unlicense are fine. MPL-2.0 is fine too, as long as its files aren't changed: it's copyleft only for its own files. Checked so far:
   - `ureq` (HTTP) and everything it uses are MIT, Apache-2.0, ISC, BSD or Zlib. Its certificates come from `webpki-roots`, under CDLA-Permissive-2.0, a permissive license for data.
   - `csv` is MIT or Unlicense.
@@ -23,8 +38,6 @@ What the standard library is getting next *(see [README.md](README.md))*. Termin
 ## Being discussed
 
 - **`std/html`**, for scraping: a page is parsed with `html5ever`, the parser of Servo, which repairs broken HTML the way browsers do. Its elements are found with CSS selectors *(i.e. `html::parse($page).select('a.title')`)*, then their text and attributes are read. With the `scraper` crate rather than a selector engine of our own.
-- **One `std/archive` for every archive format**, as functions on the archive's path that return built-in types, without classes *(i.e. `archive::extract('backup.tar.gz', 'out')`, `archive::list('site.zip')`)*. The format comes from the name: `.zip`, `.tar`, `.tar.gz` or `.tgz`.
-- **The details of templates**: the shorter form of `for` and `if`, and whether HTML is escaped.
 
 ## Left out for now
 
