@@ -84,7 +84,8 @@ impl Checker<'_> {
 
     /// Before a `.` *(i.e. `$point.` or `$point.di`)*: the members of the value.
     pub(super) fn note_receiver(&mut self, receiver_end: usize, span: Span, ty: &Ty) {
-        if self.cursor().is_some_and(|c| receiver_end <= c && c <= span.end) {
+        // The `.` is after the receiver: a chain that goes on after the place isn't it
+        if self.cursor().is_some_and(|c| receiver_end < c && c <= span.end) {
             let ty = self.resolve(ty);
             let ty = match ty {
                 Ty::Nullable(inner) => *inner,
@@ -226,6 +227,8 @@ impl Checker<'_> {
             Ty::Map(k, v) => builtin(&mut items, &mut seen, "map", vec![(**k).clone(), (**v).clone()]),
             Ty::Result(t, e) => builtin(&mut items, &mut seen, "result", vec![(**t).clone(), (**e).clone()]),
             Ty::Exception(_) => builtin(&mut items, &mut seen, "exception", Vec::new()),
+            // Not known: what every value has
+            Ty::Any | Ty::Var(_) | Ty::Param(_) => {}
             _ => return None,
         }
         // What every value has

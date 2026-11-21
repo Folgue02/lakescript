@@ -107,6 +107,8 @@ struct Parser {
     /// Going on after errors *(see `parse_recovering`)*.
     recover: bool,
     errors: Vec<Diagnostic>,
+    /// Where the last name being written *(i.e. `$f.`)* ended: no expression goes on from there.
+    hole: Option<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -119,7 +121,7 @@ struct Checkpoint {
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
         let eof = Token { kind: TokenKind::Eof, span: Span::default(), doc: None };
-        Parser { tokens, pos: 0, split: 0, split_token: eof, last_span: Span::default(), stack_base: crate::stack::position(), stack_budget: crate::stack::DEFAULT_BUDGET, in_case_pattern: false, recover: false, errors: Vec::new() }
+        Parser { tokens, pos: 0, split: 0, split_token: eof, last_span: Span::default(), stack_base: crate::stack::position(), stack_budget: crate::stack::DEFAULT_BUDGET, in_case_pattern: false, recover: false, errors: Vec::new(), hole: None }
     }
 
     /// The statements of a whole file.
@@ -135,16 +137,22 @@ impl Parser {
             }
         }
         while !self.check(&TokenKind::Eof) {
+            // A `}` without its `{`. It's skipped here, since `statement` reads
+            // nothing at a `}` when recovering *(an empty body)*
+            if self.recover && self.check(&TokenKind::RBrace) {
+                self.errors.push(Diagnostic::new("unexpected `}`", self.peek().span));
+                self.advance();
+                continue;
+            }
+            let before = self.pos;
             match self.statement() {
                 Ok(stmt) => stmts.push(stmt),
-                Err(e) if self.recover => {
-                    self.skip_statement(e);
-                    // A `}` without its `{`
-                    if self.check(&TokenKind::RBrace) {
-                        self.advance();
-                    }
-                }
+                Err(e) if self.recover => self.skip_statement(e),
                 Err(e) => return Err(e),
+            }
+            // Recovering never stays in place: something is read every time
+            if self.recover && self.pos == before {
+                self.advance();
             }
         }
         Ok(stmts)
@@ -228,13 +236,14 @@ impl Parser {
             return Ok(self.advance());
         }
         let message = format!("expected {} {context}, found {}", kind.describe(), self.peek().kind);
-        // A `;` forgotten at the end of a line: the statement ends there
+        // A `;`, `)` or `]` forgotten at the end of a line, while it's being
+        // written *(i.e. `outln($task.`)*: it ends there
         let next = self.peek();
         let ends_line = next.span.line > self.last_span.line || matches!(next.kind, TokenKind::RBrace | TokenKind::Eof);
-        if *kind == TokenKind::Semicolon && ends_line {
+        if matches!(kind, TokenKind::Semicolon | TokenKind::RParen | TokenKind::RBracket) && ends_line {
             let span = self.last_span;
             if self.note_error(message.clone(), span) {
-                return Ok(Token { kind: TokenKind::Semicolon, span, doc: None });
+                return Ok(Token { kind: kind.clone(), span, doc: None });
             }
         }
         self.error_here(message)
@@ -325,6 +334,10 @@ impl Parser {
     fn statement(&mut self) -> Result<Stmt> {
         self.guard()?;
         let start = self.peek().span;
+        // The body of an `if` or a loop not written yet: an empty one
+        if matches!(self.peek().kind, TokenKind::RBrace | TokenKind::Eof) && self.note_error(format!("expected a statement, found {}", self.peek().kind), start) {
+            return Ok(Stmt { kind: StmtKind::Block(Vec::new()), span: Span { end: start.start, ..start } });
+        }
         let kind = match &self.peek().kind {
             TokenKind::Keyword(k @ (Keyword::Let | Keyword::Const)) if self.peek_at(1) == &TokenKind::LBracket => {
                 let constant = *k == Keyword::Const;
@@ -854,10 +867,14 @@ impl Parser {
                 }
                 return Err(error);
             }
+            let before = self.pos;
             match self.statement() {
                 Ok(stmt) => stmts.push(stmt),
                 Err(e) if self.recover => self.skip_statement(e),
                 Err(e) => return Err(e),
+            }
+            if self.recover && self.pos == before {
+                self.advance();
             }
         }
         self.advance();
@@ -1237,6 +1254,14 @@ impl Parser {
         let start = self.peek().span;
         let mut expr = self.primary()?;
         loop {
+            // While recovering, a `(` or `[` that starts a line is the next code, not a call or an index
+            let new_line = self.peek().span.line > self.last_span.line;
+            if self.recover && self.hole == Some(self.pos) {
+                return Ok(expr);
+            }
+            if self.recover && new_line && matches!(self.peek().kind, TokenKind::LParen | TokenKind::LBracket | TokenKind::QuestionBracket) {
+                return Ok(expr);
+            }
             let kind = match self.peek().kind {
                 TokenKind::Dot | TokenKind::QuestionDot => {
                     let dot = self.advance();
@@ -1244,7 +1269,10 @@ impl Parser {
                     // Nothing after the `.` yet, or only on the next line: a name being written
                     let named = matches!(self.peek().kind, TokenKind::Ident(_) | TokenKind::Keyword(_)) && self.peek().span.line == dot.span.line;
                     if !named && self.note_error(format!("expected a field or a method after `.`, found {}", self.peek().kind), dot.span) {
-                        ExprKind::Field { target: Box::new(expr), name: String::new() }
+                        // Nothing goes on from a name being written: what's after it is the next code
+                        let kind = ExprKind::Field { target: Box::new(expr), name: String::new() };
+                        self.hole = Some(self.pos);
+                        return Ok(Expr { kind, span: self.span_from(start) });
                     } else if matches!(self.peek().kind, TokenKind::Ident(_)) && self.peek_at(1) != &TokenKind::LParen {
                         // `$point.x`: a field
                         if nullable {
@@ -2033,9 +2061,24 @@ mod tests {
         // A name being written after `.` or `::`
         let (tree, errors) = recovered("$list.\nouts(1);\nfs::\n");
         assert!(tree.starts_with("(. $list )\n(call outs 1)"), "{tree}");
+        let (tree, _) = recovered("const $f = ($s) -> $s.\n(string) -> bool $g = $f;");
+        assert!(tree.starts_with("(const $f (lambda (($s)) = (. $s )))\n"), "{tree}");
         assert_eq!(errors, vec![1, 1, 3, 3]);
         let (tree, _) = recovered("outln($p.);");
         assert!(tree.contains("(. $p )"), "{tree}");
+        // Parentheses not closed yet, at the end of a line
+        let (tree, errors) = recovered("outln($list.map(($x) -> $x.\nouts(1);");
+        assert!(tree.starts_with("(call outln (.map $list (lambda"), "{tree}");
+        assert!(tree.ends_with("\n(call outs 1)"), "{tree}");
+        assert_eq!(errors.len(), 4);
+        // `}` without its `{`, alone or after a body not written yet: it ends
+        for source in ["}", "}}\nouts(1);", "if (1)\n}", "while (true)"] {
+            let (_, errors) = recovered(source);
+            assert!(!errors.is_empty(), "{source}");
+        }
+        // A body not written yet
+        let (tree, _) = recovered("for ($n in $list) {\n    if ($n.\n}\nouts(1);");
+        assert!(tree.contains("(if (. $n ) {})"), "{tree}");
         // A broken statement is skipped, also inside a block
         let (tree, errors) = recovered("void f() {\n    let = 2;\n    outln(1);\n}\nouts(2);");
         assert_eq!(tree, "(fn void f () { (call outln 1) })\n(call outs 2)");

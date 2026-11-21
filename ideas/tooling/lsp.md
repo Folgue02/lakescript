@@ -40,7 +40,7 @@ Each one is usable on its own, with tests that send real protocol messages to th
 - Every file the editor has open is checked again on each change, since a change in a module can break the files that use it. It takes a few milliseconds.
 - `lks-lsp --version` says its version, and it's in every release archive.
 - Milestone 2 is done. Hover shows a name's declaration as Lakescript code *(i.e. `list<number> $count`, `string greet(string $name, number $times = …)`, `class Dog extends Animal`)*, a sentence on what it is *(i.e. "A method of `list`.", "A parameter of `greet`.", "From `math.lks`.")* and the `///` comment of its declaration. Go to definition jumps to where it's declared, in the file or in a module.
-    - It works on variables, parameters, functions, the functions and constants of modules, classes *(in types and in calls)*, fields, methods, static members and enum values. The types are the ones the checker found, also narrowed *(i.e. not `null` after `$x != null`)*.
+    - It works on variables *(also where they're assigned)*, parameters, functions, modules *(`fs` in `fs::read`, and in `use` lines with what they import)*, the functions and constants of modules, classes *(in types and in calls)*, `Self`, type parameters, the built-in exceptions, fields, methods, static members and enum values. The types are the ones the checker found, also narrowed *(i.e. not `null` after `$x != null`)*.
     - The built-in functions and methods have their signature, but no comment yet: `prelude.txt` only has the signatures. Their comments are in `ideas/stdlib`, and can be added to it later.
     - The checker stops at the first error, so only the names before it are known. A file that can't be read at all *(i.e. a string that isn't closed)* keeps the names of its last good version.
 - Milestone 3 is done. Completion gives what fits what's before the cursor:
@@ -55,12 +55,21 @@ Each one is usable on its own, with tests that send real protocol messages to th
 ### Code that's half written
 
 - For an editor, the parser goes on after a syntax error *(`parser::parse_recovering`)*, so the rest of the file still has its names. `lks`, `ferry` and the compiler still stop at the first one.
-    - A `;` missing at the end of a line is an error, and the statement ends there.
-    - `.` or `name::` with nothing after it, or with the name on the next line, is an error, and its name is empty *(i.e. `$words.` while a method is being written)*. The checker gives it any type, and notes the type before the `.`.
+    - A `;`, `)` or `]` missing at the end of a line is an error, and what it closes ends there *(i.e. `outln($task.` with the rest of the file below it)*.
+    - `.` or `name::` with nothing after it, or with the name on the next line, is an error, and its name is empty *(i.e. `$words.` while a method is being written)*. The checker gives it any type, and notes the type before the `.`. Nothing goes on from it: what comes after is the next code.
+    - A `(` or `[` that starts a line is the next code, not a call or an index of the line before.
+    - The body of an `if` or a loop that isn't written yet *(a `}` or the end of the file instead)* is an error, and an empty block.
     - Any other error skips its statement, to its `;` or to the end of the block it opened.
     - Only the first error is sent to the editor until milestone 4.
 - For completion, the file is checked again with the place of the cursor. The checker keeps the scope it was in at the statement or expression around the cursor, or after the last statement before it. A `$` alone gets a name for that check, so it can be read.
 - The library has it too: `Engine::set_completion(file, offset)` before a check, and `Engine::completion()` after it.
+- A value whose type isn't known gets what every value has *(`toString`, `typeName`...)* after `.`.
+
+### Checked
+
+- Hover, go to definition and completion were asked at every second character of every example, and every example was typed into the server one character at a time, with completion and hover after each one: no errors, and every answer in under 20 ms *(release build)*.
+- At the 213 places of the examples where a `.` is typed before a method or a field, with the rest of the file below, 192 complete the members. The rest are inside `%w[...]`, after `@super.`, in an `if (` or `switch (` used as a value that isn't closed yet, or in `shop/store`, whose modules are found from `shop/` and not from their own folder.
+
 
 ### How names are found
 

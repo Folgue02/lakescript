@@ -470,7 +470,10 @@ impl<'a> Checker<'a> {
                         count(self, 2)?;
                         Ty::Result(Box::new(arg(self, 0)?), Box::new(arg(self, 1)?))
                     }
-                    n if exceptions::is_exception_type(n) => Ty::Exception(Rc::from(n)),
+                    n if exceptions::is_exception_type(n) => {
+                        self.note_exception(n, ty.span);
+                        Ty::Exception(Rc::from(n))
+                    }
                     // A subcommand *(i.e. `Git::Commit`)*
                     n if n.split_once("::").is_some_and(|(left, _)| crate::parser::is_type_name(left)) => {
                         match self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
@@ -488,9 +491,15 @@ impl<'a> Checker<'a> {
                             },
                         }
                     }
-                    "Self" => match self.this.last() {
-                        Some(this) if this.self_param => Ty::Param(Rc::from("Self")),
-                        Some(this) => this.class.this_type(),
+                    "Self" => match self.this.last().cloned() {
+                        Some(this) if this.self_param => {
+                            self.note_class(&this.class, ty.span, ty.span.start, "Self");
+                            Ty::Param(Rc::from("Self"))
+                        }
+                        Some(this) => {
+                            self.note_class(&this.class, ty.span, ty.span.start, "Self");
+                            this.class.this_type()
+                        }
                         None => return self.fail("`Self` can only be used inside a class", ty.span),
                     },
                     n => {
@@ -506,6 +515,9 @@ impl<'a> Checker<'a> {
                         } else if let Some(alias) = self.scopes.iter().rev().find_map(|s| s.types.get(n).cloned()) {
                             alias
                         } else if self.scopes.iter().any(|s| s.generics.contains(n)) {
+                            if self.recording() {
+                                self.note(ty.span, ty.span.start, "", n, names::Show::Text(n.to_string()), Some("A type parameter.".into()), None);
+                            }
                             Ty::Param(Rc::from(n))
                         } else {
                             return self.fail(format!("unknown type `{n}`"), ty.span);
@@ -955,6 +967,9 @@ impl<'a> Checker<'a> {
 
     fn use_decl(&mut self, decl: &UseDecl, span: Span) -> Check<()> {
         let module = self.module(&decl.path, span)?;
+        if self.recording() {
+            self.note_use(decl, &module, span);
+        }
         if decl.type_module {
             // A module named like a type holds that type, and only shares it
             let name = decl.path.last().unwrap();
@@ -1549,6 +1564,7 @@ impl<'a> Checker<'a> {
                 let Some(m) = self.lookup_module(module) else {
                     return self.fail(format!("there's no module named `{module}`. Import it with `use`"), span);
                 };
+                self.note_module(module, &m, span);
                 match m.functions.get(name) {
                     Some(f) => {
                         if self.recording() {
@@ -1565,6 +1581,7 @@ impl<'a> Checker<'a> {
                 let Some(m) = self.lookup_module(module) else {
                     return self.fail(format!("there's no module named `{module}`. Import it with `use`"), span);
                 };
+                self.note_module(module, &m, span);
                 match m.constants.get(name) {
                     Some(t) => {
                         if self.recording() {
@@ -2227,6 +2244,10 @@ impl<'a> Checker<'a> {
                 let Some(info) = self.declared_var(name) else {
                     return self.fail(format!("`${name}` isn't declared. Declare it with `let ${name} = ...;`"), target.span);
                 };
+                if self.recording() {
+                    let show = names::Show::Var { constant: info.constant, name: name.clone(), ty: info.ty.clone() };
+                    self.note(target.span, target.span.start, "", &format!("${name}"), show, info.about.clone(), info.place.clone());
+                }
                 if info.constant {
                     return self.fail(format!("`${name}` is a constant, it can't be changed"), target.span);
                 }

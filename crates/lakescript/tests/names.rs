@@ -81,3 +81,20 @@ fn classes_and_their_members() {
     assert_eq!(definition(source, y), "@y");
     assert_eq!(line_of(source, y), 4);
 }
+
+#[test]
+fn modules_exceptions_and_types() {
+    let source = "use std/fs;\nuse std/path::{name};\nclass Box<T> {\n    pub T @item;\n    pub bool same?(Self $other) = true;\n}\nlet $count = 0;\n$count = 2;\ntry { outln(fs::read('x')); } catch (IOError $e) { outln(name('a')); }\n";
+    let names = names(source);
+    let fs = at(&names, source, "fs::", 0);
+    assert_eq!(fs.code, "module std/fs");
+    assert_eq!(fs.about.as_deref(), Some("A module of the standard library."));
+    assert_eq!(at(&names, source, "fs;", 0).code, "module std/fs");
+    assert_eq!(at(&names, source, "name}", 0).code, "string name(string $path)");
+    assert_eq!(at(&names, source, "IOError", 0).code, "class IOError extends Exception");
+    assert_eq!(at(&names, source, "Self", 0).code, "class Box<T>");
+    assert_eq!(at(&names, source, "T @item", 0).about.as_deref(), Some("A type parameter."));
+    // Assigned to: still the variable
+    let count = at(&names, source, "$count = 2", 0);
+    assert_eq!((count.code.as_str(), line_of(source, count)), ("number $count", 6));
+}

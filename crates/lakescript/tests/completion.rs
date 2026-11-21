@@ -77,3 +77,10 @@ fn what_modules_and_classes_have() {
     let found = complete("use std/fs;\nouts(fs::|);\n");
     assert!(labels(&found.paths["fs"]).contains(&"read"));
 }
+
+#[test]
+fn members_in_a_chain_on_several_lines() {
+    let found = complete("const $old = ['a.tar']\n    .filter(($f) -> $f.|\n    .sorted();\n");
+    assert!(labels(&found.members.expect("the type of `$f` is known")).contains(&"startsWith"));
+}
+

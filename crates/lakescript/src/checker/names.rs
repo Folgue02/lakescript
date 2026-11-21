@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::Checker;
+use super::prelude::ModuleSig;
 use super::types::{ClassRef, FnTy, Ty};
 use crate::token::{Span, TokenKind};
 
@@ -134,6 +135,58 @@ impl Checker<'_> {
         self.scopes.iter().rev().find(|s| s.funcs.contains_key(name)).and_then(|s| s.places.get(name).cloned())
     }
 
+    /// Notes a module's name before `::` *(i.e. `fs` in `fs::read`)*.
+    pub(super) fn note_module(&mut self, name: &str, module: &ModuleSig, span: Span) {
+        if self.recording() {
+            let (show, about, definition) = module_info(module);
+            self.note(span, span.start, "", name, show, about, definition);
+        }
+    }
+
+    /// Notes the names of a `use` line: its module, and the items it imports.
+    pub(super) fn note_use(&mut self, decl: &crate::ast::UseDecl, module: &ModuleSig, span: Span) {
+        use crate::ast::UseItems;
+        let Some(last) = decl.path.last() else { return };
+        let path_text = decl.path.join("/");
+        let from = span.start + "use ".len();
+        let (show, about, definition) = module_info(module);
+        // The last part of the path: `fs` in `use std/fs;`
+        let lead = &path_text[..path_text.len() - last.len()];
+        self.note(span, from, lead, last, show, about, definition);
+        let UseItems::Items(items) = &decl.items else { return };
+        let after = from + path_text.chars().count();
+        for item in items {
+            let (needle, key) = if item.variable { (format!("${}", item.name), format!("${}", item.name)) } else { (item.name.clone(), item.name.clone()) };
+            let place = module.places.get(&key).cloned();
+            let about = Some(format!("From `{}`.", module_name(&module.path)));
+            let show = if item.variable {
+                module.constants.get(&item.name).map(|ty| Show::Var { constant: true, name: item.name.clone(), ty: ty.clone() })
+            } else if let Some(Ty::Object(class, _)) = module.types.get(&item.name) {
+                let definition = class_place(class, None, &item.name);
+                self.note(span, after, "", &needle, Show::Class(class.clone()), None, definition);
+                continue;
+            } else {
+                module.functions.get(&item.name).map(|f| Show::Func { name: item.name.clone(), ty: Ty::Func(f.clone()) })
+            };
+            if let Some(show) = show {
+                self.note(span, after, "", &needle, show, about, place);
+            }
+        }
+    }
+
+    /// Notes a built-in exception written as a type.
+    pub(super) fn note_exception(&mut self, name: &str, span: Span) {
+        if !self.recording() {
+            return;
+        }
+        let parent = crate::exceptions::TREE.iter().find(|(n, _)| *n == name).and_then(|(_, p)| *p);
+        let code = match parent {
+            Some(p) => format!("class {name} extends {p}"),
+            None => format!("class {name}"),
+        };
+        self.note(span, span.start, "", name, Show::Text(code), Some("A built-in exception.".into()), None);
+    }
+
     /// Notes a class's name.
     pub(super) fn note_class(&mut self, class: &ClassRef, span: Span, from: usize, needle: &str) {
         if !self.recording() {
@@ -162,6 +215,17 @@ impl Checker<'_> {
         }
         *class.0.places.borrow_mut() = places;
     }
+}
+
+/// How a module is shown, and where it is: the start of its file.
+fn module_info(module: &ModuleSig) -> (Show, Option<String>, Option<Place>) {
+    let std = module.path.starts_with("std/") || !module.path.contains(['/', '\\']);
+    let code = format!("module {}", module_name(&module.path));
+    if std {
+        return (Show::Text(code), Some("A module of the standard library.".into()), None);
+    }
+    let place = Place { file: Some(module.path.clone()), span: Span::default(), needle: String::new(), doc: false };
+    (Show::Text(code), None, Some(place))
 }
 
 /// Where a class, or one of its members, is declared. `member` is a key of `Places::members`.
