@@ -240,7 +240,6 @@ bool hasValue(V $value);
 list<K> keys();
 list<V> values();
 ?K keyOf(V $value);
-V getOrDefault(K $key, V $default);
 V getOrSet(K $key, V $default);
 ?K first();
 ?K last();

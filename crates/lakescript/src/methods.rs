@@ -1408,11 +1408,6 @@ fn map_method(interp: &mut Interpreter, receiver: &Value, map: &Rc<RefCell<Index
         }
 
         // Getting
-        "getOrDefault" => {
-            a.count(2, 2)?;
-            let k = key(0)?;
-            map.borrow().get(&k).cloned().unwrap_or_else(|| a.value(1))
-        }
         "getOrSet" => {
             a.count(2, 2)?;
             let k = key(0)?;

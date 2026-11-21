@@ -160,7 +160,7 @@ fn list_basics() {
     assert_eq!(eval("[17, 20, 30].countWhere(($a) -> $a >= 18)"), "2");
     assert_eq!(eval("[].first()"), "null");
     assert_eq!(eval("[1, 2].last()"), "2");
-    // `getOrDefault` is `$list[$i] ?? $default` now
+    // A default for an index past the end
     assert_eq!(eval("[1, 2][5] ?? 0"), "0");
 }
 
@@ -260,7 +260,7 @@ fn list_combining() {
 fn maps() {
     let script = "
         let $m = {'a' => 1, 'b' => 2};
-        outln($m.getOrDefault('z', 0));
+        outln($m['z'] ?? 0);
         outln($m.keyOf(2));
         outln($m.hasValue(1));
         let $groups = <string, list<string>>{};
