@@ -11,9 +11,9 @@ use std::str::FromStr;
 use lakescript::{CapturedOutput, Diagnostic, Engine, Name};
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::notification::{DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Notification as _, PublishDiagnostics};
-use lsp_types::request::{GotoDefinition, HoverRequest, Request as _};
+use lsp_types::request::{Completion, GotoDefinition, HoverRequest, Request as _};
 use lsp_types::{
-    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse,
+    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse, CompletionTextEdit, DiagnosticSeverity, TextEdit, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverContents, HoverParams, HoverProviderCapability, Location, MarkupContent, MarkupKind, OneOf, Position, PublishDiagnosticsParams, Range,
     ServerCapabilities, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
@@ -40,6 +40,7 @@ fn run() -> Result<(), String> {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
+        completion_provider: Some(CompletionOptions { trigger_characters: Some(vec![".".into(), "$".into(), "@".into(), ":".into()]), ..Default::default() }),
         ..Default::default()
     };
     let capabilities = serde_json::to_value(capabilities).map_err(|e| e.to_string())?;
@@ -148,14 +149,13 @@ impl Server {
         self.documents.get(path).cloned().or_else(|| std::fs::read_to_string(path).ok())
     }
 
-    /// Checks one file like `lks` or `ferry` would: a module of a ferry
-    /// project with the project's module path, any other file as a script.
     /// Checks one file, and returns what was found about its names.
     fn check(&self, path: &Path) -> (Result<(), Diagnostic>, Vec<Name>) {
         let mut engine = Engine::with_output(CapturedOutput::new());
         engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
         engine.set_names(true);
-        let (result, as_module) = self.run_check(&mut engine, path);
+        let text = self.documents.get(path).cloned().unwrap_or_default();
+        let (result, as_module) = self.run_check(&mut engine, path, &text, None);
         let shown = path.display().to_string();
         let names = engine
             .names()
@@ -178,15 +178,21 @@ impl Server {
         (result, names)
     }
 
-    /// Checks one file like `lks` or `ferry` would. Returns whether it was checked as a module.
-    fn run_check(&self, engine: &mut Engine, path: &Path) -> (Result<(), Diagnostic>, bool) {
+    /// Checks one file like `lks` or `ferry` would: a module of a ferry
+    /// project with the project's module path, any other file as a script.
+    /// `text` is the file's, and `complete` where completion is wanted in it.
+    /// Returns whether it was checked as a module.
+    fn run_check(&self, engine: &mut Engine, path: &Path, text: &str, complete: Option<usize>) -> (Result<(), Diagnostic>, bool) {
         for (open, text) in &self.documents {
             engine.set_file_text(open, text.clone());
         }
-        let text = self.documents.get(path).cloned().unwrap_or_default();
+        engine.set_file_text(path, text);
         let folder = path.parent().unwrap_or(Path::new("."));
         let Ok(project) = ferry::project::Project::find(folder) else {
-            return (engine.check_text(path, &text), false);
+            if let Some(offset) = complete {
+                engine.set_completion(None, offset);
+            }
+            return (engine.check_text(path, text), false);
         };
         let module_path = match ferry::home::Home::open() {
             Ok(home) => ferry::resolve::installed_module_path(&home, &project),
@@ -198,6 +204,9 @@ impl Server {
         // A module is checked like ferry does, by using it, so only declarations are allowed in it
         let src = project.src().canonicalize().unwrap_or_else(|_| project.src());
         if let Ok(relative) = path.strip_prefix(&src) {
+            if let Some(offset) = complete {
+                engine.set_completion(Some(path.display().to_string()), offset);
+            }
             let module: Vec<String> = relative.with_extension("").iter().map(|p| p.to_string_lossy().into_owned()).collect();
             let result = engine.check_source(&format!("use {} as module;\n", module.join("/"))).map_err(|mut e| {
                 // An error of the `use` line itself is the module's
@@ -209,7 +218,10 @@ impl Server {
             });
             return (result, true);
         }
-        (engine.check_text(path, &text), false)
+        if let Some(offset) = complete {
+            engine.set_completion(None, offset);
+        }
+        (engine.check_text(path, text), false)
     }
 
     /// Answers a request of the editor.
@@ -222,6 +234,10 @@ impl Server {
             },
             GotoDefinition::METHOD => match request.extract::<GotoDefinitionParams>(GotoDefinition::METHOD) {
                 Ok((_, params)) => serde_json::to_value(self.definition(&params.text_document_position_params)),
+                Err(e) => return Response::new_err(id, lsp_server::ErrorCode::InvalidParams as i32, format!("{e:?}")),
+            },
+            Completion::METHOD => match request.extract::<CompletionParams>(Completion::METHOD) {
+                Ok((_, params)) => serde_json::to_value(self.complete(&params.text_document_position)),
                 Err(e) => return Response::new_err(id, lsp_server::ErrorCode::InvalidParams as i32, format!("{e:?}")),
             },
             other => return Response::new_err(id, lsp_server::ErrorCode::MethodNotFound as i32, format!("`{other}` isn't supported yet")),
@@ -256,6 +272,75 @@ impl Server {
         })
     }
 
+    /// What can be written at the cursor, from what's before it: `.`, `$`, `@`, `name::` or a word.
+    fn complete(&self, at: &TextDocumentPositionParams) -> Option<CompletionResponse> {
+        let path = uri_to_path(&at.text_document.uri)?;
+        let mut text = self.text_of(&path)?;
+        let cursor = offset(&text, at.position);
+        let chars: Vec<char> = text.chars().collect();
+        // The part of the name already written
+        let word = |c: char| c.is_alphanumeric() || c == '_' || c == '?';
+        let mut start = cursor;
+        while start > 0 && word(chars[start - 1]) {
+            start -= 1;
+        }
+        let before = start.checked_sub(1).map(|i| chars[i]);
+        let context = match before {
+            Some('.') if start >= 2 && chars[start - 2] == '.' => return None,
+            Some('.') => Context::Member,
+            Some('$') => Context::Variable,
+            Some('@') => Context::Own,
+            Some(':') if start >= 2 && chars[start - 2] == ':' => {
+                let end = start - 2;
+                let mut s = end;
+                while s > 0 && word(chars[s - 1]) {
+                    s -= 1;
+                }
+                Context::Path(chars[s..end].iter().collect())
+            }
+            _ => Context::Word,
+        };
+        // A `$` alone isn't a variable yet: it gets a name, so the file can be read
+        if matches!(context, Context::Variable) && start == cursor {
+            let byte = text.char_indices().nth(cursor).map(|(b, _)| b).unwrap_or(text.len());
+            text.insert_str(byte, "lksCompleting");
+        }
+        let mut engine = Engine::with_output(CapturedOutput::new());
+        engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
+        let _ = self.run_check(&mut engine, &path, &text, Some(cursor));
+        let found = engine.completion().unwrap_or_default();
+        let original = self.text_of(&path)?;
+        let range = |from: usize| Range { start: position(&original, from), end: position(&original, cursor) };
+        let item = |i: &lakescript::CompletionItem, from: usize| CompletionItem {
+            label: i.label.clone(),
+            kind: Some(item_kind(i.kind)),
+            detail: Some(i.detail.clone()),
+            filter_text: Some(i.label.trim_start_matches('$').to_string()),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: range(from), new_text: i.label.clone() })),
+            ..Default::default()
+        };
+        let items: Vec<CompletionItem> = match context {
+            Context::Member => found.members.unwrap_or_default().iter().map(|i| item(i, start)).collect(),
+            Context::Own => found.own.iter().map(|i| item(i, start)).collect(),
+            Context::Path(name) => found.paths.get(&name).map(|items| items.iter().map(|i| item(i, start)).collect()).unwrap_or_default(),
+            // The `$` is replaced too
+            Context::Variable => found.scope.iter().filter(|i| i.label.starts_with('$')).map(|i| item(i, start - 1)).collect(),
+            Context::Word => {
+                let mut items: Vec<CompletionItem> = found.scope.iter().map(|i| item(i, start)).collect();
+                for keyword in KEYWORDS {
+                    items.push(CompletionItem {
+                        label: keyword.to_string(),
+                        kind: Some(CompletionItemKind::KEYWORD),
+                        text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: range(start), new_text: keyword.to_string() })),
+                        ..Default::default()
+                    });
+                }
+                items
+            }
+        };
+        Some(CompletionResponse::Array(items))
+    }
+
     fn definition(&self, at: &TextDocumentPositionParams) -> Option<GotoDefinitionResponse> {
         let (name, _) = self.name_at(at)?;
         let d = name.definition.as_ref()?;
@@ -263,6 +348,42 @@ impl Server {
         let text = self.text_of(&file)?;
         let range = Range { start: position(&text, d.start), end: position(&text, d.end) };
         Some(GotoDefinitionResponse::Scalar(Location { uri: path_to_uri(&file)?, range }))
+    }
+}
+
+/// What's before the cursor, for completion.
+enum Context {
+    /// After `.`
+    Member,
+    /// After `$`
+    Variable,
+    /// After `@`
+    Own,
+    /// After `name::`
+    Path(String),
+    Word,
+}
+
+/// The reserved words, and the names of the built-in types.
+const KEYWORDS: &[&str] = &[
+    "let", "const", "if", "else", "for", "in", "while", "switch", "case", "default", "break", "continue", "return", "yield", "try", "catch", "finally", "throw",
+    "true", "false", "null", "use", "pub", "class", "interface", "enum", "command", "static", "new", "override", "implement", "extends", "any", "void", "bool",
+    "number", "string", "symbol", "regex", "range", "list", "map", "result",
+];
+
+fn item_kind(kind: lakescript::CompletionKind) -> CompletionItemKind {
+    use lakescript::CompletionKind as K;
+    match kind {
+        K::Variable => CompletionItemKind::VARIABLE,
+        K::Constant => CompletionItemKind::CONSTANT,
+        K::Function => CompletionItemKind::FUNCTION,
+        K::Method => CompletionItemKind::METHOD,
+        K::Field => CompletionItemKind::FIELD,
+        K::Class => CompletionItemKind::CLASS,
+        K::Interface => CompletionItemKind::INTERFACE,
+        K::Enum => CompletionItemKind::ENUM,
+        K::EnumValue => CompletionItemKind::ENUM_MEMBER,
+        K::Module => CompletionItemKind::MODULE,
     }
 }
 

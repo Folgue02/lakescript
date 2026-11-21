@@ -64,6 +64,8 @@ pub struct Engine {
     found: Vec<crate::checker::names::Found>,
     /// The script of the last check, to find its names in.
     checked_source: String,
+    /// Where the next checks look for what can be written *(see `set_completion`)*.
+    completion: Option<crate::checker::complete::Request>,
 }
 
 impl Default for Engine {
@@ -119,6 +121,7 @@ impl Engine {
             record_names: false,
             found: Vec::new(),
             checked_source: String::new(),
+            completion: None,
         };
         engine.register_builtins();
         engine.builtins_ready = true;
@@ -247,8 +250,35 @@ impl Engine {
         if self.record_names {
             self.checked_source = source.to_string();
         }
-        let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
-        self.check(&program).map_err(|d| self.locate(d))
+        if !self.editing() {
+            let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
+            return self.check(&program).map_err(|d| self.locate(d));
+        }
+        // For an editor, the code is checked also after a syntax error, for its names
+        let (program, errors) = crate::parser::parse_recovering(crate::lexer::tokenize_file(source, 0)?, self.stack_budget);
+        let result = self.check(&program).map_err(|d| self.locate(d));
+        match errors.into_iter().next() {
+            Some(error) => Err(error),
+            None => result,
+        }
+    }
+
+    /// Whether the checks are for an editor: they go on after syntax errors.
+    fn editing(&self) -> bool {
+        self.record_names || self.completion.is_some()
+    }
+
+    /// Makes the checks find what can be written at a place: the names in
+    /// scope there, and the members of the value before a `.` *(see
+    /// `completion`)*. `file` is the file as errors name it, or `None` for
+    /// the script being checked. `offset` counts characters.
+    pub fn set_completion(&mut self, file: Option<String>, offset: usize) {
+        self.completion = Some(crate::checker::complete::Request { file, offset, result: None });
+    }
+
+    /// What the last check found at the place given to `set_completion`.
+    pub fn completion(&mut self) -> Option<crate::checker::complete::Completion> {
+        self.completion.as_mut()?.result.take()
     }
 
     /// Makes the checks note what they find about each name: its type, where
@@ -309,6 +339,7 @@ impl Engine {
 
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {
         let prelude = self.prelude.get_or_insert_with(|| Rc::new(crate::checker::prelude::Prelude::load())).clone();
+        let recover = self.editing();
         let modules = crate::checker::Modules {
             loader: &self.host.loader,
             cache: &mut self.check_cache,
@@ -317,6 +348,8 @@ impl Engine {
             declared: &mut self.check_declared,
             declaring: Vec::new(),
             names: if self.record_names { Some(&mut self.found) } else { None },
+            complete: self.completion.as_mut(),
+            recover,
         };
         let mut checker = crate::checker::Checker::new(&prelude, modules, &mut self.check_state, &self.host_functions);
         checker.stack_budget = self.stack_budget;

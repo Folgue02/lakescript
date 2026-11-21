@@ -42,7 +42,25 @@ Each one is usable on its own, with tests that send real protocol messages to th
 - Milestone 2 is done. Hover shows a name's declaration as Lakescript code *(i.e. `list<number> $count`, `string greet(string $name, number $times = …)`, `class Dog extends Animal`)*, a sentence on what it is *(i.e. "A method of `list`.", "A parameter of `greet`.", "From `math.lks`.")* and the `///` comment of its declaration. Go to definition jumps to where it's declared, in the file or in a module.
     - It works on variables, parameters, functions, the functions and constants of modules, classes *(in types and in calls)*, fields, methods, static members and enum values. The types are the ones the checker found, also narrowed *(i.e. not `null` after `$x != null`)*.
     - The built-in functions and methods have their signature, but no comment yet: `prelude.txt` only has the signatures. Their comments are in `ideas/stdlib`, and can be added to it later.
-    - The checker stops at the first error, so only the names before it are known. A file that doesn't parse keeps the names of its last good version, until milestone 3.
+    - The checker stops at the first error, so only the names before it are known. A file that can't be read at all *(i.e. a string that isn't closed)* keeps the names of its last good version.
+- Milestone 3 is done. Completion gives what fits what's before the cursor:
+    - after `.`: the fields and methods of the value before it, from its type *(i.e. `push` and `map` after `$words.`)*, and what every value has *(`toString`...)*. Private members only inside their class;
+    - after `$`: the variables in scope there, with the `$` replaced by the whole name;
+    - after `@`, in a class: its fields and methods, also the private ones;
+    - after `name::`: the functions, constants and types of a module, or the static methods, static fields and values of a class *(`Self::` too)*;
+    - after anything else: the variables, functions, classes and modules in scope, the reserved words and the built-in types.
+    - Each one has its declaration as its detail *(i.e. `list<string> push(...string $values)`)*. It inserts the name only: the parentheses and arguments are written by hand.
+    - The editor asks for it by itself after `.`, `$`, `@` and `:`.
+
+### Code that's half written
+
+- For an editor, the parser goes on after a syntax error *(`parser::parse_recovering`)*, so the rest of the file still has its names. `lks`, `ferry` and the compiler still stop at the first one.
+    - A `;` missing at the end of a line is an error, and the statement ends there.
+    - `.` or `name::` with nothing after it, or with the name on the next line, is an error, and its name is empty *(i.e. `$words.` while a method is being written)*. The checker gives it any type, and notes the type before the `.`.
+    - Any other error skips its statement, to its `;` or to the end of the block it opened.
+    - Only the first error is sent to the editor until milestone 4.
+- For completion, the file is checked again with the place of the cursor. The checker keeps the scope it was in at the statement or expression around the cursor, or after the last statement before it. A `$` alone gets a name for that check, so it can be read.
+- The library has it too: `Engine::set_completion(file, offset)` before a check, and `Engine::completion()` after it.
 
 ### How names are found
 

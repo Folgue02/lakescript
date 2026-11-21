@@ -30,6 +30,7 @@ pub mod token;
 mod types;
 pub mod value;
 
+pub use checker::complete::{Completion, Item as CompletionItem, ItemKind as CompletionKind};
 pub use checker::names::{Definition, Name};
 pub use diagnostic::Diagnostic;
 pub use engine::{CapturedOutput, Engine, Outcome};

@@ -806,6 +806,11 @@ impl Checker<'_> {
             }
         }
         let t = self.expr(target, None)?;
+        self.note_receiver(target.span.end, span, &t);
+        // `$point.` while it's being written
+        if name.is_empty() {
+            return Ok(Ty::Any);
+        }
         match self.shallow(&t) {
             Ty::Object(class, args) => {
                 let Some((field, owner)) = class.find(|b| b.fields.iter().find(|f| f.name == name).cloned()) else {
@@ -833,6 +838,10 @@ impl Checker<'_> {
 
     /// `Class::$name` or `Class::name`
     pub(super) fn static_member(&mut self, class: &str, name: &str, variable: bool, span: Span) -> Check<Ty> {
+        // `Point::` while it's being written
+        if name.is_empty() {
+            return Ok(Ty::Any);
+        }
         let Some(c) = self.class_named(class) else {
             if class == "Self" {
                 return self.fail("`Self` can only be used inside a class", span);

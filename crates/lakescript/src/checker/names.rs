@@ -201,7 +201,7 @@ pub(super) fn function_code(name: &str, f: &FnTy) -> String {
 }
 
 /// `class Stack<T> extends List`
-fn class_code(class: &ClassRef) -> String {
+pub(super) fn class_code(class: &ClassRef) -> String {
     let sig = &class.0;
     let word = if sig.interface {
         "interface"

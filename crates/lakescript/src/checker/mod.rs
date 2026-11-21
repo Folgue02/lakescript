@@ -7,6 +7,7 @@
 //! elements of `[]`)*.
 
 mod classes;
+pub mod complete;
 pub mod names;
 pub mod prelude;
 pub mod types;
@@ -44,6 +45,10 @@ pub struct Modules<'a> {
     pub declaring: Vec<PathBuf>,
     /// Where the names the checkers find go, when an editor wants them *(see `names.rs`)*.
     pub names: Option<&'a mut Vec<names::Found>>,
+    /// Where completion is wanted, when an editor wants it *(see `complete.rs`)*.
+    pub complete: Option<&'a mut complete::Request>,
+    /// Going on after syntax errors, for code that's being written *(see `parser::parse_recovering`)*.
+    pub recover: bool,
 }
 
 #[derive(Default, Clone)]
@@ -118,6 +123,9 @@ pub struct Checker<'a> {
     pub stack_budget: usize,
     /// The names found, when they're wanted.
     names: Option<Vec<names::Raw>>,
+    /// The scope at the place completion is wanted at, and the members before its `.`.
+    snapshot: Option<complete::Snapshot>,
+    members: Option<Vec<complete::Item>>,
 }
 
 type Check<T> = Result<T, Diagnostic>;
@@ -162,6 +170,8 @@ impl<'a> Checker<'a> {
             stack_base: crate::stack::position(),
             stack_budget: crate::stack::DEFAULT_BUDGET,
             names,
+            snapshot: None,
+            members: None,
         }
     }
 
@@ -169,6 +179,7 @@ impl<'a> Checker<'a> {
     pub fn check_program(mut self, program: &[Stmt]) -> Check<()> {
         let result = self.block(program);
         self.finish_names();
+        self.finish_completion();
         let globals = self.scopes.remove(1);
         self.state.globals = globals;
         result
@@ -617,6 +628,19 @@ impl<'a> Checker<'a> {
     fn stmt(&mut self, stmt: &Stmt) -> Check<()> {
         let span = stmt.span;
         self.guard(span)?;
+        if self.around_cursor(span) {
+            self.snapshot();
+        }
+        self.stmt_inner(stmt)?;
+        // After a statement before the place, the scope has what it declared
+        if self.cursor().is_some_and(|c| span.end <= c) {
+            self.snapshot();
+        }
+        Ok(())
+    }
+
+    fn stmt_inner(&mut self, stmt: &Stmt) -> Check<()> {
+        let span = stmt.span;
         match &stmt.kind {
             StmtKind::Class(decl) => self.class(decl, span)?,
             StmtKind::Let { constant, name, ty, value } => {
@@ -884,6 +908,9 @@ impl<'a> Checker<'a> {
             }
             self.scopes.last_mut().unwrap().vars.insert(p.name.clone(), VarInfo { ty, constant: false, place, about: Some(about) });
         }
+        if self.around_cursor(span) {
+            self.snapshot();
+        }
         self.returns.push(ret);
         let loops = std::mem::take(&mut self.loop_depth);
         let result = match &decl.body {
@@ -1074,6 +1101,8 @@ impl<'a> Checker<'a> {
                 d
             },
             names: None,
+            complete: None,
+            recover: self.modules.recover,
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1131,6 +1160,16 @@ impl<'a> Checker<'a> {
         Ok(())
     }
 
+    /// The statements of a module, and its first syntax error when going on after them.
+    fn parse_module(&self, source: &str) -> Check<(Vec<Stmt>, Option<Diagnostic>)> {
+        if !self.modules.recover {
+            return Ok((crate::parse_file(source, u32::MAX)?, None));
+        }
+        let tokens = crate::lexer::tokenize_file(source, u32::MAX)?;
+        let (program, errors) = crate::parser::parse_recovering(tokens, self.stack_budget);
+        Ok((program, errors.into_iter().next()))
+    }
+
     fn check_module(&mut self, file: &std::path::Path) -> Check<ModuleSig> {
         let shown = file.display().to_string();
         let located = |mut d: Diagnostic| {
@@ -1138,7 +1177,7 @@ impl<'a> Checker<'a> {
             d
         };
         let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
-        let program = crate::parse_file(&source, u32::MAX).map_err(located)?;
+        let (program, syntax) = self.parse_module(&source).map_err(located)?;
         let mut state = State::default();
         let modules = Modules {
             loader: self.modules.loader,
@@ -1152,6 +1191,8 @@ impl<'a> Checker<'a> {
             declared: &mut *self.modules.declared,
             declaring: self.modules.declaring.clone(),
             names: self.modules.names.as_deref_mut(),
+            complete: self.modules.complete.as_deref_mut(),
+            recover: self.modules.recover,
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1189,6 +1230,11 @@ impl<'a> Checker<'a> {
         }
         let result = checker.block(&program);
         checker.finish_names();
+        checker.finish_completion();
+        // A syntax error comes first, when the code is checked while it's written
+        if let Some(error) = syntax {
+            return Err(located(error));
+        }
         result.map_err(located)?;
         let globals = &checker.scopes[1];
         let mut sig = ModuleSig { path: shown, ..Default::default() };
@@ -1296,6 +1342,9 @@ impl<'a> Checker<'a> {
     fn expr(&mut self, e: &Expr, expected: Option<&Ty>) -> Check<Ty> {
         let span = e.span;
         self.guard(span)?;
+        if self.around_cursor(span) {
+            self.snapshot();
+        }
         Ok(match &e.kind {
             ExprKind::TypeArgs { name, args } => {
                 let Some(class) = self.class_named(name) else {
@@ -1494,6 +1543,8 @@ impl<'a> Checker<'a> {
                 }
                 None => return self.fail(format!("there's no function named `{name}`. Functions must be defined before they're used"), span),
             },
+            // `fs::` while it's being written
+            ExprKind::ModuleFunction { name, .. } if name.is_empty() => Ty::Any,
             ExprKind::ModuleFunction { module, name } => {
                 let Some(m) = self.lookup_module(module) else {
                     return self.fail(format!("there's no module named `{module}`. Import it with `use`"), span);
@@ -1876,6 +1927,7 @@ impl<'a> Checker<'a> {
     fn method(&mut self, receiver: &Expr, method: &str, args: &[Arg], nullable: bool, span: Span) -> Check<Ty> {
         let receiver_expr = receiver;
         let r = self.expr(receiver, None)?;
+        self.note_receiver(receiver.span.end, span, &r);
         let mut r = self.shallow(&r);
         if let Ty::Nullable(inner) = &r {
             if !nullable {

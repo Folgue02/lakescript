@@ -161,7 +161,7 @@ fn errors_go_to_the_module_they_are_in() {
 #[test]
 fn it_answers_requests_it_does_not_know_and_shuts_down() {
     let mut server = Server::start();
-    let response = server.request("textDocument/completion", json!({ "textDocument": { "uri": "file:///x.lks" }, "position": { "line": 0, "character": 0 } }));
+    let response = server.request("textDocument/references", json!({ "textDocument": { "uri": "file:///x.lks" }, "position": { "line": 0, "character": 0 } }));
     assert!(!response["error"].is_null(), "{response}");
     server.stop();
 }
@@ -219,5 +219,64 @@ fn definitions_are_found_in_the_file_and_in_modules() {
     server.open(&module, &std::fs::read_to_string(&module).unwrap());
     let found = server.at("textDocument/definition", &module, 4, 25);
     assert_eq!(found["range"]["start"], json!({ "line": 2, "character": 15 }));
+    server.stop();
+}
+
+/// The labels of a completion answer.
+fn labels(result: &Value) -> Vec<String> {
+    result.as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn completion_while_typing() {
+    let dir = temp("completion");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    let class = "class Point {\n    pub number @x;\n    pub static Point origin() = Point(0);\n}\n";
+    server.open(&script, &format!("{class}let $words = ['a'];\n"));
+    server.diagnostics_for(&script);
+    // `$words.`, not saved, with no `;` yet
+    server.change(&script, &format!("{class}let $words = ['a'];\n$words.\n"), 2);
+    let found = server.at("textDocument/completion", &script, 5, 7);
+    let names = labels(&found);
+    assert!(names.contains(&"push".to_string()) && names.contains(&"map".to_string()), "{names:?}");
+    let push = found.as_array().unwrap().iter().find(|i| i["label"] == "push").unwrap();
+    assert_eq!(push["detail"], "list<string> push(...string $values)");
+    assert_eq!(push["textEdit"]["range"]["start"], json!({ "line": 5, "character": 7 }));
+    // `$` alone: the variables, replacing the `$`
+    server.change(&script, &format!("{class}let $words = ['a'];\noutln($);\n"), 3);
+    let found = server.at("textDocument/completion", &script, 5, 7);
+    assert_eq!(labels(&found), vec!["$words"]);
+    assert_eq!(found[0]["textEdit"]["range"]["start"], json!({ "line": 5, "character": 6 }));
+    // `Point::o`
+    server.change(&script, &format!("{class}let $p = Point::o\n"), 4);
+    let found = server.at("textDocument/completion", &script, 4, 17);
+    assert_eq!(labels(&found), vec!["origin"]);
+    // A word: names in scope and keywords
+    server.change(&script, &format!("{class}ret\n"), 5);
+    let names = labels(&server.at("textDocument/completion", &script, 4, 3));
+    for expected in ["Point", "outln", "return", "string"] {
+        assert!(names.contains(&expected.to_string()), "{expected}: {names:?}");
+    }
+    server.stop();
+}
+
+#[test]
+fn completion_in_a_module_of_a_project() {
+    let dir = temp("completion-project");
+    std::fs::write(dir.join("ferry.toml"), "[project]\nname = \"demo\"\nauthor = \"ana\"\nversion = \"0.1.0\"\nkind = \"application\"\n").unwrap();
+    std::fs::create_dir_all(dir.join("src/ana/demo")).unwrap();
+    std::fs::write(dir.join("src/ana/demo/util.lks"), "pub number twice(number $n) = $n * 2;\n").unwrap();
+    let module = dir.join("src/ana/demo/report.lks");
+    let text = "use ana/demo/util;\n\npub string report(list<number> $values) {\n    let $total = $values.sum();\n    return f\"{util::}\";\n}\n";
+    std::fs::write(&module, text).unwrap();
+    let mut server = Server::start();
+    server.open(&module, text);
+    server.diagnostics_for(&module);
+    let found = server.at("textDocument/completion", &module, 4, 20);
+    assert_eq!(labels(&found), vec!["twice"]);
+    // Inside the function: its parameter and variable
+    let names = labels(&server.at("textDocument/completion", &module, 4, 14));
+    assert!(names.contains(&"$values".to_string()) && names.contains(&"$total".to_string()), "{names:?}");
     server.stop();
 }
