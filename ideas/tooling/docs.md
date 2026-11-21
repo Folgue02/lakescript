@@ -1,6 +1,6 @@
 # Documentation pages
 
-*Built, a first version (phase 9, see [roadmap.md](../roadmap.md)). What's missing is at the end.*
+*Built in `v0.9.0` (phase 9, see [roadmap.md](../roadmap.md)). What's missing is at the end.*
 
 How the pages that `ferry doc` makes from a project, and the page of the standard library, look. They're made from the `//!` and `///` comments of the modules and from the `module.md` of each folder *(see Doc comments in [functions.md](../language/functions.md) and Documenting folders in [modules.md](../language/modules.md))*.
 
