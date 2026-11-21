@@ -21,6 +21,8 @@ What comes with Lakescript. Its modules are under `std/` and are imported with `
 
 ## Files
 
+What's coming next is in [planned.md](planned.md).
+
 | File | Contents |
 |------|----------|
 | [types/any.md](types/any.md) | Methods every value has |
