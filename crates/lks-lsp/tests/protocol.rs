@@ -280,3 +280,25 @@ fn completion_in_a_module_of_a_project() {
     assert!(names.contains(&"$values".to_string()) && names.contains(&"$total".to_string()), "{names:?}");
     server.stop();
 }
+
+#[test]
+fn projects_that_cannot_be_used_say_why() {
+    let dir = temp("project-problems");
+    let manifest = "[project]\nname = \"demo\"\nauthor = \"ana\"\nversion = \"0.1.0\"\nkind = \"application\"\n\n[dependencies]\n";
+    std::fs::write(dir.join("ferry.toml"), format!("{manifest}\"github:bob/strings\" = \"1.0.0\"\n")).unwrap();
+    std::fs::create_dir_all(dir.join("bin")).unwrap();
+    let script = dir.join("bin/demo.lks");
+    let text = "use bob/strings/pad;\noutln(1);\n";
+    std::fs::write(&script, text).unwrap();
+    let mut server = Server::start();
+    // A dependency that isn't downloaded: lks-lsp never downloads, so it says what does
+    server.open(&script, text);
+    let errors = server.diagnostics_for(&script);
+    assert!(errors[0]["message"].as_str().unwrap().contains("isn't downloaded yet: `ferry check` or `ferry run` downloads it"), "{errors:?}");
+    // A `ferry.toml` that can't be read
+    std::fs::write(dir.join("ferry.toml"), format!("{manifest}\"bob/strings\" = \"1.0.0\"\n")).unwrap();
+    server.change(&script, text, 2);
+    let errors = server.diagnostics_for(&script);
+    assert!(errors[0]["message"].as_str().unwrap().contains("isn't a package"), "{errors:?}");
+    server.stop();
+}

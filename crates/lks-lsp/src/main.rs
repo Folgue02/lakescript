@@ -188,11 +188,18 @@ impl Server {
         }
         engine.set_file_text(path, text);
         let folder = path.parent().unwrap_or(Path::new("."));
-        let Ok(project) = ferry::project::Project::find(folder) else {
-            if let Some(offset) = complete {
-                engine.set_completion(None, offset);
+        let project = match ferry::project::Project::find(folder) {
+            Ok(project) => project,
+            // A `ferry.toml` that can't be read: its error, instead of checking the file as if there were no project
+            Err(e) if folder.ancestors().any(|d| d.join(ferry::project::MANIFEST).is_file()) => {
+                return (Err(Diagnostic::new(e.0, Default::default())), false);
             }
-            return (engine.check_text(path, text), false);
+            Err(_) => {
+                if let Some(offset) = complete {
+                    engine.set_completion(None, offset);
+                }
+                return (engine.check_text(path, text), false);
+            }
         };
         let module_path = match ferry::home::Home::open() {
             Ok(home) => ferry::resolve::installed_module_path(&home, &project),
@@ -216,12 +223,12 @@ impl Server {
                 }
                 e
             });
-            return (result, true);
+            return (result.map_err(|e| missing_dependency(e, &project)), true);
         }
         if let Some(offset) = complete {
             engine.set_completion(None, offset);
         }
-        (engine.check_text(path, text), false)
+        (engine.check_text(path, text).map_err(|e| missing_dependency(e, &project)), false)
     }
 
     /// Answers a request of the editor.
@@ -349,6 +356,18 @@ impl Server {
         let range = Range { start: position(&text, d.start), end: position(&text, d.end) };
         Some(GotoDefinitionResponse::Scalar(Location { uri: path_to_uri(&file)?, range }))
     }
+}
+
+/// A module that isn't found because its dependency isn't downloaded yet:
+/// `lks-lsp` never downloads, so the error says what does.
+fn missing_dependency(mut error: Diagnostic, project: &ferry::project::Project) -> Diagnostic {
+    let Some(module) = error.message.strip_prefix("module `").and_then(|rest| rest.split_once("` not found")).map(|(m, _)| m.to_string()) else {
+        return error;
+    };
+    if let Some((package, version)) = project.dependencies.iter().find(|(p, _)| module.starts_with(&format!("{}/", p.id()))) {
+        error.message = format!("`{module}` comes from the dependency {package} {version}, which isn't downloaded yet: `ferry check` or `ferry run` downloads it");
+    }
+    error
 }
 
 /// What's before the cursor, for completion.

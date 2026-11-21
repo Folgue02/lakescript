@@ -37,6 +37,7 @@ Each one is usable on its own, with tests that send real protocol messages to th
 ### Status
 
 - Milestone 1 is done. `lks-lsp` takes the whole text of a file on every change, checks every open file with it, and sends each error to the file it's in: an error in a module goes to the module, also when only a file that uses it is open. A module of a ferry project is checked as a module, with the project's module path *(`src/` and the packages of the lock file that are already downloaded: `lks-lsp` never downloads)*, and any other file as a script.
+- A project that can't be used says why, at the start of the file: a `ferry.toml` that can't be read gives its error *(the file isn't checked as if there were no project)*, and a module of a dependency that isn't downloaded says that `ferry check` or `ferry run` downloads it.
 - Every file the editor has open is checked again on each change, since a change in a module can break the files that use it. It takes a few milliseconds.
 - `lks-lsp --version` says its version, and it's in every release archive.
 - Milestone 2 is done. Hover shows a name's declaration as Lakescript code *(i.e. `list<number> $count`, `string greet(string $name, number $times = …)`, `class Dog extends Animal`)*, a sentence on what it is *(i.e. "A method of `list`.", "A parameter of `greet`.", "From `math.lks`.")* and the `///` comment of its declaration. Go to definition jumps to where it's declared, in the file or in a module.
@@ -80,6 +81,10 @@ Each one is usable on its own, with tests that send real protocol messages to th
 ## Using it
 
 An editor starts `lks-lsp` with no arguments for files ending in `.lks`, and talks to it on its stdin and stdout. The language id is `lakescript`. Nothing else needs to be configured: a ferry project is found from the folder of each file.
+
+- Positions are in UTF-16 units, the protocol's default.
+- It answers `textDocument/hover`, `textDocument/definition` and `textDocument/completion` (triggered by `.`, `$`, `@` and `:`), and sends `textDocument/publishDiagnostics` after `didOpen`, `didChange`, `didSave` and `didClose`. The text is synced whole on every change. Other requests get a `MethodNotFound` error.
+- Editors find it on the `PATH` and don't install it: it comes in the release archives, and `cargo install --path crates/lks-lsp` builds it from the source.
 
 ## Editors
 
