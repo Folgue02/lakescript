@@ -1,6 +1,6 @@
 # std/html
 
-Reading HTML pages and finding their parts with CSS selectors, to scrape them. `use std/html;`, then `html::parse($text)`. It's written in Lakescript, in `crates/lakescript/src/stdlib/html.lks`, with its Rust part in `html.rs` *(see How modules are made in [README.md](README.md))*. Pages are parsed by `html5ever`, the parser of Servo, through the `scraper` crate, so broken HTML is repaired the way browsers do it.
+Reading HTML pages and finding their parts with CSS selectors, to scrape them. `use std/html;`, then `html::parse($text)`. Broken HTML is repaired the way browsers do it.
 
 ```
 use std/http;
@@ -66,6 +66,7 @@ An element of a page *(i.e. `<a href="...">`)*.
 
 ## How it's made
 
+- It's written in Lakescript, in `crates/lakescript/src/stdlib/html.lks`, with its Rust part in `html.rs` *(see How modules are made in [README.md](README.md))*. Pages are parsed by `html5ever`, the parser of Servo, through the `scraper` crate.
 - An element is a `Document` or `Element` object whose hidden field holds the page in Rust *(a `Value::Handle`)*, which scripts never see. The page is freed when no element of it is used anymore, so scraping many pages doesn't keep them in memory. Printing an element leaves that field out *(i.e. `Element(tag: 'li')`)*.
 - `std/html/native` is its Rust part, which only `html.lks` can use.
 

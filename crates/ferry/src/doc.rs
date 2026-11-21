@@ -11,10 +11,6 @@ use lakescript::docs::{self, ArgDoc, CommandDoc, Doc, Item, ItemKind, ModuleDoc}
 use crate::Fail;
 use crate::project::Project;
 
-/// The page of the standard library, made by `tools/docs/stdlib.py` from
-/// `ideas/stdlib`, for `ferry doc std`.
-pub const STDLIB_PAGE: &str = include_str!("stdlib.html");
-
 /// What the pages of a project are made from.
 pub struct Site {
     pub id: String,
@@ -28,6 +24,10 @@ pub struct Site {
     pub commands: Vec<CommandPage>,
     /// The dependencies: their name, version, and their docs when they were made.
     pub dependencies: Vec<(String, String, Option<String>)>,
+    /// The docs of the standard library, and where their pages are, for links and search.
+    pub std: Option<(Box<Site>, String)>,
+    /// Whether these are the docs of the standard library itself.
+    pub standard: bool,
 }
 
 pub struct ModulePage {
@@ -35,9 +35,19 @@ pub struct ModulePage {
     pub path: String,
     /// Its path inside the project *(i.e. `units`, `api/users`)*.
     pub short: String,
-    /// Its file, as errors name it *(i.e. `units.lks`)*.
+    /// Its file, as errors name it *(i.e. `units.lks`)*. Empty for the standard library.
     pub file: String,
     pub doc: ModuleDoc,
+    /// Its title *(i.e. `units`, `std/fs`, `Built-in functions`)*.
+    pub title: String,
+    /// What's written before its items in search *(i.e. `units::`, nothing for the built-in functions)*.
+    pub prefix: String,
+    /// Whether it's imported with `use`, which its page shows.
+    pub importable: bool,
+    /// The groups of its items, with their text, in order *(i.e. `Reading`)*.
+    pub groups: Vec<(String, String)>,
+    /// Sections of text after its items.
+    pub notes: Option<String>,
 }
 
 pub struct FolderPage {
@@ -66,7 +76,9 @@ pub fn read(project: &Project) -> Result<Site, Fail> {
         let doc = docs::module_doc(&text).map_err(|d| format!("{}: {}", file.display(), d.message))?;
         let short = path.strip_prefix(&format!("{}/", project.id)).unwrap_or(&path).to_string();
         let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        modules.push(ModulePage { path, short, file: name, doc });
+        let title = short.rsplit('/').next().unwrap_or(&short).to_string();
+        let prefix = format!("{title}::");
+        modules.push(ModulePage { path, short, file: name, doc, title, prefix, importable: true, groups: Vec::new(), notes: None });
     }
     let mut front = None;
     let mut folders = Vec::new();
@@ -106,7 +118,115 @@ pub fn read(project: &Project) -> Result<Site, Fail> {
         folders,
         commands,
         dependencies: Vec::new(),
+        std: None,
+        standard: false,
     })
+}
+
+// ---- The standard library ----
+
+/// The docs of the standard library, made by `tools/docs/stdlib.py` from
+/// `ideas/stdlib`, which ferry has inside.
+const STDLIB: &str = include_str!("stdlib.toml");
+
+#[derive(serde::Deserialize)]
+struct StdData {
+    overview: String,
+    modules: Vec<StdModule>,
+}
+
+#[derive(serde::Deserialize)]
+struct StdModule {
+    short: String,
+    #[serde(default)]
+    path: String,
+    title: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    groups: Vec<StdGroup>,
+    #[serde(default)]
+    items: Vec<StdItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct StdGroup {
+    name: String,
+    #[serde(default)]
+    text: String,
+}
+
+#[derive(serde::Deserialize)]
+struct StdItem {
+    kind: String,
+    name: String,
+    code: String,
+    #[serde(default)]
+    text: String,
+    group: Option<String>,
+    #[serde(default)]
+    groups: Vec<StdGroup>,
+    #[serde(default)]
+    members: Vec<StdItem>,
+}
+
+impl StdItem {
+    fn item(self) -> Item {
+        let kind = match self.kind.as_str() {
+            "function" => ItemKind::Function,
+            "constant" => ItemKind::Constant,
+            "class" => ItemKind::Class,
+            "type" => ItemKind::Type,
+            "field" => ItemKind::Field,
+            _ => ItemKind::Method,
+        };
+        let mut item = Item::new(kind, &self.name, &self.code);
+        item.doc = Doc { text: self.text, ..Doc::default() };
+        item.group = self.group;
+        item.groups = self.groups.into_iter().map(|g| (g.name, g.text)).collect();
+        item.members = self.members.into_iter().map(StdItem::item).collect();
+        item
+    }
+}
+
+/// The standard library as a site, like a project's: its modules, the
+/// built-in functions and the built-in types.
+pub fn std_site() -> Site {
+    let data: StdData = toml::from_str(STDLIB).expect("stdlib.toml is made by tools/docs/stdlib.py");
+    let modules = data
+        .modules
+        .into_iter()
+        .map(|m| {
+            let importable = !m.path.is_empty();
+            let prefix = if importable { format!("{}::", m.short.rsplit('/').next().unwrap_or(&m.short)) } else { String::new() };
+            let text = (!m.text.is_empty()).then_some(m.text);
+            ModulePage {
+                path: if importable { m.path } else { m.title.clone() },
+                short: m.short,
+                file: String::new(),
+                doc: ModuleDoc { text, items: m.items.into_iter().map(StdItem::item).collect() },
+                title: m.title,
+                prefix,
+                importable,
+                groups: m.groups.into_iter().map(|g| (g.name, g.text)).collect(),
+                notes: (!m.notes.is_empty()).then_some(m.notes),
+            }
+        })
+        .collect();
+    Site {
+        id: "Standard library".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
+        kind: "lakescript".into(),
+        front: Some(data.overview),
+        modules,
+        folders: Vec::new(),
+        commands: Vec::new(),
+        dependencies: Vec::new(),
+        std: None,
+        standard: true,
+    }
 }
 
 fn read_file(path: &Path) -> Result<String, Fail> {
@@ -156,7 +276,7 @@ pub fn write(site: &Site, dir: &Path) -> Result<PathBuf, Fail> {
 }
 
 fn has_page(item: &Item) -> bool {
-    matches!(item.kind, ItemKind::Class | ItemKind::Interface | ItemKind::Enum)
+    matches!(item.kind, ItemKind::Class | ItemKind::Interface | ItemKind::Enum | ItemKind::Type)
 }
 
 fn dotted(path: &str) -> String {
@@ -182,11 +302,16 @@ fn command_href(name: &str) -> String {
 /// The classes, interfaces and enums of the project, by name, and their pages.
 fn types(site: &Site) -> BTreeMap<String, String> {
     let mut types = BTreeMap::new();
+    // The standard library's, which the project's own replace
+    if let Some((std, base)) = &site.std {
+        for (name, href) in self::types(std) {
+            types.insert(name, format!("{base}{href}"));
+        }
+    }
     for module in &site.modules {
-        let last = module.short.rsplit('/').next().unwrap_or(&module.short);
         for item in module.doc.items.iter().filter(|i| has_page(i)) {
             types.insert(item.name.clone(), type_href(module, &item.name));
-            types.insert(format!("{last}::{}", item.name), type_href(module, &item.name));
+            types.insert(format!("{}{}", module.prefix, item.name), type_href(module, &item.name));
         }
     }
     types
@@ -199,14 +324,53 @@ fn esc(text: &str) -> String {
 /// Markdown as HTML. HTML written in it is shown as text, so a comment can't
 /// add scripts to the pages.
 fn md(text: &str) -> String {
-    use pulldown_cmark::{Event, Parser};
-    let events = Parser::new(text).map(|e| match e {
+    use pulldown_cmark::{Event, Options, Parser};
+    let events = Parser::new_ext(text, Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH).map(|e| match e {
         Event::Html(h) | Event::InlineHtml(h) => Event::Text(h),
         other => other,
     });
     let mut out = String::new();
     pulldown_cmark::html::push_html(&mut out, events);
     out
+}
+
+/// The first sentence of a text, for tiles, lists and search: without its
+/// links, since it often goes inside a link itself, and a link can't be inside
+/// another.
+fn sentence(text: &str) -> String {
+    let first = Doc { text: text.to_string(), ..Doc::default() }.summary();
+    // `[label](url)` is only its label
+    let chars: Vec<char> = first.chars().collect();
+    let mut plain = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '['
+            && let Some(close) = chars[i..].iter().position(|c| *c == ']').map(|p| p + i)
+            && chars.get(close + 1) == Some(&'(')
+            && let Some(end) = chars[close..].iter().position(|c| *c == ')').map(|p| p + close)
+        {
+            plain.extend(&chars[i + 1..close]);
+            i = end + 1;
+            continue;
+        }
+        plain.push(chars[i]);
+        i += 1;
+    }
+    // Up to the first `.` that ends a sentence, outside code and parentheses
+    let (mut code, mut depth) = (false, 0i32);
+    let chars: Vec<char> = plain.chars().collect();
+    for (i, c) in chars.iter().enumerate() {
+        match c {
+            '`' => code = !code,
+            '(' if !code => depth += 1,
+            ')' if !code => depth -= 1,
+            '.' if !code && depth <= 0 && chars.get(i + 1).is_none_or(|n| n.is_whitespace()) => {
+                return chars[..=i].iter().collect();
+            }
+            _ => {}
+        }
+    }
+    plain
 }
 
 /// Markdown of one line, without its paragraph.
@@ -294,7 +458,8 @@ fn page_at(site: &Site, title: &str, current: Option<(&ModulePage, &[Item])>, cu
     for module in &site.modules {
         let open = current.is_some_and(|(m, _)| std::ptr::eq(m, module));
         let cls = if open { " class=\"current\"" } else { "" };
-        side.push_str(&format!("<li><a href=\"{}\"{cls}>{}</a>", module_href(module), esc(&module.short)));
+        let label = if module.importable { &module.short } else { &module.title };
+        side.push_str(&format!("<li><a href=\"{}\"{cls}>{}</a>", module_href(module), esc(label)));
         if let (true, Some((_, items))) = (open, current) {
             side.push_str("<ul class=\"side-members\">");
             for item in items {
@@ -383,12 +548,11 @@ fn card(item: &Item, file: &str, types: &BTreeMap<String, String>, note: &str) -
     let text = if item.doc.text.is_empty() { String::new() } else { format!("<div class=\"doc\">{}</div>", md(&item.doc.text)) };
     let body = format!("{text}{}{note}", details(&item.doc));
     let body = if body.is_empty() { String::new() } else { format!("<div class=\"card-body\">{body}</div>") };
+    let place = if item.line > 0 && !file.is_empty() { format!("<span class=\"where\">{}:{}</span>", esc(file), item.line) } else { String::new() };
     format!(
-        "<section class=\"card\" id=\"{}\"><div class=\"card-head\"><code>{}</code><span class=\"where\">{}:{}</span></div>{body}</section>\n",
+        "<section class=\"card\" id=\"{}\"><div class=\"card-head\"><code>{}</code>{place}</div>{body}</section>\n",
         anchor(&item.name),
-        code(&item.code, &item.name, types),
-        esc(file),
-        item.line
+        code(&item.code, &item.name, types)
     )
 }
 
@@ -409,24 +573,34 @@ fn breadcrumb(site: &Site, parts: &[(String, Option<String>)]) -> String {
 }
 
 fn front_page(site: &Site, _types: &BTreeMap<String, String>) -> String {
+    let dependencies = match (site.standard, site.dependencies.len()) {
+        (true, _) => String::new(),
+        (false, 0) => "<span>No dependencies</span>".to_string(),
+        (false, 1) => "<span>1 dependency</span>".to_string(),
+        (false, n) => format!("<span>{n} dependencies</span>"),
+    };
     let mut main = format!(
-        "<div class=\"title\"><h1>{}</h1>{}</div>\n<div class=\"facts\"><span>Version <strong>{}</strong></span><span>{}</span></div>\n",
+        "<div class=\"title\"><h1>{}</h1>{}</div>\n<div class=\"facts\"><span>Version <strong>{}</strong></span>{dependencies}</div>\n",
         esc(&site.id),
         badge(&site.kind),
         esc(&site.version),
-        match site.dependencies.len() {
-            0 => "No dependencies".to_string(),
-            1 => "1 dependency".to_string(),
-            n => format!("{n} dependencies"),
-        }
     );
-    if let Some(text) = &site.front {
+    // The standard library's text is long: its first paragraph, the modules, then the rest
+    let (intro, rest) = match (&site.front, site.standard) {
+        (Some(text), true) => match text.split_once("\n\n") {
+            Some((first, rest)) => (Some(first.to_string()), Some(rest.to_string())),
+            None => (Some(text.clone()), None),
+        },
+        (text, false) => (text.clone(), None),
+        (None, true) => (None, None),
+    };
+    if let Some(text) = &intro {
         let _ = writeln!(main, "<article class=\"doc big\">{}</article>", md(text));
     }
     if !site.modules.is_empty() {
         main.push_str("<h2>Modules</h2>\n<div class=\"tiles\">\n");
         for module in &site.modules {
-            let summary = module.doc.text.as_ref().map(|t| Doc { text: t.clone(), ..Doc::default() }.summary()).unwrap_or_default();
+            let summary = module.doc.text.as_deref().map(sentence).unwrap_or_default();
             let count = |kinds: &[ItemKind], one: &str, many: &str| {
                 let n = module.doc.items.iter().filter(|i| kinds.contains(&i.kind)).count();
                 match n {
@@ -437,7 +611,7 @@ fn front_page(site: &Site, _types: &BTreeMap<String, String>) -> String {
             };
             let counts: Vec<String> = [
                 count(&[ItemKind::Function], "function", "functions"),
-                count(&[ItemKind::Class, ItemKind::Interface, ItemKind::Enum], "type", "types"),
+                count(&[ItemKind::Class, ItemKind::Interface, ItemKind::Enum, ItemKind::Type], "type", "types"),
                 count(&[ItemKind::Constant], "constant", "constants"),
             ]
             .into_iter()
@@ -457,7 +631,7 @@ fn front_page(site: &Site, _types: &BTreeMap<String, String>) -> String {
     if !site.folders.is_empty() {
         main.push_str("<h2>Folders</h2>\n<div class=\"tiles\">\n");
         for folder in &site.folders {
-            let summary = Doc { text: folder.text.clone(), ..Doc::default() }.summary();
+            let summary = sentence(&folder.text);
             let _ = writeln!(main, "<a class=\"tile\" href=\"{}\"><code>{}/</code><span>{}</span></a>", folder_href(&folder.short), esc(&folder.short), md_inline(&summary));
         }
         main.push_str("</div>\n");
@@ -476,6 +650,9 @@ fn front_page(site: &Site, _types: &BTreeMap<String, String>) -> String {
         }
         main.push_str("</div>\n");
     }
+    if let Some(text) = &rest {
+        let _ = writeln!(main, "<article class=\"doc big notes\">{}</article>", md(text));
+    }
     if !site.dependencies.is_empty() {
         main.push_str("<h2>Dependencies</h2>\n<div class=\"rows\">\n");
         for (name, version, href) in &site.dependencies {
@@ -491,17 +668,17 @@ fn front_page(site: &Site, _types: &BTreeMap<String, String>) -> String {
 }
 
 fn module_page(site: &Site, module: &ModulePage, types: &BTreeMap<String, String>) -> String {
-    let last = module.short.rsplit('/').next().unwrap_or(&module.short);
-    let mut main = breadcrumb(site, &[(module.short.clone(), None)]);
-    let _ = writeln!(
-        main,
-        "<div class=\"title\"><h1>{}</h1>{}<span class=\"where\">{}</span></div>\n<div class=\"use\"><code><span class=\"k\">use</span> {};</code><button type=\"button\" data-copy=\"use {};\">Copy</button></div>",
-        esc(last),
-        badge("module"),
-        esc(&module.file),
-        esc(&module.path),
-        esc(&module.path)
-    );
+    let mut main = breadcrumb(site, &[(module.title.clone(), None)]);
+    let kind = if module.importable { "module" } else { "built-in" };
+    let _ = writeln!(main, "<div class=\"title\"><h1>{}</h1>{}<span class=\"where\">{}</span></div>", esc(&module.title), badge(kind), esc(&module.file));
+    if module.importable {
+        let _ = writeln!(
+            main,
+            "<div class=\"use\"><code><span class=\"k\">use</span> {};</code><button type=\"button\" data-copy=\"use {};\">Copy</button></div>",
+            esc(&module.path),
+            esc(&module.path)
+        );
+    }
     if let Some(text) = &module.doc.text {
         let _ = writeln!(main, "<div class=\"doc big\">{}</div>", md(text));
     }
@@ -511,7 +688,15 @@ fn module_page(site: &Site, module: &ModulePage, types: &BTreeMap<String, String
             return;
         }
         let _ = writeln!(main, "<h2>{title}</h2>\n<div class=\"cards\">");
+        let mut group: Option<&str> = None;
         for item in items {
+            // The groups of the standard library *(i.e. `Reading` in std/fs)*, each with its text
+            if item.group.is_some() && item.group.as_deref() != group && module.groups.len() > 1 {
+                group = item.group.as_deref();
+                let name = group.unwrap_or_default();
+                let text = module.groups.iter().find(|(n, _)| n == name).map(|(_, t)| t.as_str()).unwrap_or("");
+                let _ = writeln!(main, "<h3>{}</h3>{}", esc(name), if text.is_empty() { String::new() } else { format!("<div class=\"doc\">{}</div>", md(text)) });
+            }
             if has_page(item) {
                 let _ = writeln!(
                     main,
@@ -519,7 +704,7 @@ fn module_page(site: &Site, module: &ModulePage, types: &BTreeMap<String, String
                     type_href(module, &item.name),
                     badge(item.kind.word()),
                     esc(&item.name),
-                    md_inline(&item.doc.summary())
+                    md_inline(&sentence(&item.doc.text))
                 );
             } else {
                 main.push_str(&card(item, &module.file, types, ""));
@@ -529,22 +714,25 @@ fn module_page(site: &Site, module: &ModulePage, types: &BTreeMap<String, String
     };
     section("Constants", &[ItemKind::Constant], &mut main);
     section("Functions", &[ItemKind::Function], &mut main);
-    section("Types", &[ItemKind::Class, ItemKind::Interface, ItemKind::Enum], &mut main);
+    section("Types", &[ItemKind::Class, ItemKind::Interface, ItemKind::Enum, ItemKind::Type], &mut main);
+    if let Some(notes) = &module.notes {
+        let _ = writeln!(main, "<div class=\"doc notes\">{}</div>", md(notes));
+    }
     if module.doc.items.is_empty() && module.doc.text.is_none() {
         main.push_str("<p class=\"muted\">This module has nothing <code>pub</code> and no <code>//!</code> comment.</p>\n");
     }
-    page(site, last, Some((module, &module.doc.items)), None, &main)
+    page(site, &module.title, Some((module, &module.doc.items)), None, &main)
 }
 
 fn type_page(site: &Site, module: &ModulePage, item: &Item, types: &BTreeMap<String, String>) -> String {
-    let mut main = breadcrumb(site, &[(module.short.clone(), Some(module_href(module))), (item.name.clone(), None)]);
+    let mut main = breadcrumb(site, &[(module.title.clone(), Some(module_href(module))), (item.name.clone(), None)]);
+    let place = if item.line > 0 { format!("{}:{}", module.file, item.line) } else { String::new() };
     let _ = writeln!(
         main,
-        "<div class=\"title\"><h1>{}</h1>{}<span class=\"where\">{}:{}</span></div>\n<div class=\"use\"><code>{}</code></div>",
+        "<div class=\"title\"><h1>{}</h1>{}<span class=\"where\">{}</span></div>\n<div class=\"use\"><code>{}</code></div>",
         esc(&item.name),
         badge(item.kind.word()),
-        esc(&module.file),
-        item.line,
+        esc(&place),
         code(&item.code, &item.name, types)
     );
     if !item.doc.text.is_empty() {
@@ -650,7 +838,15 @@ fn type_page(site: &Site, module: &ModulePage, item: &Item, types: &BTreeMap<Str
         let own: Vec<&&Item> = methods.iter().filter(|m| m.from.is_none()).collect();
         if !own.is_empty() {
             main.push_str("<h2>Methods</h2>\n<div class=\"cards\">\n");
+            let mut group: Option<&str> = None;
             for method in own {
+                // The groups of a built-in type *(i.e. `Searching` in string)*
+                if method.group.is_some() && method.group.as_deref() != group && item.groups.len() > 1 {
+                    group = method.group.as_deref();
+                    let name = group.unwrap_or_default();
+                    let text = item.groups.iter().find(|(n, _)| n == name).map(|(_, t)| t.as_str()).unwrap_or("");
+                    let _ = writeln!(main, "<h3>{}</h3>{}", esc(name), if text.is_empty() { String::new() } else { format!("<div class=\"doc\">{}</div>", md(text)) });
+                }
                 main.push_str(&card(method, &module.file, types, ""));
             }
             main.push_str("</div>\n");
@@ -702,7 +898,7 @@ fn folder_page(site: &Site, folder: &FolderPage) -> String {
     if !inside.is_empty() {
         main.push_str("<h2>Modules</h2>\n<div class=\"tiles\">\n");
         for module in inside {
-            let summary = module.doc.text.as_ref().map(|t| Doc { text: t.clone(), ..Doc::default() }.summary()).unwrap_or_default();
+            let summary = module.doc.text.as_deref().map(sentence).unwrap_or_default();
             let _ = writeln!(main, "<a class=\"tile\" href=\"{}\"><code>{}</code><span>{}</span></a>", module_href(module), esc(&module.path), md_inline(&summary));
         }
         main.push_str("</div>\n");
@@ -810,27 +1006,41 @@ fn json(text: &str) -> String {
 /// line of its comment and its page.
 fn index(site: &Site) -> String {
     let mut entries = Vec::new();
+    entries_of(site, &site.id, "", &mut entries);
+    if let Some((std, base)) = &site.std {
+        entries_of(std, "Standard library", base, &mut entries);
+    }
+    format!("{{\"items\":[{}]}}", entries.join(","))
+}
+
+/// The search entries of a site, in the group `group`, with `base` before their pages.
+fn entries_of(site: &Site, group: &str, base: &str, entries: &mut Vec<String>) {
     let mut add = |path: String, kind: &str, summary: String, href: String| {
-        let summary = plain(&summary).replace('`', "");
-        entries.push(format!("{{\"p\":{},\"k\":{},\"s\":{},\"h\":{}}}", json(&path), json(kind), json(&summary), json(&href)));
+        let summary = plain(&sentence(&summary)).replace('`', "");
+        entries.push(format!(
+            "{{\"g\":{},\"p\":{},\"k\":{},\"s\":{},\"h\":{}}}",
+            json(group),
+            json(&path),
+            json(kind),
+            json(&summary),
+            json(&format!("{base}{href}"))
+        ));
     };
     for module in &site.modules {
-        let last = module.short.rsplit('/').next().unwrap_or(&module.short).to_string();
         let summary = module.doc.text.as_ref().map(|t| Doc { text: t.clone(), ..Doc::default() }.summary()).unwrap_or_default();
         add(module.path.clone(), "module", summary, module_href(module));
         for item in &module.doc.items {
             let href = if has_page(item) { type_href(module, &item.name) } else { format!("{}#{}", module_href(module), anchor(&item.name)) };
-            add(format!("{last}::{}", item.name), item.kind.word(), item.doc.summary(), href.clone());
+            add(format!("{}{}", module.prefix, item.name), item.kind.word(), item.doc.summary(), href);
             for member in &item.members {
                 let page = type_href(module, &item.name);
-                add(format!("{last}::{}.{}", item.name, member.name), member.kind.word(), member.doc.summary(), format!("{page}#{}", anchor(&member.name)));
+                add(format!("{}{}.{}", module.prefix, item.name, member.name), member.kind.word(), member.doc.summary(), format!("{page}#{}", anchor(&member.name)));
             }
         }
     }
     for command in &site.commands {
         add(command.name.clone(), "command", command.summary.clone(), command_href(&command.name));
     }
-    format!("{{\"project\":{},\"items\":[{}]}}", json(&site.id), entries.join(","))
 }
 
 // ---- The terminal ----
@@ -848,7 +1058,8 @@ pub fn describe(site: &Site, name: &str) -> Option<String> {
     if module_name.is_none()
         && let Some(module) = site.modules.iter().find(|m| module_matches(m, name))
     {
-        let mut out = format!("module {}{:>width$}\n", module.path, module.file, width = 80usize.saturating_sub(module.path.len() + 7));
+        let out = format!("{} {}{:>width$}\n", if module.importable { "module" } else { "" }, module.path, module.file, width = 80usize.saturating_sub(module.path.len() + 7));
+        let mut out = out.trim_start().to_string();
         if let Some(text) = &module.doc.text {
             let _ = writeln!(out, "\n{}", plain(text));
         }
@@ -883,9 +1094,9 @@ fn plain(text: &str) -> String {
 }
 
 fn describe_item(item: &Item, file: &str) -> String {
-    let place = format!("{file}:{}", item.line);
+    let place = if item.line > 0 && !file.is_empty() { format!("{file}:{}", item.line) } else { String::new() };
     let width = 80usize.saturating_sub(item.code.chars().count()).max(place.len() + 2);
-    let mut out = format!("{}{place:>width$}\n", item.code);
+    let mut out = if place.is_empty() { format!("{}\n", item.code) } else { format!("{}{place:>width$}\n", item.code) };
     if !item.doc.text.is_empty() {
         let _ = writeln!(out, "\n{}", plain(&item.doc.text));
     }
@@ -960,6 +1171,9 @@ button{font:inherit;font-size:13px;padding:6px 12px;min-height:32px;border:1px s
 .doc{color:var(--text);line-height:1.65}.doc.big{margin-top:22px;font-size:17px}.doc p{margin:0 0 12px}.doc>:last-child{margin-bottom:0}
 .doc pre,pre{padding:14px 16px;background:var(--code);border-radius:8px;overflow-x:auto;font-size:14px;line-height:1.6}
 h2{margin:44px 0 14px;font-size:22px}
+h3{margin:26px 0 4px;font-size:17px}.cards>h3:first-child{margin-top:0}.cards>.doc{margin:0 0 4px;font-size:15px}
+.doc table{display:block;overflow-x:auto;margin:0 0 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.doc td,.doc th{font-size:14px}
+.notes{margin-top:40px}.notes h2{margin-top:32px}
 .cards{display:flex;flex-direction:column;gap:16px}
 .card{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
 .card-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:14px 20px;background:var(--panel);border-bottom:1px solid var(--line)}.card-head code{flex:1;min-width:0;font-size:15px;overflow-wrap:anywhere}.card-head:last-child{border-bottom:0}
@@ -969,7 +1183,7 @@ h2{margin:44px 0 14px;font-size:22px}
 .label{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding-top:2px}
 .arg-grid{display:grid;grid-template-columns:minmax(150px,max-content) minmax(0,1fr);gap:10px 20px;font-size:15px;line-height:1.5}.arg-grid.box{padding:18px 20px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
-.tile{display:flex;flex-direction:column;gap:6px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:14px}.tile:hover{text-decoration:none;border-color:var(--accent)}.tile code{color:var(--accent);font-size:15px}
+.tile{display:flex;flex-direction:column;gap:6px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font-size:14px;min-width:0;overflow-wrap:anywhere}.tile:hover{text-decoration:none;border-color:var(--accent)}.tile code{color:var(--accent);font-size:15px}
 .tile.wide{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:8px 12px}.cards .tile span:last-child{color:var(--muted)}
 .rows{border:1px solid var(--line);border-radius:10px;background:var(--surface)}.row{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 18px;padding:13px 18px;border-bottom:1px solid var(--line2)}.row:last-child{border-bottom:0}.row>a,.row>code:first-child{min-width:110px}.row>span{flex:1;min-width:200px}
 .section-head{display:flex;align-items:baseline;gap:12px}.section-head h2{margin-bottom:14px}
@@ -1015,9 +1229,14 @@ const SEARCH: &str = r#"(function () {
     shown.sort(function (a, b) { return b.r.s - a.r.s; });
     shown = shown.slice(0, 20);
     sel = 0;
-    var html = '<div class="group">In ' + esc(window.DOCS.project) + '</div>';
+    // The project's results first, then the standard library's, each under its name
+    var groups = items.length ? [items[0].g] : [];
+    shown.forEach(function (x) { if (groups.indexOf(x.it.g) < 0) groups.push(x.it.g); });
+    shown.sort(function (a, b) { return groups.indexOf(a.it.g) - groups.indexOf(b.it.g); });
+    var html = '', group = null;
     if (!shown.length) html += '<div class="empty">Nothing matches.</div>';
     shown.forEach(function (x, n) {
+      if (x.it.g !== group) { group = x.it.g; html += '<div class="group">' + (group === 'Standard library' ? 'Standard library' : 'In ' + esc(group)) + '</div>'; }
       html += '<a role="option" href="' + x.it.h + '"' + (n === 0 ? ' class="sel" aria-selected="true"' : '') + '>' +
         '<span class="line"><span class="badge ' + x.it.k + '">' + x.it.k + '</span><code>' + marked(x.it.p, x.r.hits) + '</code></span>' +
         (x.it.s ? '<span class="sum">' + esc(x.it.s) + '</span>' : '') + '</a>';

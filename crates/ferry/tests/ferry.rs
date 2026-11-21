@@ -357,6 +357,10 @@ fn doc_makes_the_pages_of_a_project() {
     assert!(command.contains("app [options] &lt;who&gt;") && command.contains("-l, --loud") && command.contains("Who to greet."), "{command}");
     assert!(read("command.plain.html").contains("ferry run plain [arguments...]"));
     assert!(read("search.js").contains("\"p\":\"math::twice\""));
+    // The types of the standard library link to its pages, and search finds them
+    assert!(math.contains("doc/std/") && math.contains("types.number.html"), "{math}");
+    assert!(read("search.js").contains("\"g\":\"Standard library\",\"p\":\"fs::read\""));
+    pages_are_well_formed(&doc);
 
     // One thing in the terminal
     let out = w.ok(&dir, &["doc", "math::twice"]);
@@ -373,28 +377,69 @@ fn doc_makes_the_pages_of_a_project() {
     assert!(w.fails(&dir, &["doc"]).contains("has 1 error, so its docs weren't made"));
 }
 
-#[test]
-fn doc_std_has_the_page_inside() {
-    let w = World::new();
-    let out = w.ok(&w.dir, &["doc", "std"]);
-    let page = std::path::PathBuf::from(out.trim());
-    assert!(page.ends_with(format!("doc/std/{}/index.html", env!("CARGO_PKG_VERSION"))), "{out}");
-    assert!(std::fs::read_to_string(&page).unwrap().contains("Lakescript Standard Library"));
+/// Every page of a folder of docs: no link inside another, which browsers
+/// break apart, and no table of Markdown left as text.
+fn pages_are_well_formed(dir: &Path) {
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "html") {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut depth = 0;
+        for (i, _) in text.match_indices('<') {
+            if text[i..].starts_with("<a ") || text[i..].starts_with("<a>") {
+                depth += 1;
+                assert!(depth == 1, "a link inside a link in {}: {}", path.display(), &text[i.saturating_sub(200)..i + 50]);
+            } else if text[i..].starts_with("</a>") {
+                depth -= 1;
+            }
+        }
+        assert!(!text.contains("|---") && !text.contains("| ---"), "a table of Markdown as text in {}", path.display());
+    }
 }
 
-/// The page ferry has inside is the one `tools/docs/stdlib.py` makes from the notes.
 #[test]
-fn the_page_of_the_standard_library_is_up_to_date() {
+fn doc_std_makes_the_pages_of_the_standard_library() {
+    let w = World::new();
+    let out = w.ok(&w.dir, &["doc", "std"]);
+    let index = std::path::PathBuf::from(out.trim());
+    assert!(index.ends_with(format!("doc/std/{}/index.html", env!("CARGO_PKG_VERSION"))), "{out}");
+    let dir = index.parent().unwrap();
+    let read = |name: &str| std::fs::read_to_string(dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+    assert!(read("index.html").contains("Philosophy"));
+    let fs = read("fs.html");
+    assert!(fs.contains("<h3>Reading</h3>") && fs.contains("<span class=\"n\">read</span>") && fs.contains("use std/fs;"));
+    assert!(read("http.Response.html").contains("<span class=\"n\">ok?</span>"));
+    assert!(read("types.string.html").contains("<span class=\"n\">upper</span>"));
+    assert!(!read("general.html").contains("use "), "the built-in functions need no `use`");
+    assert!(read("search.js").contains("\"p\":\"http::get\""));
+    // A table before the first heading of a note is read too
+    assert!(read("env.html").contains("<span class=\"n\">get</span>"));
+    // The front page: the modules before the long text, and their tiles are one sentence
+    let index = read("index.html");
+    assert!(index.find("<h2>Modules</h2>").unwrap() < index.find("Philosophy").unwrap());
+    assert!(!index.contains("No dependencies"));
+    pages_are_well_formed(dir);
+    // In the terminal, also outside a project
+    let out = w.ok(&w.dir, &["doc", "http::get"]);
+    assert!(out.starts_with("Response get(string $url"), "{out}");
+    assert!(w.ok(&w.dir, &["doc", "string.upper"]).contains("upper case"));
+}
+
+/// The data of the standard library ferry has inside is what `tools/docs/stdlib.py` makes from the notes.
+#[test]
+fn the_docs_of_the_standard_library_are_up_to_date() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let fresh = std::env::temp_dir().join(format!("ferry-stdlib-{}.html", std::process::id()));
+    let fresh = std::env::temp_dir().join(format!("ferry-stdlib-{}.toml", std::process::id()));
     let made = Command::new("python3").arg(root.join("tools/docs/stdlib.py")).arg(&fresh).output();
     // Without Python there's nothing to compare with
     let Ok(made) = made else { return };
     assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
-    let committed = std::fs::read_to_string(root.join("crates/ferry/src/stdlib.html")).unwrap();
+    let committed = std::fs::read_to_string(root.join("crates/ferry/src/stdlib.toml")).unwrap();
     let fresh_text = std::fs::read_to_string(&fresh).unwrap();
     let _ = std::fs::remove_file(&fresh);
-    assert!(committed == fresh_text, "crates/ferry/src/stdlib.html is out of date: run `python3 tools/docs/stdlib.py`");
+    assert!(committed == fresh_text, "crates/ferry/src/stdlib.toml is out of date: run `python3 tools/docs/stdlib.py`");
 }
 
 #[test]

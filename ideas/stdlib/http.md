@@ -1,6 +1,6 @@
 # std/http
 
-Requests to web servers. `use std/http;`, then `http::get($url)`. It's written in Lakescript, in `crates/lakescript/src/stdlib/http.lks`, with its Rust part in `http.rs` *(see How modules are made in [README.md](README.md))*. Requests are sent with the `ureq` crate, with HTTPS through `rustls`.
+Requests to web servers. `use std/http;`, then `http::get($url)`. HTTPS works out of the box.
 
 ```
 use std/http;
@@ -56,6 +56,10 @@ What a server answered.
 - **A status of 4xx or 5xx isn't an error.** It's an answer like any other, and the script checks it with `ok?()` or `status`. Scripts often expect some of them *(i.e. a 404 when asking if something exists)*, and a `try` around every request would hide the ones that matter.
 - **No answer at all** throws a `NetworkError`, under `IOError`: no network, a name that doesn't resolve, a refused connection, a timeout, too many redirects. Its message says which *(i.e. `can't reach 'http://localhost:9999/': the server refused the connection`)*.
 - An address that isn't valid throws a `ValueError`, and so does a timeout that isn't a positive number.
+
+## How it's made
+
+It's written in Lakescript, in `crates/lakescript/src/stdlib/http.lks`, with its Rust part in `http.rs` *(see How modules are made in [README.md](README.md))*. Requests are sent with the `ureq` crate, with HTTPS through `rustls`.
 
 ## Backlog
 

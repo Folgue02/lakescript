@@ -1,0 +1,2850 @@
+# Made by tools/docs/stdlib.py from ideas/stdlib. Don't change it by hand.
+overview = "What comes with Lakescript. Its modules are under `std/` and are imported with `use` *(i.e. `use std/fs;`, see the module path in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*. `out`, `outln`, `err`, `errln`, `exit` and the built-in exceptions can be used without `use`.\n\n## Philosophy\n\n- **If people keep writing the same helper in their scripts, the standard library is missing something.** Common operations get a function or a method, even the simple ones *(i.e. `$text.capitalize()`, `$list.unique()`, `$path.removeSuffix('.log')`)*. A script should read as what it does, not as the helpers it needed first.\n- **Methods, not procedural functions.** Operations on a value are methods on that value: `$list.length()`, not `len($list)`, and `$list.push($item)`, not `array_push($list, $item)`. Global functions are only for things that don't belong to a value *(i.e. `outln`, `exit`)*.\n- **Primitive types first.** If a built-in type is enough, it's used, so day-to-day scripts don't need to learn extra types. Paths are strings, the files of a folder are a `list<string>`, an exit code is a `number` *(like Python's `os.listdir()` and `os.path.join()`)*.\n- **A new type only when the built-in ones aren't enough, never a map pretending to be one.** A map with fixed keys used as an object *(i.e. `{'size' => 10, 'modified' => ...}` for a file)* means a real type is missing. Older modules use separate functions instead *(i.e. `fs::size()`, `fs::modified()`)*, from before the standard library could declare classes. Maps are only for data whose keys aren't known in advance *(i.e. `env::all()`, JSON)*.\n- **Types as specific as possible.** Signatures use generics instead of `any` *(i.e. `sortBy<K>((T) -> K $key)`)*. `any` is only for values whose type really can't be known *(i.e. JSON read without a schema)* or functions that accept every value *(i.e. `outln`)*.\n- **Values, not class hierarchies.** Classes of the standard library are values that functions give back *(i.e. the `http::Response` of `http::get()`)*: scripts read their fields and call their methods, but never have to create them, extend them or implement interfaces to use a module.\n- **Full names.** `length()`, not `len()`. `trimStart()`, not `lstrip()`. Abbreviations are only used when they're the common name of the thing *(i.e. `toJson()`, `max()`)*.\n\n## Naming conventions\n\n- **Questions end with `?`.** Methods that take no arguments and ask something about the value end with `?` *(i.e. `$list.empty?()`, `$n.even?()`, `$text.blank?()`)*. Methods that take an argument read as a sentence and don't *(i.e. `$text.startsWith('a')`, `$list.contains(5)`)*.\n- **Strings and ranges never change.** Their methods always return a new value *(i.e. `$name.upper()` returns a new string, `$name` is the same)*.\n- **Lists and maps: verbs change, past participles copy.** `$list.sort()` sorts the list itself, `$list.sorted()` returns a sorted copy and leaves the list as it was. The same goes for `reverse`/`reversed`, `shuffle`/`shuffled` and `merge`/`merged`. Methods that build something new from the values *(i.e. `map`, `filter`, `unique`)* always return a new list or map.\n- **Missing things are `null`, broken things throw.** Searching for something that isn't there returns `null` *(i.e. `'abc'.indexOf('z')`, `[].first()`)*. Asking for something invalid throws *(i.e. `'abc'.toNumber()`, `$list.removeAt(10)`)*.\n- **Errors** are the built-in exceptions *(`ValueError`, `IndexError`, ... see [errors](https://github.com/Folgue02/lakescript/blob/master/ideas/language/errors.md))*."
+
+[[modules]]
+short = "general"
+title = "Built-in functions"
+text = "Functions that can always be used, without `use` *(see the module path in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*."
+
+[[modules.groups]]
+name = "Output"
+text = "- They take a single value. Several values are joined with an f-string *(i.e. `outln(f\"{$a} {$b}\")`)*.\n- A program that embeds Lakescript decides where stdout and stderr go *(i.e. to a log, or to a window)*."
+
+[[modules.groups]]
+name = "Exit"
+text = "- `finally` blocks still run on the way out, like when an exception goes through them.\n- The exit codes of `lks`:\n\n| Code | When |\n|------|------|\n| `0` | The script finished |\n| `1` | An exception wasn't caught |\n| `2` | The command-line arguments were wrong *(see [cli](https://github.com/Folgue02/lakescript/blob/master/ideas/language/cli.md))* |\n| `N` | The script called `exit(N)` |\n\n- `exit` never ends the process of a program that embeds Lakescript. The program decides what it does:\n    - Allow it: the script stops, and the program is told the exit code. This is what `lks` does.\n    - Forbid it: `exit` throws an `Exception`, which the script can catch like any other."
+
+[[modules.items]]
+kind = "function"
+name = "out"
+code = "void out(any $value = '')"
+text = "Writes the value to stdout, as `toString()` shows it"
+group = "Output"
+
+[[modules.items]]
+kind = "function"
+name = "outln"
+code = "void outln(any $value = '')"
+text = "Same as `out`, followed by a new line"
+group = "Output"
+
+[[modules.items]]
+kind = "function"
+name = "err"
+code = "void err(any $value = '')"
+text = "Writes the value to stderr"
+group = "Output"
+
+[[modules.items]]
+kind = "function"
+name = "errln"
+code = "void errln(any $value = '')"
+text = "Same as `err`, followed by a new line"
+group = "Output"
+
+[[modules.items]]
+kind = "function"
+name = "exit"
+code = "void exit(number $code = 0)"
+text = "Stops the script with an exit code, from `0` to `255`"
+group = "Exit"
+
+[[modules]]
+short = "types"
+title = "Types"
+text = "The built-in types and their methods."
+
+[[modules.items]]
+kind = "type"
+name = "any"
+code = "any"
+text = "Methods that every value has, whatever its type."
+
+[[modules.items.groups]]
+name = "Types"
+
+[[modules.items.groups]]
+name = "Comparing and printing"
+
+[[modules.items.members]]
+kind = "method"
+name = "as"
+code = "the type as(type)"
+text = "Tells the checker the value has that type, and throws a `TypeError` while running if it doesn't *(i.e. `$data['name'].as(string)`)*. See [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md)"
+group = "Types"
+
+[[modules.items.members]]
+kind = "method"
+name = "is"
+code = "bool is(type)"
+text = "`true` if the value has that type. Inside an `if` that uses it, the value is treated as that type *(i.e. `$value.is(string)`)*"
+group = "Types"
+
+[[modules.items.members]]
+kind = "method"
+name = "typeName"
+code = "string typeName()"
+text = "The name of the value's type, for messages *(i.e. `5.typeName()` is `'number'`, `[1].typeName()` is `'list'`)*"
+group = "Types"
+
+[[modules.items.members]]
+kind = "method"
+name = "equals"
+code = "bool equals(any $other)"
+text = "Compares the contents, also for lists and maps *(i.e. `[1, 2].equals([1, 2])` is `true`)*"
+group = "Comparing and printing"
+
+[[modules.items.members]]
+kind = "method"
+name = "same?"
+code = "bool same?(any $other)"
+text = "`true` only for the same value: the same list, map or object, never two equal copies. Numbers, strings and bools are the same when they're equal *(i.e. `[1].same?([1])` is `false`)*"
+group = "Comparing and printing"
+
+[[modules.items.members]]
+kind = "method"
+name = "toString"
+code = "string toString()"
+text = "The value as text, the same that `outln` prints *(i.e. `[1, 2].toString()` is `'[1, 2]'`)*"
+group = "Comparing and printing"
+
+[[modules.items]]
+kind = "type"
+name = "string"
+code = "string"
+text = "Text, made of characters. Strings never change: every method returns a new string *(see Strings in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. Indexes count characters and start at 0."
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.groups]]
+name = "Searching"
+text = "All the `indexOf` methods return `null` when the text isn't found."
+
+[[modules.items.groups]]
+name = "Case"
+
+[[modules.items.groups]]
+name = "Trimming and padding"
+
+[[modules.items.groups]]
+name = "Changing"
+
+[[modules.items.groups]]
+name = "Splitting"
+
+[[modules.items.groups]]
+name = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "length"
+code = "number length()"
+text = "The number of characters *(i.e. `'año'.length()` is `3`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "empty?"
+code = "bool empty?()"
+text = "`true` if it has no characters *(i.e. `''.empty?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "blank?"
+code = "bool blank?()"
+text = "`true` if it's empty or only has whitespace *(i.e. `'  \\n'.blank?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "contains"
+code = "bool contains(string $text)"
+text = "`true` if `$text` appears anywhere *(i.e. `'backup.tar.gz'.contains('.tar')`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "startsWith"
+code = "bool startsWith(string $prefix)"
+text = "`true` if it starts with `$prefix` *(i.e. `'/usr/bin'.startsWith('/usr')`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "endsWith"
+code = "bool endsWith(string $suffix)"
+text = "`true` if it ends with `$suffix` *(i.e. `'notes.txt'.endsWith('.txt')`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "hasPrefix"
+code = "bool hasPrefix(string $prefix)"
+text = "Same as `startsWith`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "hasSuffix"
+code = "bool hasSuffix(string $suffix)"
+text = "Same as `endsWith`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "count"
+code = "number count(string $text)"
+text = "How many times `$text` appears, without overlapping *(i.e. `'banana'.count('an')` is `2`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "equalsIgnoreCase"
+code = "bool equalsIgnoreCase(string $other)"
+text = "Compares ignoring upper and lower case *(i.e. `'YES'.equalsIgnoreCase('yes')`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "upper?"
+code = "bool upper?()"
+text = "`true` if it has letters and all of them are upper case *(i.e. `'ABC1'.upper?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "lower?"
+code = "bool lower?()"
+text = "`true` if it has letters and all of them are lower case"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "numeric?"
+code = "bool numeric?()"
+text = "`true` if `toNumber()` would work on it *(i.e. `'-2.5'.numeric?()`, `'1e6'.numeric?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "digits?"
+code = "bool digits?()"
+text = "`true` if it's not empty and only has the digits 0 to 9 *(i.e. `'0042'.digits?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "alpha?"
+code = "bool alpha?()"
+text = "`true` if it's not empty and only has letters"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "alphanumeric?"
+code = "bool alphanumeric?()"
+text = "`true` if it's not empty and only has letters and digits"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "indexOf"
+code = "?number indexOf(string $text, number $from = 0)"
+text = "Position of the first `$text`, starting the search at `$from` *(i.e. `'a-b-c'.indexOf('-')` is `1`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "indexOfFirst"
+code = "?number indexOfFirst(string $text)"
+text = "Same as `indexOf` with no `$from`"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "indexOfLast"
+code = "?number indexOfLast(string $text)"
+text = "Position of the last `$text` *(i.e. `'a-b-c'.indexOfLast('-')` is `3`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "indexesOf"
+code = "list<number> indexesOf(string $text)"
+text = "Positions of every `$text` *(i.e. `'a-b-c'.indexesOf('-')` is `[1, 3]`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "before"
+code = "?string before(string $text)"
+text = "The part before the first `$text` *(i.e. `'key=value'.before('=')` is `'key'`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "after"
+code = "?string after(string $text)"
+text = "The part after the first `$text` *(i.e. `'key=value'.after('=')` is `'value'`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "beforeLast"
+code = "?string beforeLast(string $text)"
+text = "The part before the last `$text` *(i.e. `'archive.tar.gz'.beforeLast('.')` is `'archive.tar'`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "afterLast"
+code = "?string afterLast(string $text)"
+text = "The part after the last `$text` *(i.e. `'/home/me/notes.txt'.afterLast('/')` is `'notes.txt'`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "match"
+code = "?list<string> match(regex $pattern)"
+text = "The first match: the whole match, then each group. `null` if it doesn't match *(i.e. `'v1.2'.match(%r\"(\\d+)\\.(\\d+)\")` is `['1.2', '1', '2']`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "matchAll"
+code = "list<list<string>> matchAll(regex $pattern)"
+text = "Every match, each one like `match()` *(i.e. `'a1 b2'.matchAll(%r\"\\w(\\d)\")` is `[['a1', '1'], ['b2', '2']]`)*"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "upper"
+code = "string upper()"
+text = "All letters in upper case *(i.e. `'hello'.upper()` is `'HELLO'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "lower"
+code = "string lower()"
+text = "All letters in lower case"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "capitalize"
+code = "string capitalize()"
+text = "The first character in upper case, the rest as it was *(i.e. `'hello world'.capitalize()` is `'Hello world'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "capitalizeWords"
+code = "string capitalizeWords()"
+text = "The first letter of every word in upper case *(i.e. `'hello world'.capitalizeWords()` is `'Hello World'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "uncapitalize"
+code = "string uncapitalize()"
+text = "The first character in lower case *(i.e. `'Hello'.uncapitalize()` is `'hello'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "swapCase"
+code = "string swapCase()"
+text = "Upper case letters become lower case and the other way around"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "camelCase"
+code = "string camelCase()"
+text = "*(i.e. `'user name'.camelCase()` and `'user_name'.camelCase()` are `'userName'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "pascalCase"
+code = "string pascalCase()"
+text = "*(i.e. `'user name'.pascalCase()` is `'UserName'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "snakeCase"
+code = "string snakeCase()"
+text = "*(i.e. `'userName'.snakeCase()` is `'user_name'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "kebabCase"
+code = "string kebabCase()"
+text = "*(i.e. `'userName'.kebabCase()` is `'user-name'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "constantCase"
+code = "string constantCase()"
+text = "*(i.e. `'userName'.constantCase()` is `'USER_NAME'`)*"
+group = "Case"
+
+[[modules.items.members]]
+kind = "method"
+name = "trim"
+code = "string trim(string $characters = whitespace)"
+text = "Removes the whitespace, or the given characters, from both ends *(i.e. `'  hi \\n'.trim()` is `'hi'`, `'--hi--'.trim('-')` is `'hi'`)*"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "trimStart"
+code = "string trimStart(string $characters = whitespace)"
+text = "Same as `trim`, only at the start"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "trimEnd"
+code = "string trimEnd(string $characters = whitespace)"
+text = "Same as `trim`, only at the end"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "removePrefix"
+code = "string removePrefix(string $prefix)"
+text = "Removes `$prefix` once if it starts with it, otherwise returns it as it was *(i.e. `'v1.2'.removePrefix('v')` is `'1.2'`)*"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeSuffix"
+code = "string removeSuffix(string $suffix)"
+text = "Removes `$suffix` once if it ends with it *(i.e. `'web.log'.removeSuffix('.log')` is `'web'`)*"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "padStart"
+code = "string padStart(number $length, string $fill = ' ')"
+text = "Adds `$fill` at the start until it's `$length` characters long *(i.e. `'7'.padStart(3, '0')` is `'007'`)*"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "padEnd"
+code = "string padEnd(number $length, string $fill = ' ')"
+text = "Adds `$fill` at the end until it's `$length` characters long, useful for columns"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "center"
+code = "string center(number $length, string $fill = ' ')"
+text = "Adds `$fill` on both sides until it's `$length` characters long *(i.e. `'hi'.center(6, '*')` is `'**hi**'`)*"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "truncate"
+code = "string truncate(number $length, string $ending = '...')"
+text = "Cuts it to `$length` characters, `$ending` included, if it's longer *(i.e. `'Hello world'.truncate(8)` is `'Hello...'`)*"
+group = "Trimming and padding"
+
+[[modules.items.members]]
+kind = "method"
+name = "replace"
+code = "string replace(string $find, string $with)"
+text = "Replaces every `$find` *(i.e. `'a-b-c'.replace('-', '+')` is `'a+b+c'`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "replaceFirst"
+code = "string replaceFirst(string $find, string $with)"
+text = "Replaces only the first `$find`"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "replaceLast"
+code = "string replaceLast(string $find, string $with)"
+text = "Replaces only the last `$find`"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "remove"
+code = "string remove(string $find)"
+text = "Removes every `$find` *(i.e. `'1,000,000'.remove(',')` is `'1000000'`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "replaceMatches"
+code = "string replaceMatches(regex $pattern, string $with)"
+text = "Replaces every match of `$pattern`. `$1`, `$2`... in `$with` are its groups *(i.e. `'Smith, John'.replaceMatches(%r\"(\\w+), (\\w+)\", '$2 $1')` is `'John Smith'`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "replaceMatchesWith"
+code = "string replaceMatchesWith(regex $pattern, (list<string>) -> string $fn)"
+text = "Replaces every match with what `$fn` returns for it. `$fn` gets the match like `match()` does: the whole match, then each group *(i.e. `'a1 b22'.replaceMatchesWith(%r\"\\d+\", ($m) -> f\"<{$m[0]?.length()}>\")` is `'a<1> b<2>'`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "replaceFirstMatch"
+code = "string replaceFirstMatch(regex $pattern, string $with)"
+text = "Replaces only the first match"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "replaceLastMatch"
+code = "string replaceLastMatch(regex $pattern, string $with)"
+text = "Replaces only the last match"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeMatches"
+code = "string removeMatches(regex $pattern)"
+text = "Removes every match *(i.e. `'a1b22'.removeMatches(%r\"\\d\")` is `'ab'`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "insert"
+code = "string insert(number $index, string $text)"
+text = "Inserts `$text` at `$index` *(i.e. `'helo'.insert(3, 'l')` is `'hello'`)*. Throws an `IndexError` if `$index` is past the end"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "repeat"
+code = "string repeat(number $times)"
+text = "*(i.e. `'-'.repeat(20)`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "reverse"
+code = "string reverse()"
+text = "The characters in reverse order *(i.e. `'abc'.reverse()` is `'cba'`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "collapseWhitespace"
+code = "string collapseWhitespace()"
+text = "Trims it and turns every run of whitespace into one space *(i.e. `' a   b\\n c '.collapseWhitespace()` is `'a b c'`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "indent"
+code = "string indent(number $spaces = 4)"
+text = "Adds `$spaces` spaces at the start of every line that isn't empty"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "dedent"
+code = "string dedent()"
+text = "Removes the indentation all the lines share, like multi-line strings do"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "wrap"
+code = "string wrap(number $width)"
+text = "Breaks lines between words so none is longer than `$width`, when possible"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "split"
+code = "list<string> split(string $separator, ?number $limit = null)"
+text = "Splits at every `$separator`. With `$limit`, makes at most that many parts *(i.e. `'a,b,c'.split(',')` is `['a', 'b', 'c']`, `'a,b,c'.split(',', 2)` is `['a', 'b,c']`)*"
+group = "Splitting"
+
+[[modules.items.members]]
+kind = "method"
+name = "splitMatches"
+code = "list<string> splitMatches(regex $pattern, ?number $limit = null)"
+text = "Splits at every match of `$pattern` *(i.e. `'a, b;c'.splitMatches(%r\"[,;]\\s*\")` is `['a', 'b', 'c']`)*"
+group = "Splitting"
+
+[[modules.items.members]]
+kind = "method"
+name = "splitOnce"
+code = "?list<string> splitOnce(string $separator)"
+text = "The part before and the part after the first `$separator`, or `null` if it's not there *(i.e. `'key=a=b'.splitOnce('=')` is `['key', 'a=b']`)*"
+group = "Splitting"
+
+[[modules.items.members]]
+kind = "method"
+name = "lines"
+code = "list<string> lines()"
+text = "Splits at new lines, `\\n` or `\\r\\n`, without them. A last empty line is ignored *(i.e. `\"a\\nb\\n\".lines()` is `['a', 'b']`)*"
+group = "Splitting"
+
+[[modules.items.members]]
+kind = "method"
+name = "words"
+code = "list<string> words()"
+text = "Splits at any whitespace, ignoring empty parts *(i.e. `' a  b\\tc '.words()` is `['a', 'b', 'c']`)*"
+group = "Splitting"
+
+[[modules.items.members]]
+kind = "method"
+name = "chars"
+code = "list<string> chars()"
+text = "Every character as a one-character string *(i.e. `'abc'.chars()` is `['a', 'b', 'c']`)*"
+group = "Splitting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toNumber"
+code = "number toNumber()"
+text = "Reads a number in any of the literal forms *(i.e. `'42'`, `'-2.5'`, `'0xFF'`, `'1_000'`)*. Whitespace around it is ignored. Throws a `ValueError` otherwise"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toBool"
+code = "bool toBool()"
+text = "`'true'` and `'false'`, ignoring case. Throws a `ValueError` otherwise"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toSymbol"
+code = "symbol toSymbol()"
+text = "*(i.e. `'active'.toSymbol()` is `:active`)*. Throws a `ValueError` if it isn't a valid name"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "codePoint"
+code = "number codePoint(number $index = 0)"
+text = "The Unicode code of the character at `$index` *(i.e. `'A'.codePoint()` is `65`)*"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "escapeRegex"
+code = "string escapeRegex()"
+text = "Escapes the characters that mean something in a regex, so it can be matched literally *(i.e. `'1+1'.escapeRegex()` is `'1\\+1'`)*"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toString"
+code = "string toString()"
+text = "The same string"
+group = "Converting"
+
+[[modules.items]]
+kind = "type"
+name = "number"
+code = "number"
+text = "Any number, whole or with decimals *(see Number in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. Numbers never change: every method returns a new value."
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.groups]]
+name = "Rounding"
+
+[[modules.items.groups]]
+name = "Math"
+
+[[modules.items.groups]]
+name = "Formatting"
+
+[[modules.items.groups]]
+name = "Repeating"
+
+[[modules.items.members]]
+kind = "method"
+name = "even?"
+code = "bool even?()"
+text = "`true` for whole numbers divisible by 2 *(i.e. `4.even?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "odd?"
+code = "bool odd?()"
+text = "`true` for whole numbers not divisible by 2"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "whole?"
+code = "bool whole?()"
+text = "`true` if it has no decimals *(i.e. `4.0.whole?()` is `true`, `4.5.whole?()` is `false`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "positive?"
+code = "bool positive?()"
+text = "`true` if it's bigger than 0"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "negative?"
+code = "bool negative?()"
+text = "`true` if it's smaller than 0"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "zero?"
+code = "bool zero?()"
+text = "`true` if it's 0"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "nan?"
+code = "bool nan?()"
+text = "`true` if it's `NaN` *(i.e. `(0 / 0).nan?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "infinite?"
+code = "bool infinite?()"
+text = "`true` if it's `Infinity` or `-Infinity`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "finite?"
+code = "bool finite?()"
+text = "`true` if it's neither `NaN` nor infinite"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "between"
+code = "bool between(number $min, number $max)"
+text = "`true` if it's from `$min` to `$max`, both included *(i.e. `5.between(1, 10)`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "round"
+code = "number round(number $decimals = 0)"
+text = "Rounds to the nearest, halves away from zero *(i.e. `2.5.round()` is `3`, `3.14159.round(2)` is `3.14`)*"
+group = "Rounding"
+
+[[modules.items.members]]
+kind = "method"
+name = "floor"
+code = "number floor()"
+text = "Rounds down *(i.e. `2.7.floor()` is `2`, `(-2.1).floor()` is `-3`)*"
+group = "Rounding"
+
+[[modules.items.members]]
+kind = "method"
+name = "ceil"
+code = "number ceil()"
+text = "Rounds up *(i.e. `2.1.ceil()` is `3`)*"
+group = "Rounding"
+
+[[modules.items.members]]
+kind = "method"
+name = "truncate"
+code = "number truncate()"
+text = "Removes the decimals *(i.e. `(-2.7).truncate()` is `-2`)*"
+group = "Rounding"
+
+[[modules.items.members]]
+kind = "method"
+name = "abs"
+code = "number abs()"
+text = "The value without its sign *(i.e. `(-5).abs()` is `5`)*"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "sign"
+code = "number sign()"
+text = "`-1`, `0` or `1`"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "min"
+code = "number min(number $other)"
+text = "The smaller of the two *(i.e. `5.min(3)` is `3`)*"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "max"
+code = "number max(number $other)"
+text = "The bigger of the two"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "clamp"
+code = "number clamp(number $min, number $max)"
+text = "Keeps it between `$min` and `$max` *(i.e. `150.clamp(0, 100)` is `100`)*"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "div"
+code = "number div(number $by)"
+text = "Division without decimals, truncated like Java's *(i.e. `7.div(2)` is `3`)*. Throws an `ArithmeticError` if `$by` is 0"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "mod"
+code = "number mod(number $by)"
+text = "Remainder with the sign of `$by`, unlike `%` *(i.e. `(-1).mod(5)` is `4`, `-1 % 5` is `-1`)*. Useful for wrapping around. Throws an `ArithmeticError` if `$by` is 0"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "sqrt"
+code = "number sqrt()"
+text = "Square root. Negative numbers give `NaN`"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "log"
+code = "number log(?number $base = null)"
+text = "Logarithm, natural without a `$base` *(i.e. `100.log(10)` is `2`)*"
+group = "Math"
+
+[[modules.items.members]]
+kind = "method"
+name = "toString"
+code = "string toString(number $base = 10)"
+text = "*(i.e. `255.toString()` is `'255'`, `255.toString(16)` is `'ff'`, `5.toString(2)` is `'101'`)*. Bases other than 10 only work with whole numbers"
+group = "Formatting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toFixed"
+code = "string toFixed(number $decimals)"
+text = "Always shows `$decimals` decimals *(i.e. `2.5.toFixed(2)` is `'2.50'`)*"
+group = "Formatting"
+
+[[modules.items.members]]
+kind = "method"
+name = "withSeparators"
+code = "string withSeparators(string $separator = ',')"
+text = "Groups thousands *(i.e. `1234567.withSeparators()` is `'1,234,567'`)*"
+group = "Formatting"
+
+[[modules.items.members]]
+kind = "method"
+name = "formatBytes"
+code = "string formatBytes()"
+text = "A size in bytes, readable *(i.e. `1536.formatBytes()` is `'1.5 KB'`, `3_000_000_000.formatBytes()` is `'2.8 GB'`)*"
+group = "Formatting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toChar"
+code = "string toChar()"
+text = "The character with this Unicode code *(i.e. `65.toChar()` is `'A'`)*"
+group = "Formatting"
+
+[[modules.items.members]]
+kind = "method"
+name = "times"
+code = "void times((number) -> void $fn)"
+text = "Calls `$fn` this many times, with the count from 0 *(i.e. `3.times(($i) -> outln($i))`)*"
+group = "Repeating"
+
+[[modules.items]]
+kind = "type"
+name = "bool"
+code = "bool"
+text = "`true` or `false`. A `bool` is never used as a number, but it can be converted to one on purpose."
+
+[[modules.items.groups]]
+name = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toNumber"
+code = "number toNumber()"
+text = "`1` for `true`, `0` for `false`"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toString"
+code = "string toString()"
+text = "`'true'` or `'false'`"
+group = "Converting"
+
+[[modules.items]]
+kind = "type"
+name = "list"
+code = "list"
+text = "`list<T>`: values in order, starting at index 0 *(see List in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. Verbs change the list itself, past participles return a copy *(i.e. `sort()` and `sorted()`)*."
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.groups]]
+name = "Getting"
+text = "`$list[$index]` is the element at `$index`, or `null` outside the list, so `$list[$index] ?? $default` gives a default."
+
+[[modules.items.groups]]
+name = "Adding and removing"
+text = "These change the list."
+
+[[modules.items.groups]]
+name = "Ordering"
+
+[[modules.items.groups]]
+name = "Transforming"
+text = "These always return a new list."
+
+[[modules.items.groups]]
+name = "Grouping"
+
+[[modules.items.groups]]
+name = "Searching"
+
+[[modules.items.groups]]
+name = "Combining"
+
+[[modules.items.groups]]
+name = "Looping"
+
+[[modules.items.members]]
+kind = "method"
+name = "length"
+code = "number length()"
+text = "The number of elements"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "empty?"
+code = "bool empty?()"
+text = "`true` if it has no elements"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "contains"
+code = "bool contains(T $value)"
+text = "`true` if `$value` is in the list, comparing contents. Same as `-in`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "indexOf"
+code = "?number indexOf(T $value)"
+text = "Position of the first `$value`, or `null` *(i.e. `['a', 'b', 'a'].indexOf('a')` is `0`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "indexOfLast"
+code = "?number indexOfLast(T $value)"
+text = "Position of the last `$value`, or `null`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "count"
+code = "number count(T $value)"
+text = "How many times `$value` is in the list"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "countWhere"
+code = "number countWhere((T) -> bool $fn)"
+text = "How many elements `$fn` returns `true` for *(i.e. `$ages.countWhere(($a) -> $a >= 18)`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "first"
+code = "?T first()"
+text = "The first element, or `null` if the list is empty"
+group = "Getting"
+
+[[modules.items.members]]
+kind = "method"
+name = "last"
+code = "?T last()"
+text = "The last element, or `null` if the list is empty"
+group = "Getting"
+
+[[modules.items.members]]
+kind = "method"
+name = "random"
+code = "?T random()"
+text = "A random element, or `null` if the list is empty"
+group = "Getting"
+
+[[modules.items.members]]
+kind = "method"
+name = "push"
+code = "list<T> push(...T $values)"
+text = "Adds the values at the end, same as `<<`. Returns the list *(i.e. `$list.push(1, 2)`)*"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "prepend"
+code = "list<T> prepend(...T $values)"
+text = "Adds the values at the start. Returns the list"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "insert"
+code = "list<T> insert(number $index, T $value)"
+text = "Inserts `$value` at `$index`, moving the rest. Throws an `IndexError` if `$index` is past the end"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "extend"
+code = "list<T> extend(list<T> $other)"
+text = "Adds every element of `$other` at the end"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeFirst"
+code = "?T removeFirst()"
+text = "Removes and returns the first element, or `null` if the list is empty"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeLast"
+code = "?T removeLast()"
+text = "Removes and returns the last element, or `null` if the list is empty"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeAt"
+code = "T removeAt(number $index)"
+text = "Removes and returns the element at `$index`. Throws an `IndexError` if it's outside the list"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "remove"
+code = "bool remove(T $value)"
+text = "Removes the first `$value`. `true` if it was there"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeAll"
+code = "number removeAll(T $value)"
+text = "Removes every `$value`, and returns how many there were"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeWhere"
+code = "number removeWhere((T) -> bool $fn)"
+text = "Removes the elements `$fn` returns `true` for, and returns how many there were"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "clear"
+code = "void clear()"
+text = "Removes everything"
+group = "Adding and removing"
+
+[[modules.items.members]]
+kind = "method"
+name = "sort"
+code = "list<T> sort()"
+text = "Sorts the list from smallest to biggest, using `<`. Returns the list"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "sorted"
+code = "list<T> sorted()"
+text = "A sorted copy"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortBy<K>((T) -> K $key)"
+code = "list<T> sortBy<K>((T) -> K $key)"
+text = "Sorts the list by what `$key` returns *(i.e. `$files.sortBy(($f) -> $f.length())`)*"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortedBy<K>((T) -> K $key)"
+code = "list<T> sortedBy<K>((T) -> K $key)"
+text = "A copy sorted by what `$key` returns"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortWith"
+code = "list<T> sortWith((T, T) -> number $compare)"
+text = "Sorts the list with a comparison function, which returns a negative number if the first value goes first, a positive one if the second does, and `0` if they're equal. For values `<` can't compare, like lists *(i.e. `$words.sortWith(($a, $b) -> $a.length() - $b.length())`)*. To sort by a part of each value, `sortBy` is shorter: `$rows.sortBy(($r) -> $r[0])`. The sort is stable, so equal values keep their order. Returns the list"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortedWith"
+code = "list<T> sortedWith((T, T) -> number $compare)"
+text = "A copy sorted with a comparison function"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "reverse"
+code = "list<T> reverse()"
+text = "Reverses the list. Returns the list"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "reversed"
+code = "list<T> reversed()"
+text = "A reversed copy"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "shuffle"
+code = "list<T> shuffle()"
+text = "Puts the elements in random order. Returns the list"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "shuffled"
+code = "list<T> shuffled()"
+text = "A copy in random order"
+group = "Ordering"
+
+[[modules.items.members]]
+kind = "method"
+name = "map"
+code = "list<U> map((T) -> U $fn)"
+text = "`$fn` applied to every element *(i.e. `$names.map(($n) -> $n.upper())`)*"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "filter"
+code = "list<T> filter((T) -> bool $fn)"
+text = "The elements `$fn` returns `true` for"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "reject"
+code = "list<T> reject((T) -> bool $fn)"
+text = "The elements `$fn` returns `false` for"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "flatMap"
+code = "list<U> flatMap((T) -> list<U> $fn)"
+text = "Like `map`, joining the lists `$fn` returns *(i.e. `$lines.flatMap(($l) -> $l.words())`)*"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "flatten"
+code = "list<U> flatten()"
+text = "For a `list<list<U>>`: joins the lists inside it *(i.e. `[[1, 2], [3]].flatten()` is `[1, 2, 3]`)*. Throws a `TypeError` if an element isn't a list"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "unique"
+code = "list<T> unique()"
+text = "Without repeated values, keeping the first of each *(i.e. `[1, 2, 1].unique()` is `[1, 2]`)*"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "uniqueBy<K>((T) -> K $key)"
+code = "list<T> uniqueBy<K>((T) -> K $key)"
+text = "Without elements with a repeated `$key`"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "compact"
+code = "list<T> compact()"
+text = "Without the `null` values. A `list<?T>` becomes a `list<T>`"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "take"
+code = "list<T> take(number $count)"
+text = "The first `$count` elements, or all of them if there are fewer"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "skip"
+code = "list<T> skip(number $count)"
+text = "Everything but the first `$count` elements"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "takeWhile"
+code = "list<T> takeWhile((T) -> bool $fn)"
+text = "The elements from the start, until `$fn` returns `false`"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "skipWhile"
+code = "list<T> skipWhile((T) -> bool $fn)"
+text = "The elements after the ones at the start that `$fn` returns `true` for"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "chunk"
+code = "list<list<T>> chunk(number $size)"
+text = "Splits it in lists of `$size` elements, the last one can be shorter *(i.e. `[1, 2, 3].chunk(2)` is `[[1, 2], [3]]`)*"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "concat"
+code = "list<T> concat(list<T> $other)"
+text = "This list followed by `$other`"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "copy"
+code = "list<T> copy()"
+text = "A copy of the list. The elements themselves aren't copied"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "groupBy"
+code = "map<K, list<T>> groupBy((T) -> K $key)"
+text = "The elements grouped by what `$key` returns *(i.e. `$files.groupBy(($f) -> $f.afterLast('.'))`)*"
+group = "Grouping"
+
+[[modules.items.members]]
+kind = "method"
+name = "countBy"
+code = "map<K, number> countBy((T) -> K $key)"
+text = "How many elements give each `$key` *(i.e. `$words.countBy(($w) -> $w.lower())`)*"
+group = "Grouping"
+
+[[modules.items.members]]
+kind = "method"
+name = "partition"
+code = "list<list<T>> partition((T) -> bool $fn)"
+text = "Two lists: the elements `$fn` returns `true` for, and the rest *(i.e. `let [$adults, $kids] = $ages.partition(($a) -> $a >= 18);`)*"
+group = "Grouping"
+
+[[modules.items.members]]
+kind = "method"
+name = "toMap"
+code = "map<K, T> toMap((T) -> K $key)"
+text = "A map from what `$key` returns to each element. If two give the same key, the last one is kept"
+group = "Grouping"
+
+[[modules.items.members]]
+kind = "method"
+name = "find"
+code = "?T find((T) -> bool $fn)"
+text = "The first element `$fn` returns `true` for, or `null`"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "findLast"
+code = "?T findLast((T) -> bool $fn)"
+text = "The last element `$fn` returns `true` for, or `null`"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "findIndex"
+code = "?number findIndex((T) -> bool $fn)"
+text = "The position of the first element `$fn` returns `true` for, or `null`"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "any"
+code = "bool any((T) -> bool $fn)"
+text = "`true` if `$fn` returns `true` for at least one element"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "all"
+code = "bool all((T) -> bool $fn)"
+text = "`true` if `$fn` returns `true` for every element. `true` for an empty list"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "none"
+code = "bool none((T) -> bool $fn)"
+text = "`true` if `$fn` returns `true` for no element"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "join"
+code = "string join(string $separator = '')"
+text = "The elements as text, with `$separator` between them *(i.e. `['a', 'b'].join(', ')` is `'a, b'`)*"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "reduce"
+code = "?T reduce((T, T) -> T $fn)"
+text = "Combines the elements from left to right, starting with the first one. `null` if the list is empty *(i.e. `$parts.reduce(($a, $b) -> $a + '/' + $b)`)*"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "fold"
+code = "U fold(U $initial, (U, T) -> U $fn)"
+text = "Like `reduce`, starting from `$initial`"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "sum"
+code = "number sum()"
+text = "The sum, for a `list<number>`. `0` for an empty list"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "product"
+code = "number product()"
+text = "The product, for a `list<number>`. `1` for an empty list"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "average"
+code = "?number average()"
+text = "The average, for a `list<number>`. `null` for an empty list"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "min"
+code = "?T min()"
+text = "The smallest element, using `<`, or `null`"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "max"
+code = "?T max()"
+text = "The biggest element, using `<`, or `null`"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "minBy<K>((T) -> K $key)"
+code = "?T minBy<K>((T) -> K $key)"
+text = "The element with the smallest `$key`, or `null`"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "maxBy<K>((T) -> K $key)"
+code = "?T maxBy<K>((T) -> K $key)"
+text = "The element with the biggest `$key`, or `null` *(i.e. `$files.maxBy(($f) -> $f.size())`)*"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
+name = "each"
+code = "void each((T) -> void $fn)"
+text = "Calls `$fn` with every element. Usually a `for` loop reads better"
+group = "Looping"
+
+[[modules.items.members]]
+kind = "method"
+name = "eachWithIndex"
+code = "void eachWithIndex((T, number) -> void $fn)"
+text = "Calls `$fn` with every element and its position"
+group = "Looping"
+
+[[modules.items]]
+kind = "type"
+name = "map"
+code = "map"
+text = "`map<K, V>`: keys and their values, in the order they were added *(see Map in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. Verbs change the map itself, past participles return a copy *(i.e. `merge()` and `merged()`)*. Functions passed to the methods get the key and the value."
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.groups]]
+name = "Getting"
+text = "`$map[$key]` is the value of `$key`, or `null` when it isn't there, so `$map[$key] ?? $default` gives a default *(i.e. `$config['port'] ?? 8080`)*."
+
+[[modules.items.groups]]
+name = "Changing"
+text = "These change the map."
+
+[[modules.items.groups]]
+name = "Transforming"
+text = "These always return a new map."
+
+[[modules.items.groups]]
+name = "Searching"
+
+[[modules.items.groups]]
+name = "Looping"
+
+[[modules.items.members]]
+kind = "method"
+name = "length"
+code = "number length()"
+text = "The number of keys"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "empty?"
+code = "bool empty?()"
+text = "`true` if it has no keys"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "has"
+code = "bool has(K $key)"
+text = "`true` if `$key` is in the map, even if its value is `null`. Same as `-in`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "hasValue"
+code = "bool hasValue(V $value)"
+text = "`true` if some key has `$value`, comparing contents"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "keys"
+code = "list<K> keys()"
+text = "The keys, in order"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "values"
+code = "list<V> values()"
+text = "The values, in order"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "keyOf"
+code = "?K keyOf(V $value)"
+text = "The first key with `$value`, or `null`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "getOrSet"
+code = "V getOrSet(K $key, V $default)"
+text = "The value of `$key`. If it's not there, it's set to `$default` first *(i.e. `$groups.getOrSet($ext, []) << $file;`)*"
+group = "Getting"
+
+[[modules.items.members]]
+kind = "method"
+name = "first"
+code = "?K first()"
+text = "The first key, or `null` if the map is empty"
+group = "Getting"
+
+[[modules.items.members]]
+kind = "method"
+name = "last"
+code = "?K last()"
+text = "The last key, or `null` if the map is empty"
+group = "Getting"
+
+[[modules.items.members]]
+kind = "method"
+name = "set"
+code = "map<K, V> set(K $key, V $value)"
+text = "Same as `$map[$key] = $value`. Returns the map"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "update"
+code = "V update(K $key, V $default, (V) -> V $fn)"
+text = "Sets `$key` to what `$fn` returns for its value, or for `$default` if it's not there. Returns the new value *(i.e. `$counts.update($word, 0, ($n) -> $n + 1)`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "remove"
+code = "?V remove(K $key)"
+text = "Removes `$key` and returns its value, or `null` if it wasn't there"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "removeWhere"
+code = "number removeWhere((K, V) -> bool $fn)"
+text = "Removes the keys `$fn` returns `true` for, and returns how many there were"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "merge"
+code = "map<K, V> merge(map<K, V> $other)"
+text = "Adds the keys of `$other`, replacing the ones that already exist. Returns the map"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "clear"
+code = "void clear()"
+text = "Removes everything"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortByKey"
+code = "map<K, V> sortByKey()"
+text = "Reorders the keys from smallest to biggest. Returns the map"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortBy<S>((K, V) -> S $key)"
+code = "map<K, V> sortBy<S>((K, V) -> S $key)"
+text = "Reorders the keys by what `$key` returns *(i.e. `$scores.sortBy(($name, $score) -> -$score)`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "merged"
+code = "map<K, V> merged(map<K, V> $other)"
+text = "A copy with the keys of `$other` added, replacing the ones that already exist *(i.e. `$defaults.merged($userConfig)`)*"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "filter"
+code = "map<K, V> filter((K, V) -> bool $fn)"
+text = "The keys `$fn` returns `true` for"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "reject"
+code = "map<K, V> reject((K, V) -> bool $fn)"
+text = "The keys `$fn` returns `false` for"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "mapValues"
+code = "map<K, U> mapValues((V) -> U $fn)"
+text = "The same keys, with `$fn` applied to each value *(i.e. `$sizes.mapValues(($s) -> $s.formatBytes())`)*"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "mapKeys"
+code = "map<J, V> mapKeys((K) -> J $fn)"
+text = "`$fn` applied to each key. If two give the same key, the last one is kept"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "map"
+code = "list<U> map((K, V) -> U $fn)"
+text = "A list with what `$fn` returns for each key and value *(i.e. `$env.map(($k, $v) -> f\"{$k}={$v}\")`)*"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "invert"
+code = "map<V, K> invert()"
+text = "Values become keys and keys become values"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortedByKey"
+code = "map<K, V> sortedByKey()"
+text = "A copy with the keys from smallest to biggest"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "sortedBy<S>((K, V) -> S $key)"
+code = "map<K, V> sortedBy<S>((K, V) -> S $key)"
+text = "A copy ordered by what `$key` returns"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "copy"
+code = "map<K, V> copy()"
+text = "A copy of the map. The values themselves aren't copied"
+group = "Transforming"
+
+[[modules.items.members]]
+kind = "method"
+name = "find"
+code = "?K find((K, V) -> bool $fn)"
+text = "The first key `$fn` returns `true` for, or `null`"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "any"
+code = "bool any((K, V) -> bool $fn)"
+text = "`true` if `$fn` returns `true` for at least one key"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "all"
+code = "bool all((K, V) -> bool $fn)"
+text = "`true` if `$fn` returns `true` for every key. `true` for an empty map"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "none"
+code = "bool none((K, V) -> bool $fn)"
+text = "`true` if `$fn` returns `true` for no key"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "countWhere"
+code = "number countWhere((K, V) -> bool $fn)"
+text = "How many keys `$fn` returns `true` for"
+group = "Searching"
+
+[[modules.items.members]]
+kind = "method"
+name = "each"
+code = "void each((K, V) -> void $fn)"
+text = "Calls `$fn` with every key and value. Usually a `for` loop reads better"
+group = "Looping"
+
+[[modules.items]]
+kind = "type"
+name = "range"
+code = "range"
+text = "Whole numbers from a start to an end, like `1..5` or `1..=5` *(see Ranges in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. Ranges never change: every method returns a new value."
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.groups]]
+name = "Changing"
+
+[[modules.items.groups]]
+name = "Using the numbers"
+
+[[modules.items.members]]
+kind = "method"
+name = "start"
+code = "number start()"
+text = "*(i.e. `(1..5).start()` is `1`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "end"
+code = "number end()"
+text = "*(i.e. `(1..5).end()` is `5`, even though 5 isn't included)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "inclusive?"
+code = "bool inclusive?()"
+text = "`true` if it was written with `..=`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "length"
+code = "number length()"
+text = "How many numbers it has *(i.e. `(1..5).length()` is `4`, `(0..10).step(5).length()` is `2`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "empty?"
+code = "bool empty?()"
+text = "`true` if it has no numbers *(i.e. `(3..3).empty?()`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "contains"
+code = "bool contains(number $n)"
+text = "`true` if `$n` is one of its numbers. Same as `-in`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "first"
+code = "?number first()"
+text = "The first number, or `null` if it's empty"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "last"
+code = "?number last()"
+text = "The last number, or `null` if it's empty *(i.e. `(1..5).last()` is `4`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "step"
+code = "range step(number $step)"
+text = "A range that skips by `$step`. The step is always positive *(i.e. `(1..10).step(2)` is 1, 3, 5, 7, 9)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "reverse"
+code = "range reverse()"
+text = "The same numbers in the other direction *(i.e. `(1..=5).reverse()` is `5..=1`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
+name = "toList"
+code = "list<number> toList()"
+text = "*(i.e. `(1..=3).toList()` is `[1, 2, 3]`)*"
+group = "Using the numbers"
+
+[[modules.items.members]]
+kind = "method"
+name = "map"
+code = "list<U> map((number) -> U $fn)"
+text = "`$fn` applied to every number *(i.e. `(1..=3).map(($n) -> $n * $n)` is `[1, 4, 9]`)*"
+group = "Using the numbers"
+
+[[modules.items.members]]
+kind = "method"
+name = "filter"
+code = "list<number> filter((number) -> bool $fn)"
+text = "The numbers `$fn` returns `true` for"
+group = "Using the numbers"
+
+[[modules.items.members]]
+kind = "method"
+name = "sum"
+code = "number sum()"
+text = "The sum of its numbers"
+group = "Using the numbers"
+
+[[modules.items.members]]
+kind = "method"
+name = "random"
+code = "?number random()"
+text = "A random number from it, or `null` if it's empty *(i.e. `(1..=6).random()`)*"
+group = "Using the numbers"
+
+[[modules.items.members]]
+kind = "method"
+name = "each"
+code = "void each((number) -> void $fn)"
+text = "Calls `$fn` with every number. Usually a `for` loop reads better"
+group = "Using the numbers"
+
+[[modules.items]]
+kind = "type"
+name = "symbol"
+code = "symbol"
+text = "*To be removed: enums and strings replace them (see Backlog in [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)).*\n\nA fixed name, like `:active` *(see Symbols in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*."
+
+[[modules.items.groups]]
+name = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "name"
+code = "string name()"
+text = "The name without the `:` *(i.e. `:active.name()` is `'active'`)*"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toString"
+code = "string toString()"
+text = "Same as `name()`"
+group = "Converting"
+
+[[modules.items]]
+kind = "type"
+name = "regex"
+code = "regex"
+text = "A regular expression, written `%r\"...\"` *(see Regex in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. Matching is done with `-match` and with the string methods `match()`, `matchAll()`, `replaceMatches()`, `replaceFirstMatch()`, `replaceLastMatch()`, `removeMatches()` and `splitMatches()` *(see [`string`](types.string.html))*."
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "pattern"
+code = "string pattern()"
+text = "The pattern as it was written *(i.e. `%r\"^\\d+$\"i.pattern()` is `'^\\d+$'`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "flags"
+code = "string flags()"
+text = "The flags *(i.e. `%r\"^\\d+$\"i.flags()` is `'i'`)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "toString"
+code = "string toString()"
+text = "The regex as it's written in code *(i.e. `'%r\"^\\d+$\"i'`)*"
+group = "Information"
+
+[[modules.items]]
+kind = "type"
+name = "command"
+code = "command"
+text = "A shell command created with `%x\"...\"` *(see Command in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. It only runs when `run()`, `output()`, `lines()` or `status()` is called. The setup methods return the same command, so they can be chained."
+
+[[modules.items.groups]]
+name = "Running"
+text = "A program that can't be started *(i.e. it isn't installed)* throws a `CommandFailed` too."
+
+[[modules.items.groups]]
+name = "Setting up"
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "run"
+code = "void run()"
+text = "Runs it, with its output going straight to the terminal *(i.e. `%x\"cargo build\".run()`)*. Throws a `CommandFailed` if the exit code isn't 0"
+group = "Running"
+
+[[modules.items.members]]
+kind = "method"
+name = "output"
+code = "string output()"
+text = "Runs it and returns what it wrote to stdout, without the last new line. stderr still goes to the terminal. Throws a `CommandFailed` if the exit code isn't 0"
+group = "Running"
+
+[[modules.items.members]]
+kind = "method"
+name = "lines"
+code = "list<string> lines()"
+text = "Same as `output().lines()` *(i.e. `%x\"git ls-files\".lines()`)*"
+group = "Running"
+
+[[modules.items.members]]
+kind = "method"
+name = "status"
+code = "number status()"
+text = "Runs it like `run()` and returns the exit code. Never throws for the exit code *(i.e. `%x\"grep -q {$word} {$file}\".status() == 0`)*"
+group = "Running"
+
+[[modules.items.members]]
+kind = "method"
+name = "succeeds?"
+code = "bool succeeds?()"
+text = "Runs it without showing its output, and returns `true` if the exit code is 0 *(i.e. `%x\"which docker\".succeeds?()`)*"
+group = "Running"
+
+[[modules.items.members]]
+kind = "method"
+name = "cwd"
+code = "command cwd(string $path)"
+text = "Runs it in another folder"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "env"
+code = "command env(string $name, string $value)"
+text = "Sets an environment variable only for this command"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "envs"
+code = "command envs(map<string, string> $vars)"
+text = "Sets several environment variables only for this command"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "input"
+code = "command input(string $text)"
+text = "Sends `$text` to its stdin *(i.e. `%x\"sort\".input($names.join(\"\\n\")).output()`)*"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "quiet"
+code = "command quiet()"
+text = "Hides its stderr"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "pipe"
+code = "command pipe(command $next)"
+text = "A pipeline: its output goes to `$next`'s input *(i.e. `%x\"git ls-files\".pipe(%x\"sort\")`)*. It fails when any of its commands does"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "writeTo"
+code = "command writeTo(string $path)"
+text = "Writes its output to a file instead of the terminal, like `>`. `output()` can't be used then"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "appendTo"
+code = "command appendTo(string $path)"
+text = "Adds its output to the end of a file, like `>>`"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "readFrom"
+code = "command readFrom(string $path)"
+text = "Reads its input from a file, like `<`"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "timeout"
+code = "command timeout(number $seconds)"
+text = "Stops it after `$seconds` and throws a `CommandFailed`"
+group = "Setting up"
+
+[[modules.items.members]]
+kind = "method"
+name = "toString"
+code = "string toString()"
+text = "The command as the shell will receive it, with the values already quoted. Useful to print it before running it"
+group = "Information"
+
+[[modules]]
+short = "fs"
+path = "std/fs"
+title = "std/fs"
+text = "Files and folders on disk. `use std/fs;`, then `fs::read($path)`. Paths are strings, relative to the current folder unless they're absolute *(see [`std/path`](path.html) to build them)*.\n\nEvery function throws when the disk says no: `FileNotFound` if the path doesn't exist, `PermissionDenied` if it can't be read or written, and `IOError` for anything else."
+
+[[modules.groups]]
+name = "Reading"
+
+[[modules.groups]]
+name = "Writing"
+
+[[modules.groups]]
+name = "Information"
+
+[[modules.groups]]
+name = "Folders"
+
+[[modules.groups]]
+name = "Copying, moving and removing"
+
+[[modules.items]]
+kind = "function"
+name = "read"
+code = "string read(string $path)"
+text = "The whole file as text. Throws a `ValueError` if it isn't valid UTF-8 *(i.e. `fs::read('notes.txt')`)*"
+group = "Reading"
+
+[[modules.items]]
+kind = "function"
+name = "readLines"
+code = "list<string> readLines(string $path)"
+text = "The lines of the file, without their new lines, like `read($path).lines()`"
+group = "Reading"
+
+[[modules.items]]
+kind = "function"
+name = "write"
+code = "void write(string $path, string $text)"
+text = "Replaces the file with `$text`, creating it if needed. The folder must exist"
+group = "Writing"
+
+[[modules.items]]
+kind = "function"
+name = "append"
+code = "void append(string $path, string $text)"
+text = "Adds `$text` at the end of the file, creating it if needed"
+group = "Writing"
+
+[[modules.items]]
+kind = "function"
+name = "writeLines"
+code = "void writeLines(string $path, list<string> $lines)"
+text = "Writes the lines with a new line after each one"
+group = "Writing"
+
+[[modules.items]]
+kind = "function"
+name = "exists?"
+code = "bool exists?(string $path)"
+text = "`true` if something is there: a file, a folder or a link. Never throws"
+group = "Information"
+
+[[modules.items]]
+kind = "function"
+name = "file?"
+code = "bool file?(string $path)"
+text = "Same as `-f $path`"
+group = "Information"
+
+[[modules.items]]
+kind = "function"
+name = "dir?"
+code = "bool dir?(string $path)"
+text = "Same as `-d $path`"
+group = "Information"
+
+[[modules.items]]
+kind = "function"
+name = "link?"
+code = "bool link?(string $path)"
+text = "`true` if it's a symbolic link, without following it"
+group = "Information"
+
+[[modules.items]]
+kind = "function"
+name = "size"
+code = "number size(string $path)"
+text = "The size in bytes *(i.e. `fs::size($path).formatBytes()`)*"
+group = "Information"
+
+[[modules.items]]
+kind = "function"
+name = "modified"
+code = "number modified(string $path)"
+text = "When it was last changed, in seconds since 1970. Comparable with `time::now() / 1000`. It becomes a date once `std/time` has dates"
+group = "Information"
+
+[[modules.items]]
+kind = "function"
+name = "mode"
+code = "number mode(string $path)"
+text = "The Unix permissions *(i.e. `0o644`)*. On Windows, `0o444` or `0o666`"
+group = "Information"
+
+[[modules.items]]
+kind = "function"
+name = "list"
+code = "list<string> list(string $path = '.')"
+text = "The names of what's inside the folder, sorted, without `.` and `..` *(i.e. `['a.txt', 'docs']`)*"
+group = "Folders"
+
+[[modules.items]]
+kind = "function"
+name = "walk"
+code = "list<string> walk(string $path = '.')"
+text = "The paths of every file inside the folder and its subfolders, sorted, starting with `$path` *(i.e. `['src/main.lks', 'src/util/text.lks']`)*"
+group = "Folders"
+
+[[modules.items]]
+kind = "function"
+name = "glob"
+code = "list<string> glob(string $pattern)"
+text = "The paths that match a pattern, sorted. `*` and `?` work like in `-like` without crossing a `/`, and `**` matches any number of folders *(i.e. `fs::glob('src/**/*.lks')`)*. Like in the shell, names starting with `.` only match when the pattern starts with `.`"
+group = "Folders"
+
+[[modules.items]]
+kind = "function"
+name = "makeDir"
+code = "void makeDir(string $path)"
+text = "Creates the folder and the folders above it that are missing. Does nothing if it already exists"
+group = "Folders"
+
+[[modules.items]]
+kind = "function"
+name = "tempDir"
+code = "string tempDir()"
+text = "Creates a new empty folder in the system's temporary folder and returns its path"
+group = "Folders"
+
+[[modules.items]]
+kind = "function"
+name = "tempFile"
+code = "string tempFile(string $extension = '')"
+text = "Creates a new empty file in the system's temporary folder and returns its path *(i.e. `fs::tempFile('.json')`)*"
+group = "Folders"
+
+[[modules.items]]
+kind = "function"
+name = "copy"
+code = "void copy(string $from, string $to)"
+text = "Copies a file, replacing `$to` if it exists. A folder is copied with everything inside it"
+group = "Copying, moving and removing"
+
+[[modules.items]]
+kind = "function"
+name = "move"
+code = "void move(string $from, string $to)"
+text = "Moves or renames a file or a folder, replacing a file at `$to`"
+group = "Copying, moving and removing"
+
+[[modules.items]]
+kind = "function"
+name = "remove"
+code = "void remove(string $path)"
+text = "Removes a file, a link or an empty folder. Does nothing if it doesn't exist"
+group = "Copying, moving and removing"
+
+[[modules.items]]
+kind = "function"
+name = "removeAll"
+code = "void removeAll(string $path)"
+text = "Removes a folder with everything inside it. Does nothing if it doesn't exist"
+group = "Copying, moving and removing"
+
+[[modules.items]]
+kind = "function"
+name = "setMode"
+code = "void setMode(string $path, number $mode)"
+text = "Changes the Unix permissions *(i.e. `fs::setMode($script, 0o755)`)*. On Windows it only changes whether the file is read-only"
+group = "Copying, moving and removing"
+
+[[modules.items]]
+kind = "function"
+name = "link"
+code = "void link(string $target, string $path)"
+text = "Creates a symbolic link at `$path` pointing to `$target`"
+group = "Copying, moving and removing"
+
+[[modules]]
+short = "path"
+path = "std/path"
+title = "std/path"
+text = "Working with paths as text. `use std/path;`, then `path::join($dir, 'notes.txt')`. These functions never touch the disk, so they never throw because of it *(see [`std/fs`](fs.html) for that)*.\n\nPaths use `/` on every system. On Windows, `\\` is accepted too."
+
+[[modules.groups]]
+name = "Building"
+
+[[modules.groups]]
+name = "Parts"
+
+[[modules.groups]]
+name = "Resolving"
+
+[[modules.groups]]
+name = "Constants"
+
+[[modules.items]]
+kind = "function"
+name = "join"
+code = "string join(...string $parts)"
+text = "Joins the parts with `/`, without doubling it. A part that is absolute starts again from it *(i.e. `path::join('/var', 'log', 'web.log')` is `'/var/log/web.log'`)*"
+group = "Building"
+
+[[modules.items]]
+kind = "function"
+name = "withExtension"
+code = "string withExtension(string $path, string $extension)"
+text = "Replaces the extension, or adds it *(i.e. `path::withExtension('a.txt', 'md')` is `'a.md'`)*. An empty `$extension` removes it"
+group = "Building"
+
+[[modules.items]]
+kind = "function"
+name = "withName"
+code = "string withName(string $path, string $name)"
+text = "Replaces the last part *(i.e. `path::withName('/a/b.txt', 'c.txt')` is `'/a/c.txt'`)*"
+group = "Building"
+
+[[modules.items]]
+kind = "function"
+name = "parent"
+code = "?string parent(string $path)"
+text = "The folder that holds it, or `null` for `/` or a single name *(i.e. `path::parent('/a/b/c.txt')` is `'/a/b'`)*"
+group = "Parts"
+
+[[modules.items]]
+kind = "function"
+name = "name"
+code = "string name(string $path)"
+text = "The last part *(i.e. `path::name('/a/b/c.txt')` is `'c.txt'`)*"
+group = "Parts"
+
+[[modules.items]]
+kind = "function"
+name = "stem"
+code = "string stem(string $path)"
+text = "The last part without its extension *(i.e. `path::stem('/a/archive.tar.gz')` is `'archive.tar'`)*"
+group = "Parts"
+
+[[modules.items]]
+kind = "function"
+name = "extension"
+code = "?string extension(string $path)"
+text = "The extension without the dot, or `null` if there's none *(i.e. `path::extension('a.tar.gz')` is `'gz'`)*. A name that starts with a dot, like `.bashrc`, has no extension"
+group = "Parts"
+
+[[modules.items]]
+kind = "function"
+name = "parts"
+code = "list<string> parts(string $path)"
+text = "Every part *(i.e. `path::parts('/a/b')` is `['/', 'a', 'b']`)*"
+group = "Parts"
+
+[[modules.items]]
+kind = "function"
+name = "absolute?"
+code = "bool absolute?(string $path)"
+text = "`true` if it starts at the root *(i.e. `'/etc'`, `'C:/Users'`)*"
+group = "Resolving"
+
+[[modules.items]]
+kind = "function"
+name = "absolute"
+code = "string absolute(string $path)"
+text = "The path from the root, starting from the current folder if it's relative, and normalized"
+group = "Resolving"
+
+[[modules.items]]
+kind = "function"
+name = "normalize"
+code = "string normalize(string $path)"
+text = "Removes `.`, doubled `/`, and `..` where possible *(i.e. `path::normalize('a/./b/../c')` is `'a/c'`)*. Links aren't followed"
+group = "Resolving"
+
+[[modules.items]]
+kind = "function"
+name = "relative"
+code = "string relative(string $path, string $from = '.')"
+text = "The path from `$from` to `$path` *(i.e. `path::relative('/a/b/c', '/a')` is `'b/c'`)*"
+group = "Resolving"
+
+[[modules.items]]
+kind = "function"
+name = "expandHome"
+code = "string expandHome(string $path)"
+text = "Replaces a `~` at the start with the home folder *(i.e. `'~/notes'` is `'/home/me/notes'`)*"
+group = "Resolving"
+
+[[modules.items]]
+kind = "function"
+name = "home"
+code = "string home()"
+text = "The home folder of the user"
+group = "Resolving"
+
+[[modules.items]]
+kind = "constant"
+name = "$separator"
+code = "const string $separator"
+text = "The separator the system itself uses: `'/'`, or `'\\'` on Windows"
+group = "Constants"
+
+[[modules]]
+short = "env"
+path = "std/env"
+title = "std/env"
+text = "Environment variables. `use std/env;`, then `env::get('HOME')`.\n\nChanges only affect the script and the commands it runs, never the shell that started it."
+
+[[modules.items]]
+kind = "function"
+name = "get"
+code = "?string get(string $name)"
+text = "The value, or `null` if it isn't set *(i.e. `env::get('EDITOR') ?? 'vi'`)*"
+
+[[modules.items]]
+kind = "function"
+name = "require"
+code = "string require(string $name)"
+text = "The value. Throws a `ValueError` that names the variable if it isn't set or is empty *(i.e. `const $token = env::require('API_TOKEN');`)*"
+
+[[modules.items]]
+kind = "function"
+name = "has"
+code = "bool has(string $name)"
+text = "`true` if it's set, even if it's empty"
+
+[[modules.items]]
+kind = "function"
+name = "set"
+code = "void set(string $name, string $value)"
+text = "Sets it for the script and the commands it runs"
+
+[[modules.items]]
+kind = "function"
+name = "remove"
+code = "void remove(string $name)"
+text = "Unsets it. Does nothing if it isn't set"
+
+[[modules.items]]
+kind = "function"
+name = "all"
+code = "map<string, string> all()"
+text = "Every variable, sorted by name"
+
+[[modules]]
+short = "io"
+path = "std/io"
+title = "std/io"
+text = "Reading what's sent to the script through stdin *(i.e. `cat notes.txt | notes.lks`)*. `use std/io;`, then `io::lines()`. Writing to stdout and stderr is done with `out`, `outln`, `err` and `errln`, which need no `use` *(see [the built-in functions](general.html))*.\n\n\n- Asking the person running the script for input *(i.e. `ask`, `confirm`, passwords)* belongs to `std/terminal`, later."
+
+[[modules.items]]
+kind = "function"
+name = "readLine"
+code = "?string readLine()"
+text = "The next line, without its new line, or `null` when there's nothing more to read *(i.e. `while (($line = io::readLine()) != null)`)*"
+
+[[modules.items]]
+kind = "function"
+name = "readAll"
+code = "string readAll()"
+text = "Everything that's left"
+
+[[modules.items]]
+kind = "function"
+name = "lines"
+code = "list<string> lines()"
+text = "Every line that's left"
+
+[[modules.items]]
+kind = "function"
+name = "piped?"
+code = "bool piped?()"
+text = "`true` if stdin comes from a pipe or a file, `false` if it's the terminal. Useful to know if there's anything to read"
+
+[[modules.items]]
+kind = "function"
+name = "flush"
+code = "void flush()"
+text = "Writes out anything `out` and `err` haven't written yet. They're flushed at the end of the script and before running a command anyway"
+
+[[modules]]
+short = "process"
+path = "std/process"
+title = "std/process"
+text = "The script's own process, and running programs. `use std/process;`, then `process::args()`."
+
+[[modules.groups]]
+name = "The script"
+
+[[modules.groups]]
+name = "Running programs"
+text = "Commands written with `%x\"...\"` run through the shell *(see Command in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. These functions are for finding programs, and for running one without a shell.\n\n\n- `exit` needs no `use` *(see [the built-in functions](general.html))*."
+
+[[modules.items]]
+kind = "function"
+name = "args"
+code = "list<string> args()"
+text = "The command-line arguments, without the script's own path *(see [cli](https://github.com/Folgue02/lakescript/blob/master/ideas/language/cli.md))*"
+group = "The script"
+
+[[modules.items]]
+kind = "function"
+name = "scriptPath"
+code = "?string scriptPath()"
+text = "The absolute path of the script being run, or `null` when there is no file *(i.e. code given by a program that embeds Lakescript)*"
+group = "The script"
+
+[[modules.items]]
+kind = "function"
+name = "cwd"
+code = "string cwd()"
+text = "The current folder"
+group = "The script"
+
+[[modules.items]]
+kind = "function"
+name = "chdir"
+code = "void chdir(string $path)"
+text = "Changes the current folder of the script and of the commands it runs. Throws a `FileNotFound` if it doesn't exist. The folder of a program that embeds Lakescript never changes"
+group = "The script"
+
+[[modules.items]]
+kind = "function"
+name = "pid"
+code = "number pid()"
+text = "The ID of the process"
+group = "The script"
+
+[[modules.items]]
+kind = "function"
+name = "platform"
+code = "symbol platform()"
+text = "`:linux`, `:macos` or `:windows`"
+group = "The script"
+
+[[modules.items]]
+kind = "function"
+name = "sleep"
+code = "void sleep(number $seconds)"
+text = "Waits *(i.e. `process::sleep(0.5)`)*"
+group = "The script"
+
+[[modules.items]]
+kind = "function"
+name = "which"
+code = "?string which(string $name)"
+text = "The path of a program in `PATH`, or `null` *(i.e. `if (process::which('docker') == null) errln('Install Docker first');`)*"
+group = "Running programs"
+
+[[modules.items]]
+kind = "function"
+name = "shell"
+code = "command shell(string $script)"
+text = "A `command` that runs through a shell: `sh -c` on Linux and macOS, `cmd /C` on Windows *(i.e. `process::shell('ls *.txt | wc -l').output()`)*. For what needs a real shell; the text is the shell's own, so it isn't portable"
+group = "Running programs"
+
+[[modules.items]]
+kind = "function"
+name = "command"
+code = "command command(string $program, ...string $args)"
+text = "A `command` that runs the program directly, without a shell, with each argument passed as it is. No quoting is needed, and it works the same on every system *(i.e. `process::command('git', 'commit', '-m', $message).run()`)*"
+group = "Running programs"
+
+[[modules]]
+short = "http"
+path = "std/http"
+title = "std/http"
+text = "Requests to web servers. `use std/http;`, then `http::get($url)`. HTTPS works out of the box.\n\n```\nuse std/http;\n\nconst $response = http::get('https://api.github.com/repos/rust-lang/rust');\nif ($response.ok?()) {\n    outln($response.json()['stargazers_count']);\n} else {\n    errln(f\"GitHub said {$response.status}\");\n}\n\nhttp::post('https://example.com/api/notes', {'title' => 'hello'});\nhttp::download('https://example.com/file.tar.gz', 'file.tar.gz');\n```"
+notes = "## Errors\n\n- **A status of 4xx or 5xx isn't an error.** It's an answer like any other, and the script checks it with `ok?()` or `status`. Scripts often expect some of them *(i.e. a 404 when asking if something exists)*, and a `try` around every request would hide the ones that matter.\n- **No answer at all** throws a `NetworkError`, under `IOError`: no network, a name that doesn't resolve, a refused connection, a timeout, too many redirects. Its message says which *(i.e. `can't reach 'http://localhost:9999/': the server refused the connection`)*.\n- An address that isn't valid throws a `ValueError`, and so does a timeout that isn't a positive number."
+
+[[modules.groups]]
+name = "Functions"
+text = "Every function takes `$headers`, sent with the request *(i.e. `headers: {'Authorization' => f\"Bearer {$token}\"}`)*, and `$timeout`, the seconds the whole request can take, or `null` to wait forever.\n\n\n- **The body:** a string is sent as it is. Any other value is sent as JSON, with the header `Content-Type: application/json` unless `$headers` gives one. `null` sends nothing.\n- **Redirects** are followed, up to 10.\n- Every request says it comes from `lakescript/<version>`, in the header `User-Agent`. `$headers` can give another."
+
+[[modules.items]]
+kind = "function"
+name = "get"
+code = "Response get(string $url, map<string, string> $headers = {}, ?number $timeout = 30)"
+text = "Gets the page or the data at `$url`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "post"
+code = "Response post(string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30)"
+text = "Sends `$body` to `$url`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "put"
+code = "Response put(string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30)"
+text = "The same with the method `PUT`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "patch"
+code = "Response patch(string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30)"
+text = "The same with the method `PATCH`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "delete"
+code = "Response delete(string $url, map<string, string> $headers = {}, ?number $timeout = 30)"
+text = "A request with the method `DELETE`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "request"
+code = "Response request(string $method, string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30)"
+text = "A request with any method *(i.e. `http::request('HEAD', $url)`)*"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "download"
+code = "Response download(string $url, string $path, map<string, string> $headers = {}, ?number $timeout = 300)"
+text = "Writes what's at `$url` to the file `$path`, without keeping it in memory, if the status is from 200 to 299. The response's body is then empty. With another status, the file isn't touched and the body is the server's answer"
+group = "Functions"
+
+[[modules.items]]
+kind = "class"
+name = "Response"
+code = "class Response"
+text = "What a server answered."
+
+[[modules.items.members]]
+kind = "field"
+name = "status"
+code = "number @status"
+text = "The status code *(i.e. `200` or `404`)*"
+
+[[modules.items.members]]
+kind = "field"
+name = "headers"
+code = "map<string, string> @headers"
+text = "The headers, with their names in lowercase. A header that came several times has its values joined with `, `"
+
+[[modules.items.members]]
+kind = "field"
+name = "body"
+code = "string @body"
+text = "The body as text. Bytes that aren't valid UTF-8 become `�`. Empty after `download()`"
+
+[[modules.items.members]]
+kind = "field"
+name = "url"
+code = "string @url"
+text = "The address that answered, after following redirects"
+
+[[modules.items.members]]
+kind = "method"
+name = "ok?"
+code = "bool ok?()"
+text = "`true` for a status from 200 to 299"
+
+[[modules.items.members]]
+kind = "method"
+name = "json"
+code = "any json()"
+text = "The body read as JSON. Throws a `ValueError` if it isn't *(see [`std/format/json`](format.json.html))*"
+
+[[modules.items.members]]
+kind = "method"
+name = "header"
+code = "?string header(string $name)"
+text = "A header by its name, in any case, or `null` *(i.e. `$response.header('Content-Type')`)*"
+
+[[modules]]
+short = "html"
+path = "std/html"
+title = "std/html"
+text = "Reading HTML pages and finding their parts with CSS selectors, to scrape them. `use std/html;`, then `html::parse($text)`. Broken HTML is repaired the way browsers do it.\n\n```\nuse std/http;\nuse std/html;\n\nconst $page = html::parse(http::get('https://news.ycombinator.com').body);\nfor ($link in $page.select('.titleline > a')) {\n    outln(f\"{$link.text()} -> {$link.attr('href')}\");\n}\noutln($page.title());\n```\n\n- It doesn't download anything: pages come from `std/http`, a file or anywhere else.\n- `select` and `first` take any CSS selector browsers know *(i.e. `li:not(.sold) > a`, `a[href^=\"https\"]`, `tr:nth-child(2) td`)*. One that isn't valid throws a `ValueError`."
+notes = "## Text\n\n`text()` gives the text the way a browser shows it, not the way it's written:\n\n- Spaces and new lines are collapsed into one space, and the ends are trimmed.\n- Elements that start a line of their own *(i.e. `<p>`, `<div>`, `<li>`, `<br>`, `<td>`)* are separated by a space, so `<p>a</p><p>b</p>` is `a b`, not `ab`.\n- The text of `<script>`, `<style>`, `<template>`, `<noscript>` and `<head>` isn't shown, unless it's the element whose `text()` is asked for. So `$page.first('script[type=\"application/ld+json\"]')?.text()` gives the JSON in it."
+
+[[modules.groups]]
+name = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "parse"
+code = "Document parse(string $text)"
+text = "Reads a page. It never fails: broken HTML is repaired, like in browsers"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "escape"
+code = "string escape(string $text)"
+text = "The text with `&`, `<`, `>`, `\"` and `'` as entities, to put it in HTML"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "unescape"
+code = "string unescape(string $text)"
+text = "The text with its entities as characters *(i.e. `&amp;` is `&`, `&copy;` is `©`)*"
+group = "Functions"
+
+[[modules.items]]
+kind = "class"
+name = "Document"
+code = "class Document"
+text = "A page, from `parse()`."
+
+[[modules.items.members]]
+kind = "method"
+name = "select"
+code = "list<Element> select(string $css)"
+text = "Every element that matches the selector, in the order of the page"
+
+[[modules.items.members]]
+kind = "method"
+name = "first"
+code = "?Element first(string $css)"
+text = "The first one, or `null`"
+
+[[modules.items.members]]
+kind = "method"
+name = "title"
+code = "?string title()"
+text = "The text of its `<title>`, or `null`"
+
+[[modules.items.members]]
+kind = "method"
+name = "text"
+code = "string text()"
+text = "The text of the page as a browser shows it"
+
+[[modules.items.members]]
+kind = "method"
+name = "html"
+code = "string html()"
+text = "The whole page as HTML, repaired"
+
+[[modules.items]]
+kind = "class"
+name = "Element"
+code = "class Element"
+text = "An element of a page *(i.e. `<a href=\"...\">`)*."
+
+[[modules.items.members]]
+kind = "field"
+name = "tag"
+code = "string @tag"
+text = "The name of its tag, in lowercase *(i.e. `a`)*"
+
+[[modules.items.members]]
+kind = "method"
+name = "select"
+code = "list<Element> select(string $css)"
+text = "Every element inside it that matches the selector. The element itself isn't one, as with `querySelectorAll` in browsers"
+
+[[modules.items.members]]
+kind = "method"
+name = "first"
+code = "?Element first(string $css)"
+text = "The first one, or `null`"
+
+[[modules.items.members]]
+kind = "method"
+name = "text"
+code = "string text()"
+text = "Its text as a browser shows it *(i.e. `Hello world` for `<p>Hello <b>world</b></p>`)*"
+
+[[modules.items.members]]
+kind = "method"
+name = "attr"
+code = "?string attr(string $name)"
+text = "An attribute, or `null` *(i.e. `$link.attr('href')`)*"
+
+[[modules.items.members]]
+kind = "method"
+name = "attrs"
+code = "map<string, string> attrs()"
+text = "Every attribute, in the order of the page"
+
+[[modules.items.members]]
+kind = "method"
+name = "html"
+code = "string html()"
+text = "The HTML inside it"
+
+[[modules.items.members]]
+kind = "method"
+name = "outerHtml"
+code = "string outerHtml()"
+text = "Its HTML, with its own tag"
+
+[[modules.items.members]]
+kind = "method"
+name = "children"
+code = "list<Element> children()"
+text = "The elements right inside it"
+
+[[modules.items.members]]
+kind = "method"
+name = "parent"
+code = "?Element parent()"
+text = "The element it's inside, or `null` at the top"
+
+[[modules]]
+short = "format/json"
+path = "std/format/json"
+title = "std/format/json"
+text = "Reading and writing JSON. `use std/format/json;`, then `json::parse($text)`.\n\n```\nuse std/format/json;\n\nconst $data = json::parse('{\"name\": \"Daniel\", \"tags\": [\"a\", \"b\"]}');\nconst $name = $data['name'].as(string);\noutln(json::stringify($data, indent: 2));\n```"
+notes = "## Reading\n\nThere's no schema: the values become the built-in types, and the result is `any`. Scripts use `.as()` to get typed values out of it.\n\n| JSON | Lakescript |\n|------|------------|\n| object | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |\n| `true`, `false` | `bool` |\n| `null` | `null` |\n\n- Only strict JSON is accepted: no comments and no trailing commas, so a file Lakescript reads is also valid for other tools.\n- Invalid JSON throws a `ValueError` with the line and column.\n\n## Writing\n\n| Lakescript | JSON |\n|------------|------|\n| `map` | object. Number and symbol keys become strings, since JSON keys can only be strings |\n| `list` | array |\n| `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |\n| `symbol` | string |\n| `string`, `number`, `bool`, `null` | the same |\n\n- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.\n- `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented."
+
+[[modules.groups]]
+name = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "parse"
+code = "any parse(string $text)"
+text = "The value the JSON text holds. Throws a `ValueError` with the line and column if it isn't valid"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "parseAll"
+code = "list<any> parseAll(string $text)"
+text = "Every value in a text that holds several, separated by whitespace: streams like `{\"a\":1} {\"a\":2}` and JSON Lines, also when a value spans several lines. An empty text gives `[]`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "stringify"
+code = "string stringify(any $value, ?number $indent = null)"
+text = "The value as JSON text. Compact without `$indent`, indented with that many spaces with it *(i.e. `json::stringify($data, indent: 2)`)*"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "read"
+code = "any read(string $path)"
+text = "Reads and parses a file, like `json::parse(fs::read($path))`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "write"
+code = "void write(string $path, any $value, ?number $indent = 2)"
+text = "Writes the value to a file, indented by default since files are usually read by people. `indent: null` writes it compact"
+group = "Functions"
+
+[[modules]]
+short = "format/csv"
+path = "std/format/csv"
+title = "std/format/csv"
+text = "Reading and writing CSV, the format of spreadsheets. `use std/format/csv;`, then `csv::parse($text)`.\n\n```\nuse std/format/csv;\n\n// Every row as a list of strings\nfor ($row in csv::read('scores.csv')) {\n    outln($row.join(' | '));\n}\n\n// The first line names the columns, and the rows are maps by those names\nconst $people = csv::readMaps('people.csv');\noutln($people.map(($p) -> $p['name']).join(', '));\n\ncsv::write('adults.csv', $people.filter(($p) -> ($p['age']?.toNumber() ?? 0) >= 18));\n```"
+notes = "## Reading\n\n- Every value is a string, even the ones that look like numbers, so nothing is guessed. `.toNumber()` turns them into numbers *(i.e. `$row['age'].toNumber()`)*.\n- Values in double quotes can have the separator, new lines and quotes written twice *(i.e. `\"Smith, John\"` and `\"say \"\"hi\"\"\"`)*, as in RFC 4180.\n- Rows can have different numbers of values. With `parseMaps`, a row with fewer values than the first line gets `''` for the rest, and one with more throws a `ValueError`. So does a name that's twice in the first line.\n- `$separator` is one character: `'\\t'` reads TSV, `';'` the CSV of spreadsheets in languages that write decimals with a comma.\n- Invalid CSV throws a `ValueError` with the line.\n\n## Writing\n\n- Values can be strings, numbers, bools and symbols, written as `outln` writes them. `null` is an empty value. Anything else throws a `TypeError`.\n- Values that have the separator, new lines or quotes are put in double quotes.\n- Rows that are maps write their keys in a first line, in the order of the first map. A later map without a key gets an empty value for it, and one with a key the first doesn't have throws a `ValueError`.\n- Every line ends with a new line, also the last one."
+
+[[modules.groups]]
+name = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "parse"
+code = "list<list<string>> parse(string $text, string $separator = ',')"
+text = "The rows of the text, every value a string *(i.e. `csv::parse(\"a,b\\n1,2\")` is `[['a', 'b'], ['1', '2']]`)*"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "parseMaps"
+code = "list<map<string, string>> parseMaps(string $text, string $separator = ',')"
+text = "The rows after the first one, as maps by the names in the first one *(i.e. `csv::parseMaps(\"name,age\\nAna,30\")` is `[{'name' => 'Ana', 'age' => '30'}]`)*"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "stringify"
+code = "string stringify(list<any> $rows, string $separator = ',')"
+text = "The rows as CSV text. Rows are lists of values, or maps, whose keys are written in a first line"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "read"
+code = "list<list<string>> read(string $path, string $separator = ',')"
+text = "Reads and parses a file, like `csv::parse(fs::read($path))`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "readMaps"
+code = "list<map<string, string>> readMaps(string $path, string $separator = ',')"
+text = "Reads a file and parses it with `parseMaps`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "write"
+code = "void write(string $path, list<any> $rows, string $separator = ',')"
+text = "Writes the rows to a file, like `fs::write($path, csv::stringify($rows))`"
+group = "Functions"
+
+[[modules]]
+short = "template"
+path = "std/template"
+title = "std/template"
+text = "Templates in the style of Ruby's ERB: a text with tags in double curly braces, and a `map<string, any>` of the values it uses, give a string. `use std/template;`, then `template::render($text, $values)`.\n\n```\n<h1>{{ $title }}</h1>\n{{ // a comment, which writes nothing }}\n{{ if ($items.empty?()) }}\n  <p>Nothing here.</p>\n{{ else }}\n  <ul>\n  {{ for ($item in $items) }}\n    <li>{{ $item['name'] }}: {{ $item['price'] }} €</li>\n  {{ endfor }}\n  </ul>\n{{ endif }}\n{{ const $total = $items.map(($i) -> $i['price']).sum() }}\n<p>Total: {{ $total }} €</p>\n```\n\n```\nuse std/template;\n\nconst $page = template::renderFile('page.html.elks', {'title' => 'Shop', 'items' => $items});\nconst $text = template::render('Hello {{ $name.upper() }}!', {'name' => 'Ana'});\n```"
+notes = "## Files\n\n**Templates end in `.elks`**, for \"embedded Lakescript\", like Ruby's `.erb`: `page.html.elks` is a template that gives HTML, `notes.md.elks` one that gives Markdown. So editors know which files have `{{ }}` tags with Lakescript inside: farsub highlights them as HTML with Lakescript in its tags. `renderFile` takes any file, with this extension or not.\n\n## Tags\n\n- **`{{ expression }}` writes its value**, as `outln` writes it. `null` writes nothing, so `{{ $user['nickname'] }}` leaves nothing on the page when there's no nickname.\n- **Blocks:** `for`, `if`, `else if`, `else` and `while` open a block without `{`, with what's inside written as in Lakescript *(i.e. `{{ for ($item in $items) }}`, `{{ if ($n > 1) }}`)*. Each block closes with its own end: `{{ endfor }}`, `{{ endif }}`, `{{ endwhile }}`. So nested blocks don't end in a row of `{{ } }}` like PHP's `<?php } ?>`, and an end in the wrong place says which block it expected.\n- **What changes a variable writes nothing**: `const` and `let` *(i.e. `{{ const $total = $prices.sum() }}`)*, assignments *(i.e. `{{ $i += 1 }}`)*, `break` and `continue`. `{{ // ... }}` is a comment, and ends at the first `}}`.\n- **An `if` that gives a value** is an expression, not a block: `{{ if ($n > 1) 'items' else 'item' }}` writes one of them. A tag is a block when the condition in parentheses is all there is after the `if`.\n- **A line with only a block tag, a definition or a comment disappears**, also its new line, so a template of a config file or of Markdown doesn't fill up with empty lines.\n- **A `{{` in the text** is written as `{{ '{{' }}`.\n\n## What a template sees\n\n- The keys of the map, as constants *(i.e. `'title'` is `$title`)*. A key that isn't a valid name throws a `ValueError`.\n- The built-in functions and the methods of the values.\n- Not the variables of the script that renders it, nor its modules. A function is passed in the map *(i.e. `{'money' => ($n) -> f\"{$n} €\"}`, then `{{ $money($price) }}`)*.\n\n## HTML\n\n- With HTML escaping on, `<`, `>`, `&`, `\"` and `'` in the values that are written become entities, so a value a user typed can't add HTML to the page. The text of the template itself is never changed.\n- `{{ raw($x) }}` writes a value without escaping it.\n\n## Errors\n\nA template becomes Lakescript code that builds the string, and runs as a script of its own whose variables are the values given. Its errors point at the line and column of the template, also the ones of the language *(i.e. ``page.html.elks:12:9: error: `$nmae` isn't declared``)*, and `$e.line()` is that line. A template made with `render` is `<template>` in its errors.\n\n- A name that isn't declared is found when its tag runs, not before, since the values only come with the call.\n- A block that isn't closed, an end of another block *(i.e. `{{ endif }}` closing a `{{ for }}`)*, an `{{ else }}` outside an `{{ if }}` and a `{{` without `}}` are errors before anything runs.\n- A template can't catch errors: a `try` is a block, which tags don't have. The script that renders it can."
+
+[[modules.groups]]
+name = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "render"
+code = "string render(string $text, map<string, any> $values = {}, bool $html = false)"
+text = "The template `$text` with `$values`. With `$html`, the values it writes are escaped for HTML"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "renderFile"
+code = "string renderFile(string $path, map<string, any> $values = {}, ?bool $html = null)"
+text = "The template in the file `$path`. It's escaped for HTML when the file ends in `.html` or `.htm`, also before `.elks` *(i.e. `page.html.elks`)*, unless `$html` says otherwise"
+group = "Functions"
+
+[[modules]]
+short = "test"
+path = "std/test"
+title = "std/test"
+text = "What tests need besides `assert`. `use std/test;`, then `test::throws(...)`. How tests are written and run is in [testing](https://github.com/Folgue02/lakescript/blob/master/ideas/tooling/testing.md).\n\n```\nuse std/test;\n\nvoid testInvalidSizes() {\n    const $e = test::throws(() -> units::bytes('lots'));\n    assert $e.typeName() == 'ValueError';\n    assert $e.message().contains('lots');\n}\n```"
+
+[[modules.groups]]
+name = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "throws"
+code = "exception throws(() -> any $code)"
+text = "Runs `$code` and returns the exception it threw, to check its type and message. If it throws nothing, it throws an `AssertionError`, so the test fails"
+group = "Functions"
+
+[[modules]]
+short = "time"
+path = "std/time"
+title = "std/time"
+text = "The current time. `use std/time;`, then `time::now()`.\n\nFor now it only gives the time as a number. Dates, formatting and durations come later, once there are classes."
+
+[[modules.items]]
+kind = "function"
+name = "now"
+code = "number now()"
+text = "Milliseconds since 1970-01-01 00:00 UTC, like Java's `System.currentTimeMillis()` *(i.e. `const $start = time::now(); ... outln(f\"took {time::now() - $start} ms\");`)*. It follows the system clock, so it can jump if the clock is changed"

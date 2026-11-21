@@ -34,7 +34,7 @@ Commands:
                               open them with --open
   doc <repository:author/name@version> [--open]
                               Make the docs of a package
-  doc std [--open]            The page of the standard library
+  doc std [--open]            The pages of the standard library
   doc <name>                  Write the docs of one thing in the terminal,
                               i.e. ferry doc units::bytes
   add <repository:author/name@version>
@@ -284,6 +284,10 @@ fn doc_project(open: bool) -> Result<ExitCode, Fail> {
         return Err(format!("{} has {errors} {what}, so its docs weren't made", project.id).into());
     }
     let mut site = ferry::doc::read(&project)?;
+    // The standard library's pages, which the project's link to and search
+    let std_index = std_docs(&home)?;
+    let std_base = format!("{}/", file_url(std_index.parent().expect("the pages are in a folder")));
+    site.std = Some((Box::new(ferry::doc::std_site()), std_base));
     for dependency in &dependencies {
         let index = package_docs(&home, &dependency.project, &dependency.package, &dependency.version)?;
         site.dependencies.push((dependency.package.to_string(), dependency.version.clone(), Some(file_url(&index))));
@@ -326,28 +330,38 @@ fn doc_package(spec: &str, open: bool) -> Result<ExitCode, Fail> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// The page of the standard library, which ferry has inside: written once
-/// per version to `~/.ferry/doc/std/<version>/`, so it can be opened.
-fn doc_std(open: bool) -> Result<ExitCode, Fail> {
-    let home = Home::open()?;
+/// The pages of the standard library, which ferry has inside, written to
+/// `~/.ferry/doc/std/<version>/`. Gives their front page.
+fn std_docs(home: &Home) -> Result<PathBuf, Fail> {
     let dir = home.dir.join("doc").join("std").join(env!("CARGO_PKG_VERSION"));
-    let page = dir.join("index.html");
-    if std::fs::read_to_string(&page).ok().as_deref() != Some(ferry::doc::STDLIB_PAGE) {
-        std::fs::create_dir_all(&dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
-        std::fs::write(&page, ferry::doc::STDLIB_PAGE).map_err(|e| format!("can't write {}: {e}", page.display()))?;
-    }
+    ferry::doc::write(&ferry::doc::std_site(), &dir)
+}
+
+fn doc_std(open: bool) -> Result<ExitCode, Fail> {
+    let index = std_docs(&Home::open()?)?;
     if open {
-        open_page(&page);
+        open_page(&index);
     } else {
-        println!("{}", page.display());
+        println!("{}", index.display());
     }
     Ok(ExitCode::SUCCESS)
 }
 
 fn doc_name(name: &str) -> Result<ExitCode, Fail> {
+    // Outside a project, only the standard library
+    if Project::find(&current_dir()?).is_err() {
+        return match ferry::doc::describe(&ferry::doc::std_site(), name) {
+            Some(text) => {
+                print!("{text}");
+                Ok(ExitCode::SUCCESS)
+            }
+            None => Err(format!("there's nothing named `{name}` in the standard library").into()),
+        };
+    }
     let (_, project, _) = open_project()?;
     let site = ferry::doc::read(&project)?;
-    match ferry::doc::describe(&site, name) {
+    // The project's own first, then the standard library's
+    match ferry::doc::describe(&site, name).or_else(|| ferry::doc::describe(&ferry::doc::std_site(), name)) {
         Some(text) => {
             print!("{text}");
             Ok(ExitCode::SUCCESS)

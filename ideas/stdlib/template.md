@@ -1,6 +1,6 @@
 # std/template
 
-Templates in the style of Ruby's ERB, in `crates/lakescript/src/stdlib/template.rs`: a text with tags in double curly braces, and a `map<string, any>` of the values it uses, give a string. `use std/template;`, then `template::render($text, $values)`.
+Templates in the style of Ruby's ERB: a text with tags in double curly braces, and a `map<string, any>` of the values it uses, give a string. `use std/template;`, then `template::render($text, $values)`.
 
 ```
 <h1>{{ $title }}</h1>
@@ -66,7 +66,7 @@ A template becomes Lakescript code that builds the string, and runs as a script 
 
 ## How it's made
 
-The template is turned into the code of a script: its text is written by `__text(n)`, `{{ $x }}` becomes `__write($x)`, `{{ raw($x) }}` becomes `__raw($x)`, and a block becomes the block of the language with `{` and `}`. `render` and `renderFile` are functions that run Lakescript code, so they get the VM *(a `Function::Vm`)*, while the other functions of the standard library only get their arguments. Where each part of the code came from is kept, to move errors back to the template.
+It's in `crates/lakescript/src/stdlib/template.rs`. The template is turned into the code of a script: its text is written by `__text(n)`, `{{ $x }}` becomes `__write($x)`, `{{ raw($x) }}` becomes `__raw($x)`, and a block becomes the block of the language with `{` and `}`. `render` and `renderFile` are functions that run Lakescript code, so they get the VM *(a `Function::Vm`)*, while the other functions of the standard library only get their arguments. Where each part of the code came from is kept, to move errors back to the template.
 
 - **Nothing is cached:** every call turns the template into code and compiles it again. A small template takes about 13 µs per render in a release build, against about 0.6 µs for the same string built by hand, which scripts don't notice. A cache is left out until a script needs it.
 - **A template is code:** it can do anything a script can. Templates are written by the author of the script, so a template that came from a user must never be rendered, as with ERB and Jinja.

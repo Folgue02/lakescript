@@ -26,6 +26,8 @@ pub enum ItemKind {
     Method,
     /// A value of an enum.
     Value,
+    /// A built-in type, in the docs of the standard library *(i.e. `string`)*.
+    Type,
 }
 
 impl ItemKind {
@@ -39,6 +41,7 @@ impl ItemKind {
             ItemKind::Field => "field",
             ItemKind::Method => "method",
             ItemKind::Value => "value",
+            ItemKind::Type => "type",
         }
     }
 }
@@ -66,6 +69,10 @@ pub struct Item {
     pub args: Vec<String>,
     /// For a method of an `implement` block: its interface.
     pub from: Option<String>,
+    /// The group it's in, in the docs of the standard library *(i.e. `Reading`)*.
+    pub group: Option<String>,
+    /// The groups of its members, with their text, in order.
+    pub groups: Vec<(String, String)>,
 }
 
 /// A `///` comment, split in its parts.
@@ -79,6 +86,13 @@ pub struct Doc {
     pub returns: Option<String>,
     /// `throws ValueError: ...` lines: the exception and when.
     pub throws: Vec<(String, String)>,
+}
+
+impl Item {
+    /// An item with only its kind, its name and its declaration.
+    pub fn new(kind: ItemKind, name: &str, code: &str) -> Item {
+        Item { code: code.to_string(), ..blank(kind, name, 0, Doc::default()) }
+    }
 }
 
 impl Doc {
@@ -308,6 +322,8 @@ fn blank(kind: ItemKind, name: &str, line: u32, doc: Doc) -> Item {
         is_static: false,
         args: Vec::new(),
         from: None,
+        group: None,
+        groups: Vec::new(),
     }
 }
 

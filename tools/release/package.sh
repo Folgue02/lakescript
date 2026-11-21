@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Builds `lks`, `ferry` and `lks-lsp` for one target and packs them for a release:
 # `dist/lakescript-<version>-<target>.tar.gz` (`.zip` on Windows), with
-# its `.sha256` next to it, and the page of the standard library inside it
-# as `doc/stdlib.html` and next to it as `lakescript-<version>-stdlib.html`.
+# its `.sha256` next to it, and the pages of the standard library inside it
+# in `doc/std/` and next to it as `lakescript-<version>-stdlib.tar.gz`.
 #
 #   tools/release/package.sh <target> [version]
 #
@@ -31,11 +31,13 @@ for bin in lks ferry lks-lsp; do
 done
 cp LICENSE NOTICE "$stage/"
 
-# The page of the standard library *(see tools/docs)*
+# The pages of the standard library, made by the ferry just built *(see ideas/tooling/docs.md)*
+docs_home="$(mktemp -d)"
+std_index="$(FERRY_HOME="$docs_home" "target/$target/release/ferry$exe" doc std | tr -d '\r')"
 mkdir -p "$stage/doc"
-python="$(command -v python3 || command -v python)"
-"$python" tools/docs/stdlib.py "$stage/doc/stdlib.html" >/dev/null
-cp "$stage/doc/stdlib.html" "dist/lakescript-$version-stdlib.html"
+cp -R "$(dirname "$std_index")" "$stage/doc/std"
+tar -czf "dist/lakescript-$version-stdlib.tar.gz" -C "$stage/doc" std
+rm -rf "$docs_home"
 
 cd dist
 case "$target" in
