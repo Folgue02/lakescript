@@ -380,7 +380,7 @@ fn md_inline(text: &str) -> String {
 }
 
 const KEYWORDS: &[&str] = &["pub", "const", "static", "class", "interface", "enum", "extends", "null", "true", "false"];
-const BUILT_IN: &[&str] = &["string", "number", "bool", "any", "void", "list", "map", "range", "regex", "symbol", "result", "command", "exception"];
+const BUILT_IN: &[&str] = &["string", "number", "bool", "any", "void", "never", "list", "map", "range", "regex", "symbol", "result", "command", "exception"];
 
 /// A declaration with colors: keywords, types, parameters, and its own name
 /// in bold. The project's types link to their pages.

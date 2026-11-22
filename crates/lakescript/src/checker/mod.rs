@@ -126,6 +126,14 @@ pub struct Checker<'a> {
     /// The scope at the place completion is wanted at, and the members before its `.`.
     snapshot: Option<complete::Snapshot>,
     members: Option<Vec<complete::Item>>,
+    /// Fields checked against `null` that the check can't narrow, by the name
+    /// they're kept under *(i.e. `@part2`)*, with why, and the places they're
+    /// used at, so an error about `null` there says why the check didn't count.
+    unnarrowed: HashMap<String, String>,
+    unnarrowed_uses: HashMap<(u32, usize, usize), String>,
+    /// The calls of functions that never return *(`never`)*, by where they are:
+    /// a statement that's one of them ends its block, like `return`.
+    never_calls: HashSet<(u32, usize, usize)>,
 }
 
 type Check<T> = Result<T, Diagnostic>;
@@ -172,6 +180,9 @@ impl<'a> Checker<'a> {
             names,
             snapshot: None,
             members: None,
+            unnarrowed: HashMap::new(),
+            unnarrowed_uses: HashMap::new(),
+            never_calls: HashSet::new(),
         }
     }
 
@@ -188,6 +199,13 @@ impl<'a> Checker<'a> {
     // ---- Errors ----
 
     fn fail<T>(&mut self, message: impl Into<String>, span: Span) -> Check<T> {
+        let mut message = message.into();
+        // A field the script checked for `null`, which the check couldn't narrow
+        if message.contains("`null`")
+            && let Some(why) = self.unnarrowed_uses.get(&(span.file, span.start, span.end))
+        {
+            message = format!("{message}. {why}");
+        }
         let mut d = Diagnostic::new(message, span);
         d.file = self.file.clone();
         Err(d)
@@ -240,6 +258,8 @@ impl<'a> Checker<'a> {
         let (from, to) = (self.shallow(from), self.shallow(to));
         match (&from, &to) {
             (Ty::Any, _) | (_, Ty::Any) => true,
+            // It never gives a value, so it's fine anywhere
+            (Ty::Never, _) => true,
             (Ty::Var(a), Ty::Var(b)) if a == b => true,
             (Ty::Var(v), other) | (other, Ty::Var(v)) => {
                 // `null` makes an unknown type nullable instead of `null` itself
@@ -294,6 +314,7 @@ impl<'a> Checker<'a> {
         let (a, b) = (self.shallow(a), self.shallow(b));
         match (&a, &b) {
             (Ty::Any, _) | (_, Ty::Any) => Ty::Any,
+            (Ty::Never, other) | (other, Ty::Never) => other.clone(),
             (Ty::Var(_), _) => {
                 self.assignable(&a, &b);
                 b
@@ -415,6 +436,9 @@ impl<'a> Checker<'a> {
         if self.declared_var(name).is_some() {
             return self.fail(format!("`${name}` already exists. Variables can't be declared twice"), span);
         }
+        if matches!(self.shallow(&ty), Ty::Never) {
+            return self.fail(format!("`${name}` can't be `never`: it's only the return type of a function that never returns, and there's no value of it"), at);
+        }
         let place = self.recording().then(|| self.here(at, format!("${name}"), true));
         if let Some(place) = &place {
             let show = names::Show::Var { constant, name: name.to_string(), ty: ty.clone() };
@@ -451,6 +475,7 @@ impl<'a> Checker<'a> {
                 match name.as_str() {
                     "any" => Ty::Any,
                     "void" => Ty::Void,
+                    "never" => Ty::Never,
                     "bool" => Ty::Bool,
                     "number" => Ty::Number,
                     "string" => Ty::Str,
@@ -695,7 +720,7 @@ impl<'a> Checker<'a> {
                     self.scoped_stmt(o, &no)?;
                 }
                 // After `if (...) return;`, what's left only runs when the condition was false
-                match (terminates(then), otherwise.as_ref().map(|o| terminates(o))) {
+                match (self.terminates(then), otherwise.as_ref().map(|o| self.terminates(o))) {
                     (true, None) | (true, Some(false)) => self.narrow_here(&no),
                     (false, Some(true)) => self.narrow_here(&yes),
                     _ => {}
@@ -776,6 +801,9 @@ impl<'a> Checker<'a> {
                     return self.fail("`return` outside a function", span);
                 };
                 match (ret, value) {
+                    (Return::Declared(Ty::Never), _) => {
+                        return self.fail("a `never` function can't return: it must throw, call `exit()` or another `never` function", span);
+                    }
                     (Return::Declared(Ty::Void), Some(v)) => {
                         return self.fail("a `void` function can't return a value", v.span);
                     }
@@ -864,12 +892,28 @@ impl<'a> Checker<'a> {
         let result = self.body(decl, &sig, Return::Declared(ret.clone()), span);
         self.pop();
         result?;
+        if ret == Ty::Never {
+            return self.never_ends(&decl.name, &decl.body, span);
+        }
         if !matches!(ret, Ty::Void | Ty::Any) {
             if let FunctionBody::Block(stmts) = &decl.body {
-                if !block_terminates(stmts) {
+                if !self.block_terminates(stmts) {
                     return self.fail(format!("`{}` must return {} at the end", decl.name, a(&ret)), span);
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A `never` function can't reach its end: every way through it throws,
+    /// exits, calls another `never` function or loops forever.
+    pub(super) fn never_ends(&mut self, name: &str, body: &FunctionBody, span: Span) -> Check<()> {
+        let ends = match body {
+            FunctionBody::Block(stmts) => self.block_terminates(stmts),
+            FunctionBody::Expr(e) => matches!(e.kind, ExprKind::Throw(_)) || self.never_calls.contains(&(e.span.file, e.span.start, e.span.end)),
+        };
+        if !ends {
+            return self.fail(format!("`{name}` is `never`, so it can't reach its end: it must throw, call `exit()` or another `never` function"), span);
         }
         Ok(())
     }
@@ -904,6 +948,9 @@ impl<'a> Checker<'a> {
     fn body(&mut self, decl: &FunctionDecl, sig: &FnTy, ret: Return, span: Span) -> Check<Ty> {
         for (i, p) in decl.params.iter().enumerate() {
             let declared = sig.params[i].clone();
+            if matches!(self.shallow(&declared), Ty::Never) {
+                return self.fail(format!("the parameter `${}` can't be `never`: it's only the return type of a function that never returns", p.name), span);
+            }
             if let Some(default) = &p.default {
                 let found = self.expr(default, Some(&declared))?;
                 if !self.assignable(&found, &declared) {
@@ -1351,15 +1398,23 @@ impl<'a> Checker<'a> {
         match &e.kind {
             ExprKind::Variable(v) => Ok(self.lookup_var(v).map(|t| (v.clone(), t))),
             ExprKind::Field { target, name, nullable: false } => {
-                let key = match &target.kind {
-                    ExprKind::This => format!("@{name}"),
-                    ExprKind::Variable(v) if self.declared_var(v).is_some_and(|i| i.constant) => format!("{v}.{name}"),
+                let (key, shown, variable) = match &target.kind {
+                    ExprKind::This => (format!("@{name}"), format!("@{name}"), None),
+                    ExprKind::Variable(v) => (format!("{v}.{name}"), format!("${v}.{name}"), Some(v)),
                     _ => return Ok(None),
                 };
                 let target_ty = self.expr(target, None)?;
                 let Ty::Object(class, _) = self.shallow(&target_ty) else { return Ok(None) };
                 let constant = class.find(|b| b.fields.iter().find(|f| f.name == *name).map(|f| f.constant)).is_some_and(|(c, _)| c);
-                if !constant {
+                let why = if !constant {
+                    Some(format!("`{shown}` isn't `const`, so checking it for `null` doesn't narrow it: make it `const`, or copy it into a `const` variable first"))
+                } else {
+                    variable.filter(|v| !self.declared_var(v).is_some_and(|i| i.constant)).map(|v| {
+                        format!("`${v}` isn't `const`, so checking `{shown}` for `null` doesn't narrow it: declare `${v}` with `const`, or copy the field into a `const` variable first")
+                    })
+                };
+                if let Some(why) = why {
+                    self.unnarrowed.insert(key, why);
                     return Ok(None);
                 }
                 let ty = self.expr(e, None)?;
@@ -1388,6 +1443,14 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, e: &Expr, expected: Option<&Ty>) -> Check<Ty> {
+        let ty = self.expr_kind(e, expected)?;
+        if matches!(self.shallow(&ty), Ty::Never) {
+            self.never_calls.insert((e.span.file, e.span.start, e.span.end));
+        }
+        Ok(ty)
+    }
+
+    fn expr_kind(&mut self, e: &Expr, expected: Option<&Ty>) -> Check<Ty> {
         let span = e.span;
         self.guard(span)?;
         if self.around_cursor(span) {
@@ -1723,6 +1786,15 @@ impl<'a> Checker<'a> {
                 let b_ty = self.scoped(&no, |c| c.branch(otherwise, expected))?;
                 self.fits(&[(&a_ty, branch_span(then)), (&b_ty, branch_span(otherwise))], expected)?;
                 self.join(&a_ty, &b_ty)
+            }
+            ExprKind::NonNull(inner) => {
+                let t = self.expr(inner, expected.map(|t| t.clone().nullable()).as_ref())?;
+                match self.shallow(&t) {
+                    Ty::Nullable(inner) => *inner,
+                    Ty::Null => return self.fail("this is always `null`, so `!` would always throw", inner.span),
+                    Ty::Any | Ty::Var(_) => t,
+                    other => return self.fail(format!("this is {}, which can't be `null`, so `!` isn't needed", a(&other)), span),
+                }
             }
             ExprKind::Switch(switch) => self.switch_expecting(switch, true, expected)?,
             ExprKind::Try(inner) => {
@@ -2492,35 +2564,37 @@ fn could_be_equal(a: &Ty, b: &Ty) -> bool {
 
 /// `true` if running the statement never continues to the next one
 /// *(`return`, `throw`, `break`, `continue`, `exit()`, or all branches doing it)*.
-fn terminates(stmt: &Stmt) -> bool {
-    match &stmt.kind {
-        StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break | StmtKind::Continue | StmtKind::Yield(_) => true,
-        StmtKind::Expr(Expr { kind: ExprKind::Call { callee, .. }, .. }) => {
-            matches!(&callee.kind, ExprKind::Function(name) if name == "exit")
+/// Whether code can't go past a statement: it returns, throws, exits, calls
+/// a `never` function, breaks out or loops forever.
+impl Checker<'_> {
+    fn terminates(&self, stmt: &Stmt) -> bool {
+        match &stmt.kind {
+            StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break | StmtKind::Continue | StmtKind::Yield(_) => true,
+            StmtKind::Expr(e) => self.never_calls.contains(&(e.span.file, e.span.start, e.span.end)),
+            StmtKind::Block(stmts) => self.block_terminates(stmts),
+            StmtKind::If { then, otherwise: Some(o), .. } => self.terminates(then) && self.terminates(o),
+            StmtKind::While { cond: Expr { kind: ExprKind::Bool(true), .. }, body } => !contains_break(body),
+            StmtKind::Switch(s) => {
+                s.default.as_ref().is_some_and(|d| self.case_terminates(d)) && s.cases.iter().all(|c| self.case_terminates(&c.body))
+            }
+            StmtKind::Try { body, catches, finally } => {
+                finally.as_ref().is_some_and(|f| self.block_terminates(f))
+                    || (self.block_terminates(body) && catches.iter().all(|c| self.block_terminates(&c.body)))
+            }
+            _ => false,
         }
-        StmtKind::Block(stmts) => block_terminates(stmts),
-        StmtKind::If { then, otherwise: Some(o), .. } => terminates(then) && terminates(o),
-        StmtKind::While { cond: Expr { kind: ExprKind::Bool(true), .. }, body } => !contains_break(body),
-        StmtKind::Switch(s) => {
-            s.default.as_ref().is_some_and(case_terminates) && s.cases.iter().all(|c| case_terminates(&c.body))
-        }
-        StmtKind::Try { body, catches, finally } => {
-            finally.as_ref().is_some_and(|f| block_terminates(f))
-                || (block_terminates(body) && catches.iter().all(|c| block_terminates(&c.body)))
-        }
-        _ => false,
     }
-}
 
-fn case_terminates(body: &CaseBody) -> bool {
-    match body {
-        CaseBody::Stmt(s) => terminates(s),
-        CaseBody::Value(_) => false,
+    fn case_terminates(&self, body: &CaseBody) -> bool {
+        match body {
+            CaseBody::Stmt(s) => self.terminates(s),
+            CaseBody::Value(_) => false,
+        }
     }
-}
 
-fn block_terminates(stmts: &[Stmt]) -> bool {
-    stmts.iter().any(terminates)
+    pub(super) fn block_terminates(&self, stmts: &[Stmt]) -> bool {
+        stmts.iter().any(|s| self.terminates(s))
+    }
 }
 
 fn contains_break(stmt: &Stmt) -> bool {

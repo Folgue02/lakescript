@@ -8,7 +8,7 @@ use crate::value::Value;
 pub fn is_class_name(name: &str) -> bool {
     !matches!(
         name,
-        "any" | "string" | "number" | "bool" | "symbol" | "range" | "regex" | "result" | "command" | "list" | "map" | "void"
+        "any" | "string" | "number" | "bool" | "symbol" | "range" | "regex" | "result" | "command" | "list" | "map" | "void" | "never"
     ) && !crate::exceptions::is_exception_type(name)
 }
 
@@ -68,6 +68,7 @@ pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Resu
                     }
                 }
                 "void" => Err("`void` isn't the type of any value".into()),
+                "never" => Err("`never` isn't the type of any value: it's what a function that never returns gives".into()),
                 other => match classes.iter().find(|(n, _)| *n == other) {
                     Some((_, Value::Class(_))) if !args.is_empty() => Err(format!(
                         "the types of a generic class can't be checked while the script runs, since types are removed before it runs. Use `.is({other})`"

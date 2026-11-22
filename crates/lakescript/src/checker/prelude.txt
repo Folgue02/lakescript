@@ -273,7 +273,7 @@ void out(any $value = '');
 void outln(any $value = '');
 void err(any $value = '');
 void errln(any $value = '');
-void exit(number $code = 0);
+never exit(number $code = 0);
 
 module std/fs
 string read(string $path);

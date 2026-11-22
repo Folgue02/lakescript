@@ -14,6 +14,7 @@ Exception
 │   └── NetworkError    // a request of std/http that got no response
 ├── ValueError          // '5a'.toNumber(), invalid JSON
 ├── TypeError           // .as() failed, `'a' + 5`, a wrong argument
+│   └── NullError       // `$x!` on a `null`
 ├── IndexError          // replacing `$list[$i]` past the end, `.removeAt()` and `.insert()` outside a list (reading `$list[$i]` past the end is `null`)
 ├── ArithmeticError     // % or .div() by zero
 ├── CommandFailed       // a shell command returned an error

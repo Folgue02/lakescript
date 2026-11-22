@@ -27,6 +27,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, function types |
 | [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
 | [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
+| [nulls.lks](nulls.lks) | Values that can be `null`: checks that narrow, a `never` function that stops the script, `?? fail(...)`, and `$x!` with its `NullError` | |
 | [enums.lks](enums.lks) | Enums: values with fields, methods, a `switch` over every value, `values()`, `from()` and `fromIgnoreCase()` |
 | [generics.lks](generics.lks) | Generic classes, `Stack<string>()`, and an interface implemented with several types |
 | [operators.lks](operators.lks) | Operators on objects through `IAdd`, `IMul`, `IEquals`, `IOrdered`, `IIndex` and `IContains`, and sorting objects |

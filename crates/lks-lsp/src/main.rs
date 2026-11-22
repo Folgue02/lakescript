@@ -386,7 +386,7 @@ enum Context {
 /// The reserved words, and the names of the built-in types.
 const KEYWORDS: &[&str] = &[
     "let", "const", "if", "else", "for", "in", "while", "switch", "case", "default", "break", "continue", "return", "yield", "try", "catch", "finally", "throw", "assert",
-    "true", "false", "null", "use", "pub", "class", "interface", "enum", "command", "static", "new", "override", "implement", "extends", "any", "void", "bool",
+    "true", "false", "null", "use", "pub", "class", "interface", "enum", "command", "static", "new", "override", "implement", "extends", "any", "void", "never", "bool",
     "number", "string", "symbol", "regex", "range", "list", "map", "result",
 ];
 

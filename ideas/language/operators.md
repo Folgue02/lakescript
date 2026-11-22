@@ -123,9 +123,26 @@ Operands: `bool`. Result: `bool`.
 | `\|`     | OR (always evaluates both) | `true \| false`  | `true`  |
 | `^`      | XOR                        | `true ^ true`    | `false` |
 
-- `!` is going to take any value: on anything that isn't a `bool`, `!$x` is `$x == null`, so `!null` is `true` and `!''` is `false` *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
+- `!` before a value is going to take any value: on anything that isn't a `bool`, `!$x` is `$x == null`, so `!null` is `true` and `!''` is `false` *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
 - `&&` and `||` stop as soon as the result is known: in `false && check()`, `check()` is never called.
 - `&` and `|` on booleans evaluate both sides, same as in Java. The operand type decides whether `&`, `|` and `^` are bitwise (`number`) or logical (`bool`).
+
+### Not null: `$x!`
+
+`$x!` is the value of `$x`, which says it isn't `null`, like in TypeScript, C# and Swift *(Kotlin's `!!`)*. For checks the checker can't follow:
+
+```
+if ($list.length() > 0) {
+    const $first = $list[0]!;          // a number, not a ?number
+}
+outln($config['name']!.upper());
+```
+
+- The checker gives `$x!` the type of `$x` without its `?`. On a value that can't be `null` it's an error, since it isn't needed, and so is `null!`.
+- When the script runs it checks: a `null` throws a `NullError` right there *(i.e. `` `$list[0]` is null ``)*, not later where the value is used. `NullError` is a `TypeError`. So it's a check and not a type, and types still never change what the code does.
+- It goes right after its value, without a space: a `!` after a space starts something else. It chains like the other postfix operators *(i.e. `$user?.address!.city`, `$map['key']!.trim()`)*.
+- `!=` right after a value is still not-equal *(i.e. `$x!=null`)*, since `$x!` can't be assigned to.
+- **There's no `!==`**, and writing it is an error with a hint: `!=` compares, and `$a! == $b`, with a space, says `$a` isn't `null`. Reading `$a !== $b` as `$a! == $b` would quietly mean the opposite of what someone used to JavaScript wrote.
 
 ### Ternary operator
 
@@ -217,7 +234,7 @@ From highest to lowest. The Java operators keep Java's order. Operators on the s
 
 | Level | Operators                                   | Associativity |
 |-------|---------------------------------------------|---------------|
-| 1     | `.` `?.` `()` `[]` `?[]` `$x++` `$x--`      | Left          |
+| 1     | `.` `?.` `()` `[]` `?[]` `$x++` `$x--` `$x!` | Left          |
 | 2     | `**`                                        | Right         |
 | 3     | `++$x` `--$x` `+$x` `-$x` `~` `!`           | Right         |
 | 4     | `*` `/` `%`                                 | Left          |

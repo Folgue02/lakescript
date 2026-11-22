@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::types::{ClassBody, ClassRef, ClassSig, FieldSig, FnTy, MemberSig, Ty, a};
-use super::{Check, Checker, Return, This, block_terminates};
+use super::{Check, Checker, Return, This};
 use crate::ast::*;
 use crate::token::Span;
 
@@ -685,9 +685,12 @@ impl Checker<'_> {
         let result = self.body(&plain, &plain_sig, Return::Declared(declared), span);
         self.pop();
         result?;
+        if !is_ctor && ret == Ty::Never {
+            return self.never_ends(&method.name, &method.body, span);
+        }
         if !is_ctor && !matches!(ret, Ty::Void | Ty::Any) {
             if let FunctionBody::Block(stmts) = &method.body {
-                if !block_terminates(stmts) {
+                if !self.block_terminates(stmts) {
                     return self.fail(format!("`{}` must return {} at the end", method.name, a(&ret)), span);
                 }
             }
@@ -798,12 +801,7 @@ impl Checker<'_> {
     /// `$object.name`, or `$object?.name`, which is `null` when the object is.
     pub(super) fn field(&mut self, target: &Expr, name: &str, nullable: bool, span: Span) -> Check<Ty> {
         // What a `switch` on this field proved *(i.e. `case Git::Push ->`)*
-        let key = match (&target.kind, nullable) {
-            (ExprKind::Variable(v), false) => Some(format!("{v}.{name}")),
-            (ExprKind::This, false) => Some(format!("@{name}")),
-            _ => None,
-        };
-        if let Some(key) = key {
+        if let Some(key) = key_of(target, name, nullable) {
             if let Some(t) = self.scopes.iter().rev().find_map(|s| s.narrowed.get(&key).cloned()) {
                 self.expr(target, None)?;
                 return Ok(t);
@@ -820,6 +818,12 @@ impl Checker<'_> {
             t = self.shallow(inner);
         }
         let ty = self.field_of(t, target, name, span)?;
+        // Checked for `null` without narrowing it: errors here say why
+        if let Some(key) = key_of(target, name, nullable)
+            && let Some(why) = self.unnarrowed.get(&key).cloned()
+        {
+            self.unnarrowed_uses.insert((span.file, span.start, span.end), why);
+        }
         Ok(if nullable { ty.nullable() } else { ty })
     }
 
@@ -963,4 +967,13 @@ fn make_operator_interfaces() -> Vec<(String, Ty)> {
         out.push((name.to_string(), Ty::Object(class, Vec::new())));
     }
     out
+}
+
+/// The name a field is narrowed under *(i.e. `@part2`, or `day.part2` for `$day.part2`)*.
+fn key_of(target: &Expr, name: &str, nullable: bool) -> Option<String> {
+    match (&target.kind, nullable) {
+        (ExprKind::Variable(v), false) => Some(format!("{v}.{name}")),
+        (ExprKind::This, false) => Some(format!("@{name}")),
+        _ => None,
+    }
 }

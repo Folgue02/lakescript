@@ -951,6 +951,15 @@ impl<'a> Interpreter<'a> {
                     })?;
                     self.stack.push(Value::Bool(ok));
                 }
+                Op::NonNull(c) => {
+                    if matches!(self.top(), Value::Null) {
+                        let message = match &proto.consts[c as usize] {
+                            Value::Str(w) => format!("`{w}` is null"),
+                            _ => "the value is null".to_string(),
+                        };
+                        return error_as(exceptions::NULL_ERROR, message, span!());
+                    }
+                }
                 Op::As { ty, classes } => {
                     let ty = &proto.types[ty as usize];
                     let found = self.stack.split_off(self.stack.len() - classes as usize);

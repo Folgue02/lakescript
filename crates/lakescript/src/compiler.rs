@@ -1498,6 +1498,12 @@ impl<'a> Compiler<'a> {
                     self.patch(j);
                 }
             }
+            ExprKind::NonNull(inner) => {
+                self.expr(inner)?;
+                let written = written(inner).map(|w| Value::string(&w)).unwrap_or(Value::Null);
+                let c = self.constant(written);
+                self.emit(Op::NonNull(c));
+            }
             ExprKind::TypeCheck { receiver, ty, check, nullable } => {
                 self.expr(receiver)?;
                 let to_end = nullable.then(|| self.emit(Op::JumpIfNull(0)));
@@ -2197,6 +2203,7 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         | ExprKind::Try(e)
         | ExprKind::Throw(e)
         | ExprKind::Increment { target: e, .. }
+        | ExprKind::NonNull(e)
         | ExprKind::TypeCheck { receiver: e, .. } => collect_expr(e, inside, out),
         ExprKind::Binary { left, right, .. } => {
             collect_expr(left, inside, out);
@@ -2241,4 +2248,32 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         }
         ExprKind::Switch(switch) => collect_switch(switch, inside, out),
     }
+}
+
+/// How a value is written, for the error of `$x!` *(i.e. `$list[0]`, `@part2`,
+/// `$user.name`)*. `None` for anything longer, which the error shows with its line.
+fn written(e: &Expr) -> Option<String> {
+    Some(match &e.kind {
+        ExprKind::Variable(v) => format!("${v}"),
+        ExprKind::Field { target, name, nullable } => match &target.kind {
+            ExprKind::This => format!("@{name}"),
+            _ => format!("{}{}{name}", written(target)?, if *nullable { "?." } else { "." }),
+        },
+        ExprKind::Index { target, index, nullable } => {
+            let i = match &index.kind {
+                ExprKind::Int(n) => n.to_string(),
+                ExprKind::Str(s) => format!("'{s}'"),
+                _ => written(index)?,
+            };
+            format!("{}{}{i}]", written(target)?, if *nullable { "?[" } else { "[" })
+        }
+        ExprKind::MethodCall { receiver, method, args, nullable } if args.is_empty() => {
+            format!("{}{}{method}()", written(receiver)?, if *nullable { "?." } else { "." })
+        }
+        ExprKind::Call { callee, args } if args.is_empty() => match &callee.kind {
+            ExprKind::Function(name) => format!("{name}()"),
+            _ => return None,
+        },
+        _ => return None,
+    })
 }

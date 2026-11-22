@@ -38,7 +38,7 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 ## Status
 
 - Phases 1 to 10 are done.
-- Phase 10 was released as `v0.10.0`: Ctrl+C throws an `Interrupted` *(see [language/errors.md](language/errors.md))*, `std/terminal` has prompts, styles, progress and ready-made pieces *(see [stdlib/terminal.md](stdlib/terminal.md))*, and `std/time` has dates, formats like Java's and time zones *(see [stdlib/time.md](stdlib/time.md))*. Errors thrown inside the standard library are shown where the script called it.
+- Phase 10 was released as `v0.10.0`: Ctrl+C throws an `Interrupted` *(see [language/errors.md](language/errors.md))*, `std/terminal` has prompts, styles, progress and ready-made pieces *(see [stdlib/terminal.md](stdlib/terminal.md))*, and `std/time` has dates, formats like Java's and time zones *(see [stdlib/time.md](stdlib/time.md))*. Errors thrown inside the standard library are shown where the script called it. After it: `never`, the return type of functions that never return, and `$x!`, which says a value isn't `null` *(see [language/functions.md](language/functions.md) and [language/operators.md](language/operators.md))*.
 - Phase 9 added `ferry doc`, released as `v0.9.0`: it makes the pages of a project and of a package, and writes the docs of one thing in the terminal *(see [tooling/docs.md](tooling/docs.md))*. What's missing of it *(i.e. search across the dependencies and the standard library)* can come as patch versions.
 - Phase 5 replaced the tree-walker with a bytecode compiler and a VM *(see [tooling/vm.md](tooling/vm.md))*. The per-user cache was moved to later, since starting a script already takes about 2 ms.
 - Phase 6 added `ferry` *(see [tooling/ferry.md](tooling/ferry.md))*: projects, dependencies from git repositories with exact versions, the lock file, and installed commands. `examples/sizes/` is a project.
@@ -60,22 +60,6 @@ Decided, and not built yet.
 - **`ferry new` without sample code**. By default it makes only the project: `ferry.toml`, `.gitignore` and the empty folders, without today's `greeting.lks` and the command that uses it, which every new project deletes first. A flag makes them as they are now, for trying ferry out. Its name *(i.e. `--example`)*, and whether an application still gets an empty command in `bin/`, are decided when it's built *(see [tooling/ferry.md](tooling/ferry.md#commands))*.
 - **Wrong arguments to a command look like a mistake of the script in `ferry`**. An uncaught `UsageError` *(i.e. a `<day>` that's missing, or `abc` for a number)* is the person's mistake, not the script's, so it should look like any other command-line tool's: the message and the usage on stderr, and the exit code 2, as the notes say *(see [language/cli.md](language/cli.md))*. `lks` does it, and so do the commands `ferry install` makes, which run `lks`. But `ferry run` shows it as an error in the script: `error: UsageError: ...`, the line of code with `Cli::parse()` under it, and the exit code 1. It should do what `lks` does, without a trace or code, the same for every way a script runs.
 - **`!` turns any value into a `bool`**, so `!null` is `true` and `!$user` asks whether there's a user. Today `!` only takes a `bool`, and `!null` is an error *(`` `!` needs a bool ``)*. `!!$x` then gives `$x` as a `bool`. On a `bool` it's NOT, as now. On anything else *(i.e. a string or an object)*, it checks for `null`: `!$x` is `$x == null`, so `!''`, `!0` and `![]` are `false`, since they aren't `null`. Empty values aren't false, unlike in JavaScript or Python. Still to decide when it's built: whether `if`, `while`, `&&` and `||` take any value the same way or stay only for `bool` *(see Boolean operators in [language/operators.md](language/operators.md))*.
-- **`$x!` says a value isn't `null`**, like in TypeScript, C# and Swift *(Kotlin's `!!`)*, for checks the checker can't follow: `if ($list.length() > 0) { const $first = $list[0]!; }`. The checker gives `$x!` the type of `$x` without its `?`, and `!` on a value that can't be `null` is an error, since it isn't needed. When the script runs, it checks: a `null` throws right there, not later where it's used, so it's a check and not a type, and types still never change what the code does. It chains like the other operators *(i.e. `$user?.address!.city`, `$map['key']!.trim()`)*, and goes on the same line as its value.
-    - **`!==` is an error**, with a hint: `there's no !==: write != to compare, or $a! == $b to say $a isn't null`. Lakescript has no `===` or `!==`, and reading `$a !== $b` as `$a! == $b` would quietly mean the opposite of what someone used to JavaScript wrote. `!=` stays unambiguous, since `$x!` can't be assigned to.
-    - A `null` throws a `NullError`, a new exception under `TypeError`, with a message like `` `$list[0]` is null ``. So `catch (TypeError $e)` still catches it.
-- **`never`, the return type of a function that never returns**, like Rust's `!`, TypeScript's `never` and Swift's `Never`. `!` is already NOT and `$x!`, and `never` is lowercase like `void` and `any`.
-    ```
-    never fail(string $message) {
-        errln(f"error: {$message}");
-        exit(1);
-    }
-
-    const $name = $config['name'] ?? fail('the config needs a name');   // a string, not a ?string
-    if ($user == null) fail('nobody is logged in');                     // $user isn't nullable after it
-    ```
-    - A call to a `never` function ends a block like `return`, `throw` and `exit()` do: it narrows, a function that must return can end with it, and the code after it can't run. Today only `exit` is known by its name; it becomes `never exit(number $code = 0);` in the prelude, like `throw` as an expression, which already counts as any type.
-    - The checker checks that a `never` function can't reach its end: every way through it throws, exits, calls another `never` function or loops forever. A `return` in it is an error.
-    - A `never` call can go where any type is expected, like `throw`. Only as a return type: a `never` variable or parameter is an error.
 
 ## Notes
 

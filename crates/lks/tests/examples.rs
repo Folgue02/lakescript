@@ -157,6 +157,12 @@ fn html() {
 }
 
 #[test]
+fn nulls() {
+    let out = run_ok(&["examples/nulls.lks"]);
+    assert_eq!(out, "Tea: 11 left after this cup\nCake: 3 left\nFirst: CAKE\nNo pie: `$stock['pie']` is null\n");
+}
+
+#[test]
 fn dates() {
     let out = run_ok(&["examples/dates.lks"]);
     assert_eq!(

@@ -17,6 +17,7 @@ pub const TREE: &[(&str, Option<&str>)] = &[
     // Arguments that don't match a command *(see `cli.rs`)*
     ("UsageError", Some("ValueError")),
     ("TypeError", Some("Exception")),
+    ("NullError", Some("TypeError")),
     ("IndexError", Some("Exception")),
     ("ArithmeticError", Some("Exception")),
     ("CommandFailed", Some("Exception")),
@@ -27,6 +28,7 @@ pub const TREE: &[(&str, Option<&str>)] = &[
 ];
 
 pub const TYPE_ERROR: &str = "TypeError";
+pub const NULL_ERROR: &str = "NullError";
 pub const ASSERTION_ERROR: &str = "AssertionError";
 pub const INTERRUPTED: &str = "Interrupted";
 pub const VALUE_ERROR: &str = "ValueError";

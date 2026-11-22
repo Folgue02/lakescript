@@ -6,7 +6,11 @@
 - A list can be spread into the arguments with `...` *(i.e. `greet(...$names)`)*.
 - Should allow calling them while naming parameters. Named and positional arguments can be mixed, but positional ones go first *(i.e. `createFile('daniel', extension: 'jpg')`)*.
 - Must always have a return type. Functions that don't return anything use `void` *(i.e. `void log(string $message) { ... }`)*. This way a definition never looks like a call followed by a block.
-    - A function that never returns *(it always throws or exits)* is going to use `never` *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
+    - A function that never returns, because it always throws or exits, has `never`, like Rust's `!`, TypeScript's `never` and Swift's `Never` *(i.e. `never fail(string $message) { errln($message); exit(1); }`)*. `exit()` is one.
+        - A call to it ends a block, like `return` and `throw`: it narrows *(i.e. after `if ($user == null) fail('nobody is logged in');`, `$user` isn't nullable)*, a function that must return can end with it, and the code after it doesn't run.
+        - It fits where any type is expected, like `throw` *(i.e. `const $name = $config['name'] ?? fail('the config needs a name');` is a `string`)*.
+        - The checker checks that it can't reach its end: every way through it throws, exits, calls another `never` function or loops forever. A `return` in it is an error.
+        - It's only a return type: a `never` variable or parameter is an error, and so is `.as(never)`.
 - Should allow generics. The type parameters go after the name *(i.e. `?T first<T>(list<T> $items) = $items[0];`)*. They're inferred when calling, so they're never written in a call: `first($names)`.
 - Functions can call each other in any order: a function can call any function declared in the same block or around it, even one further down, so recursive functions that call each other work *(i.e. a parser with `expr()` and `term()`)*. A function can call itself.
     - The statements of the block itself can only call a function after its declaration, since it doesn't exist before that line runs *(i.e. `f();` above `void f() { ... }` is an error)*. The checker says so before anything runs.

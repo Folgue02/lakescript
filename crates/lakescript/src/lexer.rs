@@ -355,7 +355,14 @@ impl Lexer {
                 }
             }
             '!' => {
-                if self.eat('=') { NotEq } else { Bang }
+                if self.eat('=') {
+                    if self.eat('=') {
+                        return self.error("there's no `!==`: write `!=` to compare, or `$a! == $b`, with a space, to say `$a` isn't `null`", start);
+                    }
+                    NotEq
+                } else {
+                    Bang
+                }
             }
             '<' => {
                 if self.eat('<') {

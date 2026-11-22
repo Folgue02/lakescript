@@ -123,6 +123,7 @@ fn convert(ty: &TypeExpr, receiver: &[Rc<str>], generics: &mut Vec<Rc<str>>) -> 
             match name.as_str() {
                 "any" | "type" => Ty::Any,
                 "void" => Ty::Void,
+                "never" => Ty::Never,
                 "bool" => Ty::Bool,
                 "number" => Ty::Number,
                 "string" => Ty::Str,

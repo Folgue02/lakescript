@@ -10,6 +10,9 @@ pub enum Ty {
     /// Not checked: any value, including `null`.
     Any,
     Void,
+    /// What a function that never returns gives *(i.e. `exit()`)*: no value
+    /// at all, so it fits wherever any type is expected, like `throw`.
+    Never,
     /// The type of the `null` literal. Only nullable types accept it.
     Null,
     Bool,
@@ -284,6 +287,7 @@ impl fmt::Display for Ty {
         match self {
             Ty::Any | Ty::Var(_) => write!(f, "any"),
             Ty::Void => write!(f, "void"),
+            Ty::Never => write!(f, "never"),
             Ty::Null => write!(f, "null"),
             Ty::Bool => write!(f, "bool"),
             Ty::Number => write!(f, "number"),
@@ -325,6 +329,7 @@ pub fn a(ty: &Ty) -> String {
         Ty::Any | Ty::Var(_) => "any value".into(),
         Ty::Null => "`null`".into(),
         Ty::Void => "nothing (`void`)".into(),
+        Ty::Never => "nothing (`never`)".into(),
         Ty::Nullable(_) => format!("a {ty}, which can be `null`"),
         other => {
             let text = other.to_string();

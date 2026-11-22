@@ -254,8 +254,16 @@ fn const_fields_narrow_like_variables() {
     assert_eq!(ok(&format!("{day}const $d = Day(($s) -> 1, ($s) -> 2);\noutln($d.part(2)('x'));")), "2\n");
     assert_eq!(ok("class A {\n    pub const ?string @name;\n}\nconst $a = A('x');\nif ($a.name != null) {\n    outln($a.name.upper());\n}"), "X\n");
     assert_eq!(ok("class A {\n    const ?string @name;\n    pub string show() {\n        if (@name == null) return '-';\n        return @name;\n    }\n}\noutln(A(null).show());"), "-\n");
-    // A field that isn't `const` can change between the check and its use
-    assert!(rejected("class A {\n    ?string @name = null;\n    pub string show() = if (@name != null) @name else '-';\n}").contains("can be `null`"));
+    // A field that isn't `const` can change between the check and its use, and the error says why the check didn't count
+    assert_eq!(
+        rejected("class A {\n    ?string @name = null;\n    pub string show() = if (@name != null) @name else '-';\n}"),
+        "this can be `null`, but a string is expected here. `@name` isn't `const`, so checking it for `null` doesn't narrow it: make it `const`, or copy it into a `const` variable first"
+    );
     // And so can a `let` variable's object
-    assert!(rejected("class A {\n    pub const ?string @name;\n}\nlet $a = A('x');\nif ($a.name != null) {\n    outln($a.name.upper());\n}").contains("null"));
+    assert!(
+        rejected("class A {\n    pub const ?string @name;\n}\nlet $a = A('x');\nif ($a.name != null) {\n    outln($a.name.upper());\n}")
+            .ends_with("`$a` isn't `const`, so checking `$a.name` for `null` doesn't narrow it: declare `$a` with `const`, or copy the field into a `const` variable first")
+    );
+    // Without a check, there's no hint
+    assert_eq!(rejected("class A {\n    ?string @name = null;\n    pub string show() = @name;\n}"), "`show` returns a string, not a ?string, which can be `null`");
 }

@@ -1298,6 +1298,11 @@ impl Parser {
                     self.expect(&TokenKind::RBracket, "after the index")?;
                     ExprKind::Index { target: Box::new(expr), index: Box::new(index), nullable }
                 }
+                // `$x!`, right after the value: a `!` after a space is the start of something else
+                TokenKind::Bang if self.peek().span.start == self.last_span.end && self.peek().span.file == self.last_span.file => {
+                    self.advance();
+                    ExprKind::NonNull(Box::new(expr))
+                }
                 TokenKind::PlusPlus | TokenKind::MinusMinus => {
                     if !is_assignable(&expr) {
                         return self.error_here("`++` and `--` only work on variables and indexes");

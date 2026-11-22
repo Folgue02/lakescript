@@ -45,8 +45,8 @@ group = "Output"
 [[modules.items]]
 kind = "function"
 name = "exit"
-code = "void exit(number $code = 0)"
-text = "Stops the script with an exit code, from `0` to `255`"
+code = "never exit(number $code = 0)"
+text = "Stops the script with an exit code, from `0` to `255`. It never returns, so the checker knows the code after it doesn't run *(i.e. `if ($x == null) exit(1);` narrows `$x`)*"
 group = "Exit"
 
 [[modules]]

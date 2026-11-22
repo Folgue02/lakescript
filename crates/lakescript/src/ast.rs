@@ -63,6 +63,8 @@ pub enum ExprKind {
     Assign { op: Option<BinaryOp>, target: Box<Expr>, value: Box<Expr> },
     /// `++$x`, `$x++`, `--$x`, `$x--`
     Increment { target: Box<Expr>, delta: i8, prefix: bool },
+    /// `$x!`: the value, which isn't `null`. It throws a `NullError` when it is.
+    NonNull(Box<Expr>),
     Call { callee: Box<Expr>, args: Vec<Arg> },
     MethodCall { receiver: Box<Expr>, method: String, args: Vec<Arg>, nullable: bool },
     /// `.as(type)` and `.is(type)`
@@ -551,6 +553,7 @@ impl fmt::Display for Expr {
                 let op = if *delta > 0 { "++" } else { "--" };
                 if *prefix { write!(f, "({op}pre {target})") } else { write!(f, "({op}post {target})") }
             }
+            NonNull(e) => write!(f, "(! {e})"),
             Call { callee, args: a } => write!(f, "(call {callee}{})", args(a)),
             MethodCall { receiver, method, args: a, nullable } => {
                 let dot = if *nullable { "?." } else { "." };

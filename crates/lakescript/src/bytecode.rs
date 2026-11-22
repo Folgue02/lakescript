@@ -128,6 +128,9 @@ pub enum Op {
     /// `classes`: how many classes are on top, the ones the type names *(see `class_names`)*.
     Is { ty: u32, catch: bool, classes: u8 },
     As { ty: u32, classes: u8 },
+    /// `$x!`: throws a `NullError` when the value on top is `null`. The
+    /// constant is how the value is written *(i.e. `$list[0]`)*, or `null`.
+    NonNull(u32),
 
     // ---- Classes ----
     /// Makes a class, described by `Proto::classes`, from what's on the stack:

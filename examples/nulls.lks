@@ -1,0 +1,31 @@
+// Values that can be `null`: checks that narrow, `never` functions that stop
+// the script, and `$x!` for what the checker can't see.
+
+never fail(string $message) {
+    errln(f"error: {$message}");
+    exit(1);
+}
+
+const $stock = {'tea' => 12, 'cake' => 3};
+
+// After a check, the value isn't nullable anymore
+const $tea = $stock['tea'];
+if ($tea == null) fail('no tea');
+outln(f"Tea: {$tea - 1} left after this cup");
+
+// `??` with a `never` call gives a value that's never `null`
+const number $cake = $stock['cake'] ?? fail('no cake');
+outln(f"Cake: {$cake} left");
+
+// `$x!` says a value isn't `null`, when the checker can't know it
+const $names = $stock.keys().sort();
+if ($names.length() > 0) {
+    outln(f"First: {$names[0]!.upper()}");
+}
+
+// And it throws a NullError right there when it is
+try {
+    outln($stock['pie']! + 1);
+} catch (NullError $e) {
+    outln(f"No pie: {$e.message()}");
+}
