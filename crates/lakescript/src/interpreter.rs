@@ -79,7 +79,7 @@ pub fn uncaught(exception: &ExceptionValue, files: &[String]) -> Diagnostic {
     } else {
         format!("{}: {}", exception.kind, exception.message)
     };
-    let mut diagnostic = Diagnostic::new(message, exception.span);
+    let mut diagnostic = Diagnostic::new(message, exception.place());
     diagnostic.trace = calls(exception, files, false);
     diagnostic
 }
@@ -209,6 +209,8 @@ impl<'a> Interpreter<'a> {
         match self.call(&script, Vec::new(), Vec::new(), Span::default()) {
             Ok(_) => Ok(Outcome::Finished),
             Err(Flow::Exit(code)) => Ok(Outcome::Exit(code)),
+            // Ctrl+C not caught: the code of shells, without the message of an error
+            Err(Flow::Throw(e)) if &*e.kind == exceptions::INTERRUPTED => Ok(Outcome::Exit(130)),
             Err(Flow::Throw(exception)) => Err(uncaught(&exception, &self.host.loader.files)),
         }
     }
@@ -288,9 +290,20 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
+    /// Throws an `Interrupted` if Ctrl+C was pressed since the last check.
+    #[inline(always)]
+    fn check_interrupt(&self, span: Span) -> Exec<()> {
+        if self.host.interrupt.load(std::sync::atomic::Ordering::Relaxed) {
+            self.host.interrupt.store(false, std::sync::atomic::Ordering::Relaxed);
+            return error_as(exceptions::INTERRUPTED, "the script was interrupted with Ctrl+C", span);
+        }
+        Ok(())
+    }
+
     /// The `Call` instruction: the function is `argc` values below the top.
     #[inline(always)]
     fn call_op(&mut self, argc: usize, span: Span) -> Exec<bool> {
+        self.check_interrupt(span)?;
         let callee = self.stack.len() - argc - 1;
         let function = match &self.stack[callee] {
             Value::Function(f) => f.clone(),
@@ -400,6 +413,10 @@ impl<'a> Interpreter<'a> {
                 // `exit()` only runs the `finally`s
                 continue;
             }
+            // `try` as an expression doesn't catch Ctrl+C
+            if handler.kind == HandlerKind::TryExpr && matches!(&flow, Flow::Throw(e) if &*e.kind == exceptions::INTERRUPTED) {
+                continue;
+            }
             self.frames.truncate(handler.frame + 1);
             self.stack.truncate(handler.sp);
             let frame = &mut self.frames[handler.frame];
@@ -422,7 +439,10 @@ impl<'a> Interpreter<'a> {
     /// Takes the calls an exception is thrown through, the first time it's
     /// thrown: from the frames, which are all still there. Each frame is at
     /// the call it made, and the last one where the exception was thrown. A
-    /// function that called itself from the same place is one entry.
+    /// function that called itself from the same place is one entry. The
+    /// calls inside the standard library are left out: its code isn't the
+    /// script's, and its files can't be opened, so the error is where the
+    /// script called it.
     fn keep_trace(&self, e: &ExceptionValue) {
         if e.trace.borrow().is_some() {
             return;
@@ -438,6 +458,11 @@ impl<'a> Interpreter<'a> {
                 Some(prev) if i != last && prev.function == function && prev.span == span => prev.times += 1,
                 _ => entries.push(crate::value::TraceEntry { function, span, times: 1 }),
             }
+        }
+        let files = &self.host.loader.files;
+        let ours = |entry: &crate::value::TraceEntry| !files.get(entry.span.file as usize).is_some_and(|f| f.starts_with(crate::stdlib::EMBEDDED));
+        if entries.iter().any(ours) {
+            entries.retain(ours);
         }
         *e.trace.borrow_mut() = Some(Rc::new(entries));
     }
@@ -713,7 +738,13 @@ impl<'a> Interpreter<'a> {
                 }
 
                 // ---- Jumps ----
-                Op::Jump(t) => ip = t as usize,
+                Op::Jump(t) => {
+                    // A jump back is the next turn of a loop
+                    if (t as usize) < ip {
+                        self.check_interrupt(span!())?;
+                    }
+                    ip = t as usize
+                }
                 Op::JumpIfFalse { target, keyword } => match self.pop() {
                     Value::Bool(true) => {}
                     Value::Bool(false) => ip = target as usize,
@@ -1187,6 +1218,7 @@ impl<'a> Interpreter<'a> {
                     self.stack[at + 2] = extra;
                 }
                 Op::ForNext { slot, exit, kind } => {
+                    self.check_interrupt(span!())?;
                     let at = base + slot as usize;
                     let Value::Int(i) = self.stack[at + 1] else { unreachable!("the index of a `for`") };
                     let item = match &self.stack[at] {

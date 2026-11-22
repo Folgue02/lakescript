@@ -15,6 +15,7 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **7. OOP** | Classes | Classes, interfaces, enums, custom exceptions as classes, `command` and `subcommand` for command-line arguments. Type aliases are removed, `pub const` needs its type, and modules can import each other in a cycle |
 | **8. Editors** | A language server | `lks-lsp`: errors while typing, hover, go to definition and completion, first for farsub *(see [tooling/lsp.md](tooling/lsp.md))* |
 | **9. Documentation** | Docs for scripts and projects | The documentation of the standard library, and `ferry doc` for the `pub` items of a project, from their `///` comments |
+| **10. Interactive scripts** | Talking with the person who runs the script | `std/terminal` *(prompts, styles, progress, a fuzzy finder, a pager, tables)*, Ctrl+C as an `Interrupted`, and dates, their formats and time zones in `std/time` |
 | **Later** | | The rest of the standard library, the per-user bytecode cache, formatter, concurrency |
 
 ## Versions
@@ -36,7 +37,8 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 
 ## Status
 
-- Phases 1 to 9 are done.
+- Phases 1 to 10 are done.
+- Phase 10: Ctrl+C throws an `Interrupted` *(see [language/errors.md](language/errors.md))*, `std/terminal` has prompts, styles, progress and ready-made pieces *(see [stdlib/terminal.md](stdlib/terminal.md))*, and `std/time` has dates, formats like Java's and time zones *(see [stdlib/time.md](stdlib/time.md))*. Errors thrown inside the standard library are shown where the script called it.
 - Phase 9 added `ferry doc`, released as `v0.9.0`: it makes the pages of a project and of a package, and writes the docs of one thing in the terminal *(see [tooling/docs.md](tooling/docs.md))*. What's missing of it *(i.e. search across the dependencies and the standard library)* can come as patch versions.
 - Phase 5 replaced the tree-walker with a bytecode compiler and a VM *(see [tooling/vm.md](tooling/vm.md))*. The per-user cache was moved to later, since starting a script already takes about 2 ms.
 - Phase 6 added `ferry` *(see [tooling/ferry.md](tooling/ferry.md))*: projects, dependencies from git repositories with exact versions, the lock file, and installed commands. `examples/sizes/` is a project.
@@ -51,7 +53,6 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 
 Decided, and not built yet.
 
-- **Ctrl+C as an exception**, `Interrupted`, beside `Exception` and thrown anywhere in a script, like Python's `KeyboardInterrupt` *(see Ctrl+C in [language/errors.md](language/errors.md))*. `std/terminal` needs it.
 - **Remove symbols** *(`:active`, `%i[...]`, the type `symbol`)*. Since phase 7, enums do what they were for, and better: the checker catches a typo in an enum's value, checks that a `switch` covers every one, and completes them, while any `:name` is a valid symbol. Strings do the rest. Symbols also gave two ways to write the same key *(`{:a => 1}['a']` is `null`)*, didn't survive JSON or CSV, which write them as strings, and cost syntax next to named arguments, `? :` and `::`.
     - Fixed sets of values become enums, and loose values strings *(i.e. `case :admin` becomes `case 'admin'`, or an enum)*.
     - `process::platform()` gives a string or an enum instead of `:linux`, `:macos` and `:windows`. Which one is decided when it's built.

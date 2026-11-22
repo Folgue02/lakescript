@@ -924,8 +924,18 @@ fn calls_super(body: &FunctionBody) -> bool {
     }
 }
 
+thread_local! {
+    /// Made once, so the checkers of every module see the same interfaces: a
+    /// class from another module implements the `IOrdered` of this one.
+    static OPERATOR_INTERFACES: Vec<(String, Ty)> = make_operator_interfaces();
+}
+
 /// The interfaces behind the operators, as the checker sees them *(see `operators.rs`)*.
 pub(super) fn operator_interfaces() -> Vec<(String, Ty)> {
+    OPERATOR_INTERFACES.with(|all| all.clone())
+}
+
+fn make_operator_interfaces() -> Vec<(String, Ty)> {
     let mut out = Vec::new();
     for (name, method, spec) in crate::operators::INTERFACES {
         let ty = |word: &str| match word {

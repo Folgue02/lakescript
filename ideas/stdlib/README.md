@@ -58,7 +58,7 @@ What's coming next is in [planned.md](planned.md).
 | [fs.md](fs.md) | `std/fs`: files and folders |
 | [path.md](path.md) | `std/path`: building and splitting paths |
 | [env.md](env.md) | `std/env`: environment variables |
-| [time.md](time.md) | `std/time`: the current time |
+| [time.md](time.md) | `std/time`: the current time, dates, their formats and zones *(`std/time/zone`)* |
 | [io.md](io.md) | `std/io`: reading stdin |
 | [process.md](process.md) | `std/process`: arguments, the current folder, finding and running programs |
 | [html.md](html.md) | `std/html`: reading HTML and finding its parts with CSS selectors |
@@ -67,13 +67,7 @@ What's coming next is in [planned.md](planned.md).
 | [format/csv.md](format/csv.md) | `std/format/csv`: reading and writing CSV |
 | [test.md](test.md) | `std/test`: what tests need besides `assert` *(see [testing.md](../tooling/testing.md))* |
 | [template.md](template.md) | `std/template`: templates with `{{ }}` tags, like Ruby's ERB |
-
-### Still planned
-
-| File          | Contents |
-|---------------|----------|
 | [terminal.md](terminal.md) | `std/terminal`: prompts, styles, progress and ready-made interactive pieces |
-| `time.md`     | Dates, times and durations |
 
 ## Backlog
 

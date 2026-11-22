@@ -1,0 +1,126 @@
+//! Talking with the person who runs the script: asking them things, styles,
+//! the size of the terminal, progress, and ready-made pieces like a fuzzy
+//! finder or a pager *(see ideas/stdlib/terminal.md)*. Its Rust part,
+//! `std/terminal/native`, draws on the terminal.
+
+use std/terminal/native;
+use std/terminal/Style;
+
+// ---- Styles ----
+
+/// The text with the codes of those styles around it *(i.e.
+/// `terminal::style('error:', Style::RED, Style::BOLD)`)*. Without colors
+/// *(`NO_COLOR`, or the output isn't a terminal)*, the text as it is.
+pub string style(string $text, ...Style $styles) = native::style($text, $styles.map(($s) -> $s.name()));
+
+/// The text without the codes of styles.
+pub string strip(string $text) = native::strip($text);
+
+/// How many columns the text takes: without the codes of styles, and with the
+/// characters that take two *(i.e. emoji)* counted twice.
+pub number visibleWidth(string $text) = native::visibleWidth($text);
+
+// ---- The terminal ----
+
+/// `true` when there's a person at a terminal: stdin and stderr are terminals.
+pub bool interactive?() = native::interactive();
+
+/// The width of the terminal, in columns, or 80 when it isn't one.
+pub number width() = native::size()[0] ?? 80;
+
+/// The height of the terminal, in lines, or 24 when it isn't one.
+pub number height() = native::size()[1] ?? 24;
+
+/// One key, without waiting for enter *(i.e. `'a'`, `'enter'`, `'up'`)*.
+/// Throws an `IOError` without a terminal.
+pub string readKey() = native::readKey();
+
+/// Clears the screen.
+pub void clear() = native::clear();
+
+// ---- Prompts ----
+
+/// A line the person writes. Without a terminal, the next line of stdin, or
+/// `$default` when there's nothing more to read.
+///
+/// $question: what's asked
+/// $default: the answer when the person writes nothing
+/// $check: gives what's wrong with an answer, or `null` when it's fine. The question is asked again until it is
+/// throws ValueError: without a terminal, when `$check` doesn't like the answer
+pub string ask(string $question, ?string $default = null, ?((string) -> ?string) $check = null) {
+    while (true) {
+        const $answer = native::ask($question, $default);
+        if ($check == null) {
+            return $answer;
+        }
+        const $problem = $check($answer);
+        if ($problem == null) {
+            return $answer;
+        }
+        native::problem($problem);
+    }
+    return '';
+}
+
+/// A line the person writes, without showing it.
+///
+/// throws IOError: without a terminal, since a secret never comes from a file or a command by accident
+pub string password(string $question) = native::password($question);
+
+/// Yes or no. Without a terminal, a line of stdin like `y`, `yes`, `n` or `no`.
+pub bool confirm(string $question, ?bool $default = null) = native::confirm($question, $default);
+
+/// One of the options, picked with the arrow keys. Without a terminal, a line
+/// of stdin with one of them.
+pub string choose(string $question, list<string> $options) = native::choose($question, $options);
+
+/// Several of the options, ticked with the space bar. Without a terminal, a
+/// line of stdin with them separated by commas.
+pub list<string> chooseMany(string $question, list<string> $options) = native::chooseMany($question, $options);
+
+// ---- Progress ----
+
+/// A bar that fills up to its total, or a spinner without one, on stderr.
+/// Made by `terminal::progress()`.
+pub class Progress {
+    /// What it fills up to, or `null` for a spinner.
+    pub const ?number @total;
+    /// What it's doing *(i.e. `Copying`)*.
+    pub const string @label;
+    /// How far it got.
+    pub number @done = 0;
+
+    /// Moves it forward.
+    ///
+    /// $n: how much
+    pub void advance(number $n = 1) {
+        @done += $n;
+        native::drawProgress(@total, @label, @done, false);
+    }
+
+    /// Leaves it full, and goes to the next line.
+    pub void finish() {
+        native::drawProgress(@total, @label, @total ?? @done, true);
+    }
+}
+
+/// A bar that fills up to `$total`. With `null`, a spinner that turns with each
+/// `advance()` *(i.e. `terminal::progress(null, 'Reading pages')`)*.
+pub Progress progress(?number $total, string $label = '') = Progress($total, $label);
+
+// ---- Ready-made pieces ----
+
+/// Typing filters the list, fuzzily, like `fzf`. The item picked, or `null`
+/// when the person gives up with Escape.
+pub ?string filter(list<string> $items, string $question = 'Search') = native::filter($question, $items);
+
+/// Shows long text to scroll through, with `$PAGER` or `less`. Without a
+/// terminal, writes it.
+pub void pager(string $text) = native::pager($text);
+
+/// Writes the rows with their columns lined up. Rows are lists, or maps whose
+/// keys are the header. Through the pager when they don't fit.
+pub void table(list<any> $rows, ?list<string> $header = null) = native::table($rows, $header);
+
+/// Opens `$VISUAL` or `$EDITOR` on the text, and gives what was saved, like `git commit`.
+pub string edit(string $text) = native::edit($text);

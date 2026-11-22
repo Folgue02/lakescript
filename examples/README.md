@@ -43,10 +43,12 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [json.lks](json.lks) | `std/format/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
 | [csv.lks](csv.lks) | `std/format/csv`: rows as lists or as maps by the names of the columns, quotes, other separators | |
 | [html.lks](html.lks) | `std/html`: a page, CSS selectors, text and attributes, repaired HTML, the JSON in a `<script>` | |
+| [terminal.lks](terminal.lks) | `std/terminal`: styles with `Style`, `ask` with a check, `choose`, `confirm`, a progress bar and a table; answers from a pipe without a terminal | `printf 'Ann\\n\\ntea\\ny\\n' \| lks examples/terminal.lks` |
 | [http.lks](http.lks) | `std/http`: a request, its status and headers, JSON answers, `NetworkError` and downloading | `lks examples/http.lks https://api.github.com/repos/rust-lang/rust` |
 | [templates/templates.lks](templates/templates.lks) | `std/template`: `{{ }}` tags, `for` and `if` blocks, a text template and an HTML template, `page.html.elks`, that escapes its values, `raw()` | |
 | [testing.lks](testing.lks) | Tests: functions named `test...`, `assert` and `test::throws` | `lks --test examples/testing.lks` |
 | [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
+| [dates.lks](dates.lks) | `std/time` and `std/time/zone`: parsing and formatting dates with Java's letters, ISO 8601, the same instant in other zones, comparing and sorting dates | |
 | [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, typed `pub const`s and a module's private `let` | |
 | [shop/main.lks](shop/main.lks) | A file per type: `use store/Customer;` imports the class itself, and `Customer` and `Order` use each other | |
 | [backup/backup.lks](backup/backup.lks) | A real script: arguments, a JSON config, a helper module, `tar`, rotating old backups | `lks examples/backup/backup.lks <folder> <backups folder>` |

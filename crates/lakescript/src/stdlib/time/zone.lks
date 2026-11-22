@@ -1,0 +1,29 @@
+//! `std/time/zone`: time zones, for the dates of `std/time` *(see
+//! ideas/stdlib/time.md)*. Like Java's `ZoneId` and Python's `zoneinfo`.
+
+use std/time/native;
+
+/// A time zone *(i.e. `Europe/Madrid`)*, from `zone::named()`, `zone::local()` or `zone::utc()`.
+pub class Zone {
+    /// Its IANA name *(i.e. `Europe/Madrid`)*, `UTC`, or an offset like `+01:00`.
+    pub const string @name;
+
+    implement IEquals {
+        bool equals?(Zone $other) = @name == $other.name;
+    }
+}
+
+/// UTC.
+pub Zone utc() = Zone('UTC');
+
+/// A zone by its IANA name *(i.e. `Europe/Madrid`, `America/Lima`)*, `UTC`, or
+/// an offset *(i.e. `+05:30`)*.
+///
+/// throws ValueError: when there's no zone with that name
+pub Zone named(string $name) = Zone(native::zone($name));
+
+/// The zone of the system, or the one in `TZ`.
+pub Zone local() = Zone(native::localZone());
+
+/// The names of every zone the system knows, sorted.
+pub list<string> all() = native::zones();

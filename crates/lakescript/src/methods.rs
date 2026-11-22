@@ -174,7 +174,7 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
         Value::Range(range) => range_method(interp, *range, &args)?,
         Value::Exception(e) => match method {
             "message" => Some(string(&e.message)),
-            "line" => Some(Value::Int(e.span.line as i64)),
+            "line" => Some(Value::Int(e.place().line as i64)),
             // The calls it was thrown through, the first one first, with where it was thrown last
             "trace" => {
                 let files = &interp.host.loader.files;

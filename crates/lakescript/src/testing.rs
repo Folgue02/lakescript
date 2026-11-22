@@ -69,6 +69,8 @@ impl Engine {
             let seconds = start.elapsed().as_secs_f64();
             self.host.output = output;
             self.host.error = error;
+            // Ctrl+C stops the tests, not only this one
+            let stop = matches!(&result, Err(Flow::Throw(e)) if &*e.kind == exceptions::INTERRUPTED);
             let failure = match result {
                 Ok(_) => None,
                 Err(Flow::Throw(e)) if &*e.kind == exceptions::ASSERTION_ERROR => {
@@ -80,6 +82,9 @@ impl Engine {
                 Err(Flow::Exit(code)) => Some(Diagnostic::new(format!("the test called `exit({code})`"), Default::default())),
             };
             results.push(TestResult { name, failure: failure.map(|d| self.locate(d)), output: captured.text(), seconds });
+            if stop {
+                break;
+            }
         }
         let _ = self.host.output.flush();
         Ok(results)

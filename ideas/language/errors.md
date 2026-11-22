@@ -19,7 +19,7 @@ Exception
 ├── CommandFailed       // a shell command returned an error
 └── AssertionError      // an `assert` whose condition was false
 
-Interrupted             // Ctrl+C: beside Exception, not under it (planned, see Ctrl+C below)
+Interrupted             // Ctrl+C: beside Exception, not under it (see Ctrl+C below)
 ```
 
 - Custom exceptions are classes that extend one of these *(see [classes.md](classes.md))*:
@@ -71,7 +71,7 @@ try {
 
 ## Ctrl+C
 
-*Decided, not built yet.*
+*Built.*
 
 Ctrl+C throws an `Interrupted` wherever the script is, like Python's `KeyboardInterrupt`. So a script can clean up before it stops *(i.e. remove a temporary folder in a `finally`)*.
 
@@ -90,6 +90,8 @@ try {
 - Not caught, the script stops with the code 130, like shells do, without the message of an error.
 - `try` as an expression and `test::throws` don't catch it either.
 - **How**: the signal of Ctrl+C *(SIGINT)* only sets a flag, and the VM checks it at the start of each loop's turn and each call, which costs a check of a bool. A read of stdin that's waiting, or a command that runs, ends and then it's thrown. A command gets the Ctrl+C itself too, since the terminal sends it to every process in front.
+- `lks` and `ferry` set the flag from a handler of `ctrlc`. A second Ctrl+C before the VM sees the first one *(i.e. while a long call of Rust runs)* stops the script at once, with 130. Engines that embed Lakescript give their own flag with `Engine::set_interrupt_flag`.
+- The VM checks it at backward jumps, at each turn of a `for` and at each call. Tests are in `crates/lakescript/tests/interrupt.rs`.
 - In `std/terminal`'s prompts the terminal is in raw mode, where Ctrl+C is a key: they put the terminal back and throw it themselves *(see [terminal.md](../stdlib/terminal.md))*.
 
 ## Throwing
@@ -161,7 +163,8 @@ error: FileNotFound: can't read 'b.csv': it doesn't exist
 
 - **Each line** is a call that hadn't finished: the function it was in, and the file, line and column it was at, in the order they were called, the first one at the top. The last function, where the error was thrown, is the error below them. A function of a module has its name *(i.e. `report::build`)*, and a method its class *(i.e. `Point.length`)*.
 - Paths are full, like the arrow's, so a terminal or an editor can open them.
-- Modules count, also the embedded ones *(i.e. `<std>/http.lks`)*, and so do functions called by methods *(i.e. the lambda of `.map()`)*.
+- Modules count, and so do functions called by methods *(i.e. the lambda of `.map()`)*.
+- **The standard library is left out**: the calls inside the modules written in Lakescript *(i.e. `<std>/time.lks`)* aren't lines, and an error thrown inside one is shown where the script called it, with its line of code. Their code isn't the script's, and their files can't be opened. A function of the script that they call *(i.e. the `$check` of `terminal::ask`)* is still a line. `$e.line()` and `$e.trace()` say the same.
 - **A function that calls itself** many times is one line *(i.e. `at fact (/home/ana/math.lks:3:12), 998 times`)*.
 - **An error without calls**, like the checker's or one at the top of the script, has no lines above it, and looks the same as now.
 - **Only an uncaught exception prints its trace.** A caught one prints nothing on its own: **`$e.trace()`** gives its lines as a `list<string>`, which the script joins and prints if it wants to *(i.e. `errln($e.trace().join('\n'))`)*. Its last line is where it was thrown *(i.e. `at load (/home/ana/shop/report.lks:4:34)`)*, since there's no error below it.

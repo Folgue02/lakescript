@@ -125,6 +125,16 @@ pub struct ExceptionValue {
     pub trace: RefCell<Option<Rc<Vec<TraceEntry>>>>,
 }
 
+impl ExceptionValue {
+    /// Where it's shown to be thrown: the last call of its trace, which leaves
+    /// out the code of the standard library *(i.e. the line of the script that
+    /// called `time::parse()`, not the one inside `time.lks`)*, or where it
+    /// was thrown before it has a trace.
+    pub fn place(&self) -> Span {
+        self.trace.borrow().as_ref().and_then(|t| t.last()).map(|t| t.span).unwrap_or(self.span)
+    }
+}
+
 /// A call that hadn't finished when an exception was thrown: the function
 /// it was in, and where it was in it *(see Tracebacks in ideas/language/errors.md)*.
 #[derive(Debug, Clone, PartialEq)]

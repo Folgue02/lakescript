@@ -10,6 +10,7 @@ mod json;
 mod path;
 mod process;
 mod template;
+mod terminal;
 mod test;
 mod time;
 
@@ -31,15 +32,25 @@ pub const MODULES: &[&str] = &[
     "std/path",
     "std/process",
     "std/template",
+    "std/terminal",
+    "std/terminal/Style",
+    "std/time/zone",
     "std/test",
     "std/time",
 ];
 
 /// The Rust parts of modules written in Lakescript, which only those modules use.
-const NATIVE: &[&str] = &["std/html/native", "std/http/native"];
+const NATIVE: &[&str] = &["std/html/native", "std/http/native", "std/terminal/native", "std/time/native"];
 
 /// Modules written in Lakescript, which come with the interpreter.
-const SOURCES: &[(&str, &str)] = &[("std/html", include_str!("html.lks")), ("std/http", include_str!("http.lks"))];
+const SOURCES: &[(&str, &str)] = &[
+    ("std/html", include_str!("html.lks")),
+    ("std/http", include_str!("http.lks")),
+    ("std/terminal", include_str!("terminal.lks")),
+    ("std/terminal/Style", include_str!("terminal/Style.lks")),
+    ("std/time", include_str!("time.lks")),
+    ("std/time/zone", include_str!("time/zone.lks")),
+];
 
 /// Where the files of the modules written in Lakescript seem to be, in errors.
 pub const EMBEDDED: &str = "<std>/";
@@ -111,11 +122,12 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/format/json" => json::register(&mut exports),
         "std/html/native" => html::register(&mut exports),
         "std/http/native" => http::register(&mut exports),
+        "std/terminal/native" => terminal::register(&mut exports),
         "std/path" => path::register(&mut exports),
         "std/process" => process::register(&mut exports),
         "std/template" => template::register(&mut exports),
         "std/test" => test::register(&mut exports),
-        "std/time" => time::register(&mut exports),
+        "std/time/native" => time::register(&mut exports),
         _ => return None,
     }
     let globals = Rc::new(Globals::default());

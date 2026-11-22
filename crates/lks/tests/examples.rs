@@ -157,6 +157,30 @@ fn html() {
 }
 
 #[test]
+fn dates() {
+    let out = run_ok(&["examples/dates.lks"]);
+    assert_eq!(
+        out,
+        "Thursday 24 December 2026, 18:30\nDay 4 of the week, at 18:30\n  America/Lima: Thu 12:30 (-05:00)\n  Asia/Tokyo: Fri 02:30 (+09:00)\n  UTC: Thu 17:30 (Z)\n\
+         2026-12-20T23:59:00Z\n2026-12-24T18:30:00+01:00\nThe deadline comes first\n['2026-01-01', '2026-12-20', '2026-12-24']\n90 hours from the deadline to the meeting\n\
+         Not a date: '2026-02-30' isn't a date in ISO 8601, like 2026-11-22 or 2026-11-22T10:00:00Z: parsed date is not valid: parameter 'day' for `2026-02` is invalid, must be in range `1..=28`\n"
+    );
+}
+
+#[test]
+fn terminal() {
+    let output = lks(&["examples/terminal.lks"], Some("Ann\n\ntea\ny\n"));
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Welcome to the Lake Café\nName   Ann\nDrink  tea\nSize   medium\nPrice  3.20\nEnjoy!\n"
+    );
+    let output = lks(&["examples/terminal.lks"], Some("\n"));
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ValueError: write a name, please"));
+}
+
+#[test]
 fn testing() {
     let out = run_ok(&["--test", "examples/testing.lks"]);
     assert!(out.starts_with("          ok testSlug\n"), "{out}");

@@ -761,7 +761,9 @@ impl<'a> Compiler<'a> {
             self.patch(push_catch);
             for catch in catches {
                 let mut to_next = None;
-                if let Some(ty) = &catch.ty {
+                // `catch ($e)` catches every `Exception`, but not an `Interrupted`, which is beside it
+                let every = TypeExpr { kind: TypeKind::Named { name: "Exception".into(), args: Vec::new() }, span };
+                if let Some(ty) = catch.ty.as_ref().or(Some(&every)) {
                     self.emit(Op::Dup);
                     let classes = self.type_classes(ty);
                     let t = self.ty(ty);

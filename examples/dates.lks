@@ -1,0 +1,36 @@
+// std/time and std/time/zone: dates, formats like Java's, ISO 8601, zones,
+// and comparing dates. The zones are named, so it prints the same anywhere.
+
+use std/time;
+use std/time/zone;
+
+const $madrid = zone::named('Europe/Madrid');
+
+// A meeting, written by a person in Madrid
+const $meeting = time::parse('24/12/2026 18:30', 'dd/MM/yyyy HH:mm', $madrid);
+outln($meeting.format('EEEE d MMMM yyyy, HH:mm'));
+outln(f"Day {$meeting.weekday} of the week, at {$meeting.hour}:{$meeting.minute}");
+
+// The same instant somewhere else
+for ($name in ['America/Lima', 'Asia/Tokyo', 'UTC']) {
+    const $there = $meeting.inZone(zone::named($name));
+    outln(f"  {$name}: {$there.format('EEE HH:mm (XXX)')}");
+}
+
+// ISO 8601, the format of JSON and APIs, without a format
+const $deadline = time::parse('2026-12-20T23:59:00Z');
+outln($deadline.format());
+outln($meeting.format());
+outln($deadline < $meeting ? 'The deadline comes first' : 'The meeting comes first');
+
+// Sorting dates, and the days between two of them
+const $dates = [$meeting, $deadline, time::of(2026, 1, 1, zone: $madrid)].sort();
+outln($dates.map(($d) -> $d.format('yyyy-MM-dd')));
+const $hours = ($meeting.millis() - $deadline.millis()) / 3600000;
+outln(f"{$hours.round()} hours from the deadline to the meeting");
+
+try {
+    time::parse('2026-02-30');
+} catch (ValueError $e) {
+    outln(f"Not a date: {$e.message()}");
+}

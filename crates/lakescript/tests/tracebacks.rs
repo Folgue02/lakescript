@@ -120,3 +120,17 @@ fn failed_tests_show_their_calls() {
     assert!(shown.contains("             at testHelper (t.lks:5:5)\n             t.lks:2:5: assert failed: $n == 4\n"), "{shown}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_standard_library_is_left_out() {
+    // Thrown inside `time.lks`, shown where the script called it
+    let e = error("use std/time;\nvoid load() {\n    time::parse('22/11/2026');\n}\nload();");
+    assert!(e.starts_with("  at the script (test.lks:5:1)\ntest.lks:3:5: error: ValueError: '22/11/2026' isn't a date in ISO 8601"), "{e}");
+    assert!(!e.contains("<std>"), "{e}");
+    // One called right from the script
+    let e = error("use std/html;\nhtml::parse('').select('a[');");
+    assert!(e.starts_with("test.lks:2:1: error: ValueError: 'a[' isn't a valid CSS selector"), "{e}");
+    // `line()` and `trace()` of a caught one say the same
+    let out = run("use std/time;\ntry {\n    time::parse('x');\n} catch (ValueError $e) {\n    outln($e.line());\n    outln($e.trace());\n}");
+    assert_eq!(out, "3\n['at the script (<script>:3:5)']\n");
+}

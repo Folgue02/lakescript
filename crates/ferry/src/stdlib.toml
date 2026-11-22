@@ -2822,6 +2822,157 @@ text = "The template in the file `$path`. It's escaped for HTML when the file en
 group = "Functions"
 
 [[modules]]
+short = "terminal"
+path = "std/terminal"
+title = "std/terminal"
+text = "*Built: layers 1 and 2. `form` and `std/tui` come later.*\n\nTalking with the person who runs the script: asking them things, colors and styles, the size of the terminal, progress, and ready-made interactive pieces like a fuzzy finder or a pager. `use std/terminal;`, then `terminal::ask('Your name?')`.\n\nIt has two layers:\n\n1. **The basics**: prompts, styles, what the terminal is like, single keys, progress.\n2. **Ready-made interactive pieces**, like `gum` and `fzf`: behavior of a TUI from one call, without programming one.\n\nFull TUIs, with a screen the script draws and an event loop, are a third layer, in `std/tui`, and they're in the backlog *(see [planned](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/planned.md))*."
+
+[[modules.groups]]
+name = "Prompts"
+text = "```\nuse std/terminal;\n\nconst $name = terminal::ask('Your name?', default: 'Ana');\nconst $pass = terminal::password('Password:');\nif (terminal::confirm('Delete 3 files?', default: false)) {\n    ...\n}\nconst $env = terminal::choose('Deploy to', ['staging', 'production']);\nconst $tags = terminal::chooseMany('Tags', ['bug', 'docs', 'ui']);\nconst $port = terminal::ask('Port?', check: ($s) -> $s.digits?() ? null : 'a number, please');\n```\n\n\n- One `ask` with `check:` instead of `askNumber`, `askEmail` and the like.\n- **Prompts are written to stderr**, so what the script writes to stdout can still be piped or captured *(i.e. `name=$(lks script.lks)`)*, like `gum` and `fzf` do.\n- **Without a person at the terminal** *(stdin piped, CI)*, prompts read their answer from stdin, a line each, so `echo y | script.lks` works. `choose` takes a line with one of the options, and `chooseMany` one with options separated by commas. When stdin has nothing more, the default is the answer, and without a default it's an error.\n    - A `$check` that doesn't like an answer from stdin throws a `ValueError` with its message, since there's no person to ask again.\n    - **Except `password`**, which never reads from a pipe: without a terminal it throws an `IOError`, so a secret never comes from a file or a command by accident.\n- **Ctrl+C** throws an `Interrupted`, like it does anywhere in a script *(see Ctrl+C in [errors](https://github.com/Folgue02/lakescript/blob/master/ideas/language/errors.md))*. While a prompt or a ready-made piece waits, the terminal is in raw mode, so Ctrl+C arrives as a key: the terminal is put back as it was first, then it's thrown. Escape gives up a prompt the same way, except in `filter`, where it gives `null`.\n- On a terminal, what `$check` says is shown under the question, after a `✗`, and the question is asked again."
+
+[[modules.groups]]
+name = "Styles"
+text = "One function, with the styles as the values of an enum, `Style`. Colors, backgrounds and effects are all values of it, given in the same place. It's a type module of its own, `std/terminal/Style`, so `use` gives `Style` itself *(see type modules in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*:\n\n```\nuse std/terminal;\nuse std/terminal/Style;\n\nerrln(terminal::style('error:', Style::RED, Style::BOLD) + ' the file is missing');\noutln(terminal::style(' OK ', Style::BLACK, Style::ON_GREEN));\n```\n\nThe values of `Style` *(as many as terminals can show, with plain names)*:\n\n- **Colors**: `BLACK`, `RED`, `GREEN`, `YELLOW`, `BLUE`, `MAGENTA`, `CYAN`, `WHITE`, and their bright versions `BRIGHT_RED` and so on. Also `GRAY`, `ORANGE`, `PINK`, `PURPLE` and `BROWN`, from the 256 colors most terminals have.\n- **Backgrounds**: the same colors after `ON_` *(i.e. `ON_RED`, `ON_BRIGHT_BLUE`, `ON_GRAY`)*.\n- **Effects**: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `DOUBLE_UNDERLINE`, `CURLY_UNDERLINE`, `OVERLINE`, `STRIKE`, `BLINK`, `INVERSE` and `HIDDEN`. A terminal that doesn't have one ignores it.\n\n\n- An enum instead of symbols or a function for each color: there are few names to learn, and the checker catches a misspelled style and completes them.\n- Styles turn themselves off when `NO_COLOR` is set or the output isn't a terminal, so the codes never end up in a file or a pipe."
+
+[[modules.groups]]
+name = "The terminal"
+text = "- A person is at a terminal when stdin and stderr are terminals, and the script isn't run by a program that captures what it writes *(i.e. the tests of the engine)*."
+
+[[modules.groups]]
+name = "Progress"
+text = "```\nconst $bar = terminal::progress($files.length(), 'Copying');\nfor ($f in $files) {\n    copy($f);\n    $bar.advance();\n}\n$bar.finish();\n\n// Without a total, it's a spinner that turns with each `advance()`\nconst $pages = terminal::progress(null, 'Reading pages');\nwhile ($next != null) {\n    $next = scrape($next);\n    $pages.advance();\n}\n$pages.finish();\n```\n\n\nA `Progress` has `advance(number $n = 1)`, which moves it forward, and `finish()`, which leaves it full and goes to the next line. Its fields `total`, `label` and `done` can be read.\n\n- It's drawn on stderr, and only when stderr is a terminal, so a log or a pipe never gets it. It's drawn at most every 40 ms, so a fast loop doesn't slow down for it.\n\n- **No spinner that turns on its own** while the script's code runs *(i.e. `spinner('Downloading', () -> ...)`)*. It would need a thread drawing while the VM runs, which collides with what the script prints, with the commands it runs and with Ctrl+C: a small concurrency system hidden in one function, in a language without concurrency. `progress(null)` turns with each `advance()` instead, which covers loops. For one long call, a line like `Downloading...` is enough. It can come back if the language gets concurrency."
+
+[[modules.groups]]
+name = "Ready-made pieces"
+
+[[modules.items]]
+kind = "function"
+name = "ask"
+code = "string ask(string $question, ?string $default = null, ?(string) -> ?string $check = null)"
+text = "A line the person writes. `$check` gives an error message, or `null` when the answer is fine, and the question is asked again until it is"
+group = "Prompts"
+
+[[modules.items]]
+kind = "function"
+name = "password"
+code = "string password(string $question)"
+text = "The same, without showing what's written"
+group = "Prompts"
+
+[[modules.items]]
+kind = "function"
+name = "confirm"
+code = "bool confirm(string $question, ?bool $default = null)"
+text = "Yes or no"
+group = "Prompts"
+
+[[modules.items]]
+kind = "function"
+name = "choose"
+code = "string choose(string $question, list<string> $options)"
+text = "One of the options, picked with the arrow keys"
+group = "Prompts"
+
+[[modules.items]]
+kind = "function"
+name = "chooseMany"
+code = "list<string> chooseMany(string $question, list<string> $options)"
+text = "Several, ticked with the space bar"
+group = "Prompts"
+
+[[modules.items]]
+kind = "function"
+name = "style"
+code = "string style(string $text, ...Style $styles)"
+text = "The text with the codes of those styles around it"
+group = "Styles"
+
+[[modules.items]]
+kind = "function"
+name = "strip"
+code = "string strip(string $text)"
+text = "The text without the codes of styles"
+group = "Styles"
+
+[[modules.items]]
+kind = "function"
+name = "visibleWidth"
+code = "number visibleWidth(string $text)"
+text = "How many columns the text takes, without the codes and with characters that take two columns *(i.e. emoji)* counted twice"
+group = "Styles"
+
+[[modules.items]]
+kind = "function"
+name = "interactive?"
+code = "bool interactive?()"
+text = "`true` when there's a person at a terminal: stdin and stderr are terminals"
+group = "The terminal"
+
+[[modules.items]]
+kind = "function"
+name = "width"
+code = "number width()"
+text = "Its width, in columns, or 80 when it isn't a terminal"
+group = "The terminal"
+
+[[modules.items]]
+kind = "function"
+name = "height"
+code = "number height()"
+text = "Its height, in lines, or 24 when it isn't a terminal"
+group = "The terminal"
+
+[[modules.items]]
+kind = "function"
+name = "readKey"
+code = "string readKey()"
+text = "One key, without waiting for enter *(i.e. `'a'`, `'enter'`, `'up'`, `'space'`, `'escape'`, `'ctrl+d'`, `'f1'`)*. Ctrl+C throws an `Interrupted`, and without a terminal it throws an `IOError`"
+group = "The terminal"
+
+[[modules.items]]
+kind = "function"
+name = "clear"
+code = "void clear()"
+text = "Clears the screen"
+group = "The terminal"
+
+[[modules.items]]
+kind = "function"
+name = "progress"
+code = "Progress progress(?number $total, string $label = '')"
+text = "A bar that fills up to `$total`. With `null`, a spinner that shows that something is happening, without a percentage"
+group = "Progress"
+
+[[modules.items]]
+kind = "function"
+name = "filter"
+code = "?string filter(list<string> $items, string $question = 'Search')"
+text = "Typing filters the list, fuzzily, like `fzf`. The item picked, or `null` when the person gives up with Escape. Without a terminal, a line of stdin that's one of the items, or `null`"
+group = "Ready-made pieces"
+
+[[modules.items]]
+kind = "function"
+name = "pager"
+code = "void pager(string $text)"
+text = "Shows long text to scroll through, with `$PAGER` or `less -R`. When stdout isn't a terminal, it writes the text"
+group = "Ready-made pieces"
+
+[[modules.items]]
+kind = "function"
+name = "table"
+code = "void table(list<any> $rows, ?list<string> $header = null)"
+text = "Writes the rows with their columns lined up, or lets the person scroll through them when they don't fit. Rows are lists, or maps whose keys are the header, like the rows of [`std/format/csv`](format.csv.html). Without a header, maps give it with the keys of the first one, and `null` is an empty cell"
+group = "Ready-made pieces"
+
+[[modules.items]]
+kind = "function"
+name = "edit"
+code = "string edit(string $text)"
+text = "Opens `$VISUAL` or `$EDITOR` *(or `vi`)* on the text in a temporary file, and gives what was saved, like `git commit`. Without a terminal, it throws an `IOError`"
+group = "Ready-made pieces"
+
+[[modules]]
 short = "test"
 path = "std/test"
 title = "std/test"
@@ -2841,10 +2992,147 @@ group = "Functions"
 short = "time"
 path = "std/time"
 title = "std/time"
-text = "The current time. `use std/time;`, then `time::now()`.\n\nFor now it only gives the time as a number. Dates, formatting and durations come later, once there are classes."
+text = "The current time, and dates: reading them, writing them in any format, and in any time zone. `use std/time;`, then `time::now()` or `time::date()`.\n\n```\nuse std/time;\nuse std/time/zone;\n\nconst $start = time::now();                       // milliseconds, to time code\n\nconst $d = time::date();                          // now, in the local zone\noutln($d.format('yyyy-MM-dd HH:mm'));             // 2026-11-22 00:41\noutln($d.format());                               // 2026-11-22T00:41:07+01:00\noutln(f\"{$d.day}/{$d.month}/{$d.year}, day {$d.weekday} of the week\");\n\nconst $p = time::parse('22/11/2026', 'dd/MM/yyyy');\noutln($p.format('EEEE d MMMM'));                  // Sunday 22 November\nconst $api = time::parse('2026-11-22T10:00:00Z'); // ISO 8601, without a format\noutln($api.inZone(zone::named('America/Lima')).format('HH:mm VV'));   // 05:00 America/Lima\nif ($api < $d) { ... }\n```"
+notes = "## Formats\n\nThe letters of Java's `DateTimeFormatter`, the most used ones:\n\n| Letters | Gives | Example |\n|---------|-------|---------|\n| `yyyy` | The year | `2026` |\n| `yy` | The year, in two digits | `26` |\n| `M`, `MM` | The month, as a number, without and with a zero | `1`, `01` |\n| `MMM`, `MMMM` | The name of the month, short and full | `Nov`, `November` |\n| `d`, `dd` | The day of the month | `5`, `05` |\n| `EEE`, `EEEE` | The name of the day of the week, short and full | `Sun`, `Sunday` |\n| `H`, `HH` | The hour, from 0 to 23 | `7`, `07` |\n| `h`, `hh` | The hour, from 1 to 12 | `7`, `07` |\n| `a` | AM or PM | `PM` |\n| `m`, `mm` | The minute | `4`, `04` |\n| `s`, `ss` | The second | `9`, `09` |\n| `S`, `SS`, `SSS` | The fraction of the second, in that many digits | `123` |\n| `Z` | The offset | `+0100` |\n| `XXX` | The offset, or `Z` for UTC | `+01:00`, `Z` |\n| `xxx` | The offset, with `+00:00` for UTC | `+01:00` |\n| `z` | The abbreviation of the zone, only to write it | `CET` |\n| `VV` | The name of the zone | `Europe/Madrid` |\n| `'...'` | Text as it is. `''` is a quote | `'at' HH:mm` gives `at 10:00` |\n\n- Other characters, like `-`, `/`, `:`, spaces and `T`... are written as they are, except letters: every letter is reserved, like in Java, so text goes between quotes *(i.e. `yyyy-MM-dd'T'HH:mm`)*. A letter that isn't in the table throws a `ValueError`.\n- Names of months and days are in English. Reading them ignores case.\n- `z` can't be read: abbreviations mean different zones in different places *(i.e. `CST`)*. `VV` or an offset can."
+
+[[modules.groups]]
+name = "Functions"
+text = "- A date without a time is midnight.\n- A date written with an offset but no zone *(i.e. `+01:00`)* has a zone that's that offset, like Java's `ZonedDateTime.parse`.\n- A time that happens twice or never in a zone, when the clocks change, is read like Java and most libraries do: the first of the two, or moved forward by the gap."
+
+[[modules.groups]]
+name = "Zones"
+text = "`use std/time/zone;`. A zone is a class of its own, `Zone`, like Java's `ZoneId` and Python's `zoneinfo`, so a misspelled zone fails where it's named, and `std/time` stays about dates.\n\n\nA `Zone` has a field `name` *(i.e. `Europe/Madrid`, or `+01:00` for an offset)*, and two zones with the same name are equal."
 
 [[modules.items]]
 kind = "function"
 name = "now"
 code = "number now()"
 text = "Milliseconds since 1970-01-01 00:00 UTC, like Java's `System.currentTimeMillis()` *(i.e. `const $start = time::now(); ... outln(f\"took {time::now() - $start} ms\");`)*. It follows the system clock, so it can jump if the clock is changed"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "date"
+code = "Date date(?number $millis = null, ?Zone $zone = null)"
+text = "The date at that instant, in milliseconds since 1970 like `now()`, or now. In the local zone, unless one is given"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "of"
+code = "Date of(number $year, number $month, number $day, number $hour = 0, number $minute = 0, number $second = 0, number $millisecond = 0, ?Zone $zone = null)"
+text = "The date with those parts, in the local zone unless one is given *(i.e. `time::of(2026, 12, 24, 20)`)*. A date that doesn't exist *(i.e. February 30)* throws a `ValueError`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "parse"
+code = "Date parse(string $text, ?string $format = null, ?Zone $zone = null)"
+text = "Reads a date written in that format *(see Formats)*. Without one, ISO 8601, the format of JSON and APIs *(i.e. `2026-11-22`, `2026-11-22T10:00:00Z`, `2026-11-22T10:00:00+01:00`)*. A text without a zone or an offset is in `$zone`, or in the local zone. One that doesn't match throws a `ValueError`"
+group = "Functions"
+
+[[modules.items]]
+kind = "class"
+name = "Date"
+code = "class Date"
+text = "A date and time, in a zone. From `date()`, `of()` or `parse()`. Like Java's `ZonedDateTime`.\n\n\n\n- `==` and `<` compare the instants, through `IEquals` and `IOrdered`, so dates in different zones compare right, and lists of dates can be sorted. Like Python, and like Java's `isEqual` and `isBefore`.\n- Dates are values that don't change: `inZone()` gives a new one."
+
+[[modules.items.members]]
+kind = "field"
+name = "year"
+code = "number @year"
+text = "*(i.e. `2026`)*"
+
+[[modules.items.members]]
+kind = "field"
+name = "month"
+code = "number @month"
+text = "From 1, January, to 12"
+
+[[modules.items.members]]
+kind = "field"
+name = "day"
+code = "number @day"
+text = "The day of the month, from 1"
+
+[[modules.items.members]]
+kind = "field"
+name = "hour"
+code = "number @hour"
+text = "From 0 to 23"
+
+[[modules.items.members]]
+kind = "field"
+name = "minute"
+code = "number @minute"
+text = "From 0 to 59"
+
+[[modules.items.members]]
+kind = "field"
+name = "second"
+code = "number @second"
+text = "From 0 to 59"
+
+[[modules.items.members]]
+kind = "field"
+name = "millisecond"
+code = "number @millisecond"
+text = "From 0 to 999"
+
+[[modules.items.members]]
+kind = "field"
+name = "weekday"
+code = "number @weekday"
+text = "From 1, Monday, to 7, Sunday, like ISO 8601 and Java"
+
+[[modules.items.members]]
+kind = "field"
+name = "zone"
+code = "Zone @zone"
+text = "Its zone *(see [Zones](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/#zones))*"
+
+[[modules.items.members]]
+kind = "method"
+name = "format"
+code = "string format(?string $format = null)"
+text = "The date written in that format *(see Formats)*. Without one, ISO 8601 with its offset *(i.e. `2026-11-22T00:41:07+01:00`)*, which `parse()` reads back"
+
+[[modules.items.members]]
+kind = "method"
+name = "millis"
+code = "number millis()"
+text = "The instant, in milliseconds since 1970, like `now()`"
+
+[[modules.items.members]]
+kind = "method"
+name = "inZone"
+code = "Date inZone(Zone $zone)"
+text = "The same instant in another zone *(i.e. `$d.inZone(zone::utc())`)*. Not `in`, which is a keyword"
+
+[[modules.items]]
+kind = "function"
+name = "utc"
+code = "Zone utc()"
+text = "UTC. A function, like `local()`, since constants of modules are variables *(i.e. `path::$separator`)*"
+group = "Zones"
+
+[[modules.items]]
+kind = "function"
+name = "named"
+code = "Zone named(string $name)"
+text = "A zone by its IANA name *(i.e. `Europe/Madrid`, `America/Lima`)*, `UTC`, or an offset *(i.e. `+05:30`)*. One that doesn't exist throws a `ValueError`"
+group = "Zones"
+
+[[modules.items]]
+kind = "function"
+name = "local"
+code = "Zone local()"
+text = "The zone of the system, or the one in `TZ`"
+group = "Zones"
+
+[[modules.items]]
+kind = "function"
+name = "all"
+code = "list<string> all()"
+text = "The names of every zone the system knows, sorted"
+group = "Zones"

@@ -24,7 +24,7 @@ TYPES = {
 # (i.e. std/http) get their types from their own code
 MODULES = {'general': 'general', 'fs': 'std/fs', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
            'process': 'std/process', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
-           'template': 'std/template', 'test': 'std/test', 'time': 'std/time'}
+           'template': 'std/template', 'test': 'std/test'}
 
 # Types described outside ideas/stdlib, and the Rust parts of the modules
 # written in Lakescript, which aren't documented since scripts never use them
@@ -46,6 +46,36 @@ string unescape(string $text);
 
 module std/http/native
 map<string, any> send(string $method, string $url, any $body, map<string, string> $headers, ?number $timeout, ?string $path);
+
+module std/time/native
+number now();
+list<number> fields(number $millis, string $zone);
+string format(number $millis, string $zone, ?string $format);
+number of(number $year, number $month, number $day, number $hour, number $minute, number $second, number $millisecond, string $zone);
+list<any> parse(string $text, ?string $format, string $zone);
+string zone(string $name);
+string localZone();
+list<string> zones();
+
+module std/terminal/native
+string style(string $text, list<string> $styles);
+string strip(string $text);
+number visibleWidth(string $text);
+bool interactive();
+list<number> size();
+string readKey();
+void clear();
+string ask(string $question, ?string $default);
+void problem(string $text);
+string password(string $question);
+bool confirm(string $question, ?bool $default);
+string choose(string $question, list<string> $options);
+list<string> chooseMany(string $question, list<string> $options);
+void drawProgress(?number $total, string $label, number $done, bool $finish);
+?string filter(string $question, list<string> $items);
+void pager(string $text);
+void table(list<any> $rows, ?list<string> $header);
+string edit(string $text);
 
 type result<T, E>
 bool isOk();

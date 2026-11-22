@@ -29,6 +29,9 @@ pub struct Host {
     pub builtin_names: HashMap<String, u32>,
     /// The state of the random number generator, for `random()` and `shuffle()`.
     pub rng: u64,
+    /// Set by the program that runs the script when Ctrl+C is pressed: the
+    /// VM throws an `Interrupted` where the script is *(see `Engine::interrupt_flag`)*.
+    pub interrupt: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Host {

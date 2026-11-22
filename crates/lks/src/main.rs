@@ -145,6 +145,7 @@ fn run() -> ExitCode {
     }
 
     let mut engine = Engine::new();
+    on_ctrl_c(engine.interrupt_flag());
     engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
     engine.set_args(args.clone());
     engine.set_type_check(!options.no_type_check);
@@ -202,6 +203,18 @@ fn test(engine: &mut Engine, script: &str, args: &[String], color: When) -> Exit
     }
     print!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), out));
     if results.iter().all(|r| r.passed()) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+/// Ctrl+C throws an `Interrupted` in the script, which can catch it *(see
+/// ideas/language/errors.md)*. A second one before the script got to it
+/// stops it, for a script stuck waiting *(i.e. reading stdin)*.
+fn on_ctrl_c(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::Ordering;
+    let _ = ctrlc::set_handler(move || {
+        if flag.swap(true, Ordering::Relaxed) {
+            std::process::exit(130);
+        }
+    });
 }
 
 /// An error with the line of code it points to, read from the file it's in.

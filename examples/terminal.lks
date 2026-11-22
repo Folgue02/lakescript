@@ -1,0 +1,34 @@
+// std/terminal: styles, prompts, a progress bar and a table. Run it in a
+// terminal to answer with the arrow keys. With its answers piped, a line each,
+// it works the same without one:
+//
+//     printf 'Ann\n\ntea\ny\n' | lks examples/terminal.lks
+
+use std/terminal;
+use std/terminal/Style;
+
+outln(terminal::style('Welcome to the Lake Café', Style::BOLD, Style::CYAN));
+
+const $name = terminal::ask('What is your name?', null, ($a) -> $a.trim().empty?() ? 'write a name, please' : null);
+const $size = terminal::ask('Which size?', 'medium');
+const $drink = terminal::choose('What would you like?', ['coffee', 'tea', 'hot chocolate']);
+if (!terminal::confirm(f"A {$size} {$drink}, {$name}?", true)) {
+    outln(terminal::style('Maybe next time.', Style::DIM));
+    exit(0);
+}
+
+// The bar is drawn on stderr, and only for a person at a terminal
+const $steps = ['Boiling water', 'Brewing', 'Pouring'];
+const $bar = terminal::progress($steps.length(), 'Making it');
+for ($step in $steps) {
+    $bar.advance();
+}
+$bar.finish();
+
+terminal::table([
+    ['Name', $name],
+    ['Drink', $drink],
+    ['Size', $size],
+    ['Price', $size == 'large' ? '4.50' : '3.20'],
+]);
+outln(terminal::style('Enjoy!', Style::GREEN, Style::ITALIC));

@@ -105,6 +105,7 @@ impl Engine {
             builtins: Vec::new(),
             builtin_names: HashMap::new(),
             rng: crate::host::seed(),
+            interrupt: Default::default(),
         };
         let mut engine = Engine {
             globals,
@@ -126,6 +127,20 @@ impl Engine {
         engine.register_builtins();
         engine.builtins_ready = true;
         engine
+    }
+
+    /// A flag that, set from anywhere *(i.e. a handler of Ctrl+C on another
+    /// thread)*, makes the script throw an `Interrupted` where it is, at the
+    /// next turn of a loop or call. `lks` and `ferry` set it on Ctrl+C. The
+    /// library never handles signals itself, so the program embedding it decides.
+    pub fn interrupt_flag(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        self.host.interrupt.clone()
+    }
+
+    /// Uses this flag instead of its own, so several engines can share one
+    /// handler of Ctrl+C *(i.e. `ferry test`, with an engine for each file)*.
+    pub fn set_interrupt_flag(&mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        self.host.interrupt = flag;
     }
 
     /// Whether scripts are type checked before they run. It's on by default.

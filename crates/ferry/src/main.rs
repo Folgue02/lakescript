@@ -210,8 +210,28 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
     }
 }
 
+/// The flag every engine shares, set on Ctrl+C *(see `on_ctrl_c` in lks)*.
+fn interrupt() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, OnceLock};
+    static FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+    FLAG.get_or_init(|| {
+        let flag = Arc::new(AtomicBool::new(false));
+        let set = flag.clone();
+        // A second Ctrl+C before a script got to the first stops ferry
+        let _ = ctrlc::set_handler(move || {
+            if set.swap(true, Ordering::Relaxed) {
+                std::process::exit(130);
+            }
+        });
+        flag
+    })
+    .clone()
+}
+
 fn engine(module_path: &[PathBuf]) -> Engine {
     let mut engine = Engine::new();
+    engine.set_interrupt_flag(interrupt());
     engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
     for folder in module_path {
         engine.add_module_root(folder);

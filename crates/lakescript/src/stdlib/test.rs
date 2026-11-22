@@ -19,7 +19,8 @@ fn throws(vm: &mut Interpreter, values: Vec<Value>, span: Span) -> Exec<Value> {
     };
     match vm.call(&code, Vec::new(), Vec::new(), span) {
         Ok(_) => Err(flow_error_as(ASSERTION_ERROR, "the code given to `test::throws` threw nothing", span)),
-        Err(Flow::Throw(e)) => Ok(Value::Exception(e)),
+        // Ctrl+C isn't what the test waits for
+        Err(Flow::Throw(e)) if &*e.kind != crate::exceptions::INTERRUPTED => Ok(Value::Exception(e)),
         Err(exit) => Err(exit),
     }
 }

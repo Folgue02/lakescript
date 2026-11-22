@@ -22,10 +22,13 @@ pub const TREE: &[(&str, Option<&str>)] = &[
     ("CommandFailed", Some("Exception")),
     // An `assert` whose condition was false
     ("AssertionError", Some("Exception")),
+    // Ctrl+C: beside `Exception`, so `catch ($e)` doesn't catch it *(see ideas/language/errors.md)*
+    ("Interrupted", None),
 ];
 
 pub const TYPE_ERROR: &str = "TypeError";
 pub const ASSERTION_ERROR: &str = "AssertionError";
+pub const INTERRUPTED: &str = "Interrupted";
 pub const VALUE_ERROR: &str = "ValueError";
 pub const INDEX_ERROR: &str = "IndexError";
 pub const ARITHMETIC_ERROR: &str = "ArithmeticError";

@@ -1,0 +1,86 @@
+//! `std/time`: the current time, and dates: reading them, writing them in any
+//! format and in any time zone *(see ideas/stdlib/time.md)*. Zones are in
+//! `std/time/zone`. Its Rust part, `std/time/native`, is on `jiff`.
+
+use std/time/native;
+use std/time/zone;
+
+/// Milliseconds since 1970-01-01 00:00 UTC, like Java's `System.currentTimeMillis()`
+/// *(i.e. `const $start = time::now(); ... outln(f"took {time::now() - $start} ms");`)*.
+/// It follows the system clock, so it can jump if the clock is changed.
+pub number now() = native::now();
+
+/// A date and time, in a zone, like Java's `ZonedDateTime`. From `time::date()`,
+/// `time::of()` or `time::parse()`. `==` and `<` compare their instants.
+pub class Date {
+    /// *(i.e. `2026`)*
+    pub const number @year;
+    /// From 1, January, to 12.
+    pub const number @month;
+    /// The day of the month, from 1.
+    pub const number @day;
+    /// From 0 to 23.
+    pub const number @hour;
+    /// From 0 to 59.
+    pub const number @minute;
+    /// From 0 to 59.
+    pub const number @second;
+    /// From 0 to 999.
+    pub const number @millisecond;
+    /// From 1, Monday, to 7, Sunday, like ISO 8601 and Java.
+    pub const number @weekday;
+    /// Its zone.
+    pub const zone::Zone @zone;
+    const number @instant;
+
+    /// The date written in that format, with the letters of Java's
+    /// `DateTimeFormatter` *(i.e. `'yyyy-MM-dd HH:mm'`)*. Without one, ISO 8601
+    /// with its offset *(i.e. `2026-11-22T00:41:07+01:00`)*, which `time::parse()` reads back.
+    ///
+    /// throws ValueError: when the format has a letter that isn't a part of a date
+    pub string format(?string $format = null) = native::format(@instant, @zone.name, $format);
+
+    /// The instant, in milliseconds since 1970, like `time::now()`.
+    pub number millis() = @instant;
+
+    /// The same instant in another zone *(i.e. `$d.inZone(zone::utc())`)*.
+    pub Date inZone(zone::Zone $zone) = at(@instant, $zone);
+
+    implement IEquals {
+        bool equals?(Date $other) = @instant == $other.millis();
+    }
+
+    implement IOrdered {
+        number compare(Date $other) = @instant - $other.millis();
+    }
+}
+
+/// The date at that instant, in milliseconds since 1970 like `now()`, or now.
+/// In the local zone, unless one is given.
+pub Date date(?number $millis = null, ?zone::Zone $zone = null) = at($millis ?? now(), $zone ?? zone::local());
+
+/// The date with those parts, in the local zone unless one is given *(i.e.
+/// `time::of(2026, 12, 24, 20)`)*.
+///
+/// throws ValueError: when the date doesn't exist *(i.e. February 30)*
+pub Date of(number $year, number $month, number $day, number $hour = 0, number $minute = 0, number $second = 0, number $millisecond = 0, ?zone::Zone $zone = null) {
+    const $in = $zone ?? zone::local();
+    return at(native::of($year, $month, $day, $hour, $minute, $second, $millisecond, $in.name), $in);
+}
+
+/// Reads a date written in that format, with the letters of Java's
+/// `DateTimeFormatter` *(i.e. `time::parse('22/11/2026', 'dd/MM/yyyy')`)*.
+/// Without one, ISO 8601 *(i.e. `2026-11-22` or `2026-11-22T10:00:00Z`)*.
+///
+/// $zone: the zone of a text without a zone or an offset, or the local zone
+/// throws ValueError: when the text doesn't match the format
+pub Date parse(string $text, ?string $format = null, ?zone::Zone $zone = null) {
+    const $read = native::parse($text, $format, ($zone ?? zone::local()).name);
+    return at($read[0].as(number), zone::Zone($read[1].as(string)));
+}
+
+Date at(number $millis, zone::Zone $zone) {
+    // A list of 8 numbers, from Rust
+    const $f = native::fields($millis, $zone.name);
+    return Date($f[0] ?? 0, $f[1] ?? 0, $f[2] ?? 0, $f[3] ?? 0, $f[4] ?? 0, $f[5] ?? 0, $f[6] ?? 0, $f[7] ?? 0, $zone, $millis);
+}

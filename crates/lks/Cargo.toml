@@ -6,4 +6,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ctrlc = "3.5.3"
 lakescript.workspace = true
