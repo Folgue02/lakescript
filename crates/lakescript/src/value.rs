@@ -56,6 +56,9 @@ pub struct Class {
     pub fields: Vec<FieldSlot>,
     /// Its methods and the ones it inherits, by name.
     pub methods: std::collections::HashMap<Rc<str>, Rc<Function>>,
+    /// The same methods by number, which a place that calls one remembers
+    /// *(see `bytecode::InlineCache`)*.
+    pub method_list: Vec<Rc<Function>>,
     pub statics: RefCell<IndexMap<Rc<str>, StaticSlot>>,
     /// `new`, or `None` for the one that takes every field.
     pub constructor: Option<Rc<Function>>,
@@ -186,6 +189,14 @@ impl Range {
             next = if down { current.checked_sub(self.step) } else { current.checked_add(self.step) };
             Some(current)
         })
+    }
+
+    /// How many numbers it has, without walking it.
+    pub fn len(self) -> usize {
+        let (start, end) = (self.start as i128, self.end as i128);
+        let span = if start <= end { end - start } else { start - end } + self.inclusive as i128;
+        let step = self.step.max(1) as i128;
+        ((span + step - 1) / step).clamp(0, usize::MAX as i128) as usize
     }
 
     pub fn contains(self, n: i64) -> bool {
@@ -336,6 +347,28 @@ impl Function {
 }
 
 impl Value {
+    /// A copy, like `clone()`, without a call for the values that are only
+    /// bits *(numbers, bools and `null`)*: the VM copies those all the time.
+    #[inline(always)]
+    pub fn copy(&self) -> Value {
+        match self {
+            Value::Int(n) => Value::Int(*n),
+            Value::Float(f) => Value::Float(*f),
+            Value::Bool(b) => Value::Bool(*b),
+            Value::Null => Value::Null,
+            other => other.clone(),
+        }
+    }
+
+    /// Drops it, without a call for the values that are only bits.
+    #[inline(always)]
+    pub fn discard(self) {
+        match self {
+            Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null => std::mem::forget(self),
+            other => drop(other),
+        }
+    }
+
     pub fn string(s: &str) -> Value {
         Value::Str(Rc::from(s))
     }
@@ -422,6 +455,8 @@ impl Value {
                 if Rc::ptr_eq(a, b) {
                     return true;
                 }
+                // A pair that's already being compared is inside itself: equal as far as it goes
+                let Some(_comparing) = Visiting::enter(&COMPARING, (Rc::as_ptr(a) as usize, Rc::as_ptr(b) as usize)) else { return true };
                 let (a, b) = (a.borrow(), b.borrow());
                 a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equals(y))
             }
@@ -429,6 +464,7 @@ impl Value {
                 if Rc::ptr_eq(a, b) {
                     return true;
                 }
+                let Some(_comparing) = Visiting::enter(&COMPARING, (Rc::as_ptr(a) as usize, Rc::as_ptr(b) as usize)) else { return true };
                 let (a, b) = (a.borrow(), b.borrow());
                 a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| v.equals(w)))
             }
@@ -455,6 +491,39 @@ impl Value {
             Value::Symbol(s) => write!(f, ":{s}"),
             other => write!(f, "{other}"),
         }
+    }
+}
+
+thread_local! {
+    /// The lists, maps and objects being written, to stop at one that contains itself.
+    static PRINTING: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+    /// The pairs of lists or maps being compared by `.equals()`.
+    static COMPARING: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A value being walked, noted while it is, so a value that contains itself
+/// is found instead of walked forever *(i.e. `$list << $list`)*.
+struct Visiting(&'static std::thread::LocalKey<RefCell<Vec<(usize, usize)>>>);
+
+impl Visiting {
+    /// `None` when `what` is already being walked.
+    fn enter(stack: &'static std::thread::LocalKey<RefCell<Vec<(usize, usize)>>>, what: (usize, usize)) -> Option<Visiting> {
+        stack.with(|s| {
+            let mut s = s.borrow_mut();
+            if s.contains(&what) {
+                return None;
+            }
+            s.push(what);
+            Some(Visiting(stack))
+        })
+    }
+}
+
+impl Drop for Visiting {
+    fn drop(&mut self) {
+        self.0.with(|s| {
+            s.borrow_mut().pop();
+        });
     }
 }
 
@@ -489,6 +558,8 @@ impl fmt::Display for Value {
             Value::Str(s) => write!(f, "{s}"),
             Value::Symbol(s) => write!(f, "{s}"),
             Value::List(items) => {
+                // A list inside itself is written `[...]`, like in Python
+                let Some(_printing) = Visiting::enter(&PRINTING, (Rc::as_ptr(items) as usize, 0)) else { return write!(f, "[...]") };
                 write!(f, "[")?;
                 for (i, item) in items.borrow().iter().enumerate() {
                     if i > 0 {
@@ -499,6 +570,7 @@ impl fmt::Display for Value {
                 write!(f, "]")
             }
             Value::Map(entries) => {
+                let Some(_printing) = Visiting::enter(&PRINTING, (Rc::as_ptr(entries) as usize, 0)) else { return write!(f, "{{...}}") };
                 let entries = entries.borrow();
                 if entries.is_empty() {
                     return write!(f, "{{}}");
@@ -539,6 +611,7 @@ impl fmt::Display for Value {
             Value::Handle(_) => write!(f, "<native>"),
             Value::Object(o) if o.enum_name.is_some() => write!(f, "{}::{}", o.class.name, o.enum_name.as_ref().unwrap()),
             Value::Object(o) => {
+                let Some(_printing) = Visiting::enter(&PRINTING, (Rc::as_ptr(o) as usize, 0)) else { return write!(f, "{}(...)", o.class.name) };
                 write!(f, "{}(", o.class.name)?;
                 // Rust data of the standard library isn't shown *(i.e. the page of an `html::Element`)*
                 let fields = o.fields.borrow();

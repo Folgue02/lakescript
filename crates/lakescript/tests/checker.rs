@@ -267,3 +267,18 @@ fn const_fields_narrow_like_variables() {
     // Without a check, there's no hint
     assert_eq!(rejected("class A {\n    ?string @name = null;\n    pub string show() = @name;\n}"), "`show` returns a string, not a ?string, which can be `null`");
 }
+
+#[test]
+fn the_prelude_is_up_to_date() {
+    // The signatures the checker knows are made from the tables of ideas/stdlib
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fresh = std::env::temp_dir().join(format!("lks-prelude-{}.txt", std::process::id()));
+    let made = std::process::Command::new("python3").arg(root.join("tools/docs/prelude.py")).arg(&fresh).output();
+    // Without Python there's nothing to compare with
+    let Ok(made) = made else { return };
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    let committed = std::fs::read_to_string(root.join("crates/lakescript/src/checker/prelude.txt")).unwrap();
+    let fresh_text = std::fs::read_to_string(&fresh).unwrap();
+    let _ = std::fs::remove_file(&fresh);
+    assert!(committed == fresh_text, "crates/lakescript/src/checker/prelude.txt is out of date: run `python3 tools/docs/prelude.py`");
+}

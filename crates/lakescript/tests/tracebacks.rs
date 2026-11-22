@@ -121,6 +121,7 @@ fn failed_tests_show_their_calls() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[cfg(all(feature = "dates", feature = "html"))]
 #[test]
 fn the_standard_library_is_left_out() {
     // Thrown inside `time.lks`, shown where the script called it

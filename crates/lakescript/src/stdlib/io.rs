@@ -10,6 +10,8 @@ fn read_error(e: std::io::Error) -> NativeError {
 pub fn register(m: &mut Exports) {
     m.function("readLine", |ctx, values| {
         Args::new("io::readLine", values, 0, 0)?;
+        // What was written so far is seen before the script waits for input
+        let _ = ctx.output.flush();
         let mut line = String::new();
         let n = ctx.input.read_line(&mut line).map_err(read_error)?;
         if n == 0 {
@@ -25,12 +27,16 @@ pub fn register(m: &mut Exports) {
     });
     m.function("readAll", |ctx, values| {
         Args::new("io::readAll", values, 0, 0)?;
+        // What was written so far is seen before the script waits for input
+        let _ = ctx.output.flush();
         let mut text = String::new();
         ctx.input.read_to_string(&mut text).map_err(read_error)?;
         Ok(Value::string(&text))
     });
     m.function("lines", |ctx, values| {
         Args::new("io::lines", values, 0, 0)?;
+        // What was written so far is seen before the script waits for input
+        let _ = ctx.output.flush();
         let mut text = String::new();
         ctx.input.read_to_string(&mut text).map_err(read_error)?;
         Ok(strings(text.lines().map(String::from)))

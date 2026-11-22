@@ -20,6 +20,22 @@ What comes with Lakescript. Its modules are under `std/` and are imported with `
 - **Missing things are `null`, broken things throw.** Searching for something that isn't there returns `null` *(i.e. `'abc'.indexOf('z')`, `[].first()`)*. Asking for something invalid throws *(i.e. `'abc'.toNumber()`, `$list.removeAt(10)`)*.
 - **Errors** are the built-in exceptions *(`ValueError`, `IndexError`, ... see [errors.md](../language/errors.md))*.
 
+## Leaving modules out
+
+A program that embeds Lakescript can leave out the modules that need big crates. They're features of the `lakescript` crate, all on by default, so `lks` and `ferry` have every module:
+
+| Feature | Module | Crates it needs |
+|---------|--------|-----------------|
+| `csv` | `std/format/csv` | `csv` |
+| `dates` | The dates of `std/time`, and `std/time/zone`. `time::now()` is always there | `jiff` |
+| `html` | `std/html` | `scraper` |
+| `http` | `std/http` | `ureq`, with TLS |
+| `terminal` | `std/terminal` | `inquire`, `crossterm` |
+
+- `lakescript = { version = "...", default-features = false, features = ["dates"] }` has only the dates. Without any, the crate needs 14 crates instead of 163.
+- A script that uses a module that was left out is told so *(i.e. `` `std/http` isn't in this program: it was built without the `http` feature of Lakescript ``)*.
+- Regexes aren't a feature: they're part of the language.
+
 ## How modules are made
 
 A module is written in Rust, in Lakescript, or both:

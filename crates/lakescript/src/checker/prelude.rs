@@ -28,60 +28,103 @@ pub struct ModuleSig {
     pub places: HashMap<String, super::names::Place>,
 }
 
+/// A part of `prelude.txt`: the methods of a type or the functions of a
+/// module, read the first time they're needed. A script uses a few of them,
+/// so reading them all would be most of the time of checking a small one.
+struct Section<T> {
+    /// What's after `type ` or `module ` in its first line.
+    header: &'static str,
+    body: String,
+    parsed: std::cell::OnceCell<T>,
+}
+
 pub struct Prelude {
     /// By the name of the type: `string`, `list`, `any`, `exception`...
-    pub types: HashMap<String, TypeSigs>,
+    types: HashMap<String, Section<TypeSigs>>,
     /// `std/fs`..., and `general` for the functions available without `use`.
-    pub modules: HashMap<String, ModuleSig>,
+    modules: HashMap<String, Section<ModuleSig>>,
+}
+
+thread_local! {
+    /// The same one for every engine of a thread *(i.e. the ones `lks-lsp` makes for each check)*.
+    static SHARED: Rc<Prelude> = Rc::new(Prelude::load());
 }
 
 impl Prelude {
-    pub fn load() -> Prelude {
+    /// The prelude, read once for each thread.
+    pub fn shared() -> Rc<Prelude> {
+        SHARED.with(|p| p.clone())
+    }
+
+    /// Splits `prelude.txt` into its parts, without reading them yet.
+    fn load() -> Prelude {
         let mut prelude = Prelude { types: HashMap::new(), modules: HashMap::new() };
-        let mut sections: Vec<(String, String)> = Vec::new();
+        let mut sections: Vec<(&'static str, String)> = Vec::new();
         for line in TEXT.lines() {
             if line.starts_with('#') || line.trim().is_empty() {
                 continue;
             }
             if line.starts_with("type ") || line.starts_with("module ") {
-                sections.push((line.to_string(), String::new()));
+                sections.push((line, String::new()));
             } else if let Some((_, body)) = sections.last_mut() {
                 body.push_str(line);
                 body.push('\n');
             }
         }
         for (header, body) in sections {
-            let tokens = crate::lexer::tokenize(&body).expect("prelude.txt is valid");
-            let signatures = crate::parser::parse_signatures(tokens).expect("prelude.txt is valid");
             if let Some(rest) = header.strip_prefix("type ") {
-                let (name, params) = match rest.split_once('<') {
-                    Some((n, p)) => (n.to_string(), p.trim_end_matches('>').split(',').map(|s| Rc::from(s.trim())).collect()),
-                    None => (rest.to_string(), Vec::new()),
-                };
-                let mut methods = HashMap::new();
-                for sig in signatures {
-                    if let Signature::Function(decl) = sig {
-                        methods.insert(decl.name.clone(), Rc::new(signature(&decl, &params)));
-                    }
-                }
-                prelude.types.insert(name, TypeSigs { params, methods });
+                let name = rest.split('<').next().unwrap_or(rest).to_string();
+                prelude.types.insert(name, Section { header: rest, body, parsed: Default::default() });
             } else if let Some(path) = header.strip_prefix("module ") {
-                let mut module = ModuleSig { path: path.to_string(), ..Default::default() };
-                for sig in signatures {
-                    match sig {
-                        Signature::Function(decl) => {
-                            module.functions.insert(decl.name.clone(), Rc::new(signature(&decl, &[])));
-                        }
-                        Signature::Constant { ty, name } => {
-                            module.constants.insert(name, convert(&ty, &[], &mut Vec::new()));
-                        }
-                    }
-                }
-                prelude.modules.insert(path.to_string(), module);
+                prelude.modules.insert(path.to_string(), Section { header: path, body, parsed: Default::default() });
             }
         }
         prelude
     }
+
+    /// The methods of a built-in type *(i.e. `string`, `list`, `any`, `exception`)*.
+    pub fn type_sigs(&self, name: &str) -> Option<&TypeSigs> {
+        let section = self.types.get(name)?;
+        Some(section.parsed.get_or_init(|| {
+            let rest = section.header;
+            let params: Vec<Rc<str>> = match rest.split_once('<') {
+                Some((_, p)) => p.trim_end_matches('>').split(',').map(|s| Rc::from(s.trim())).collect(),
+                None => Vec::new(),
+            };
+            let mut methods = HashMap::new();
+            for sig in signatures(&section.body) {
+                if let Signature::Function(decl) = sig {
+                    methods.insert(decl.name.clone(), Rc::new(signature(&decl, &params)));
+                }
+            }
+            TypeSigs { params, methods }
+        }))
+    }
+
+    /// The functions and constants of a module written in Rust *(i.e.
+    /// `std/fs`)*, or `general` for the functions available without `use`.
+    pub fn module(&self, path: &str) -> Option<&ModuleSig> {
+        let section = self.modules.get(path)?;
+        Some(section.parsed.get_or_init(|| {
+            let mut module = ModuleSig { path: section.header.to_string(), ..Default::default() };
+            for sig in signatures(&section.body) {
+                match sig {
+                    Signature::Function(decl) => {
+                        module.functions.insert(decl.name.clone(), Rc::new(signature(&decl, &[])));
+                    }
+                    Signature::Constant { ty, name } => {
+                        module.constants.insert(name, convert(&ty, &[], &mut Vec::new()));
+                    }
+                }
+            }
+            module
+        }))
+    }
+}
+
+fn signatures(body: &str) -> Vec<Signature> {
+    let tokens = crate::lexer::tokenize(body).expect("prelude.txt is valid");
+    crate::parser::parse_signatures(tokens).expect("prelude.txt is valid")
 }
 
 /// The type of a signature. Names like `T` or `U` that aren't types are the

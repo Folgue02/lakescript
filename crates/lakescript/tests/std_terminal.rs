@@ -2,6 +2,9 @@
 //! each *(see `ideas/stdlib/terminal.md`)*. The prompts on a terminal are drawn
 //! by `inquire`, and were tried by hand in a pseudo-terminal.
 
+// Only with the features of the crate these modules need
+#![cfg(feature = "terminal")]
+
 use lakescript::{CapturedOutput, Engine};
 
 fn engine(input: &str) -> (Engine, CapturedOutput) {

@@ -41,7 +41,7 @@ fn send(ctx: &mut NativeContext, values: Vec<Value>) -> Result<Value, NativeErro
         _ => Some(a.str(5)?),
     };
 
-    let mut request = ureq::http::Request::builder().method(method.as_str()).uri(url.as_str());
+    let mut request = ureq::http::Request::builder().method(&*method).uri(&*url);
     let mut content_type = None;
     let body: Vec<u8> = match a.value(2) {
         Value::Null => Vec::new(),

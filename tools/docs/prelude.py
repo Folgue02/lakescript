@@ -3,17 +3,18 @@
 and the standard library, from the tables in ideas/stdlib. The docs are the
 source of truth, so the checker and the docs never disagree.
 
-    python3 tools/docs/prelude.py
+    python3 tools/docs/prelude.py            # writes crates/lakescript/src/checker/prelude.txt
+    python3 tools/docs/prelude.py out.txt    # writes out.txt
 
-It writes crates/lakescript/src/checker/prelude.txt. Run it after changing a
-signature in the docs.
+Run it after changing a signature in the docs: a test of lakescript says when
+prelude.txt is out of date.
 """
-import re
+import re, sys
 from pathlib import Path
 
 repo = Path(__file__).resolve().parent.parent.parent
 stdlib = repo / 'ideas' / 'stdlib'
-out = repo / 'crates' / 'lakescript' / 'src' / 'checker' / 'prelude.txt'
+out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'crates' / 'lakescript' / 'src' / 'checker' / 'prelude.txt'
 
 # The type each file describes, with the names of its type parameters
 TYPES = {

@@ -1,0 +1,10 @@
+//! `std/time` without dates: a program that embeds Lakescript left them out
+//! *(the `dates` feature of the crate)*, so there's only the current time
+//! *(see ideas/stdlib/time.md)*.
+
+use std/time/native;
+
+/// Milliseconds since 1970-01-01 00:00 UTC, like Java's `System.currentTimeMillis()`
+/// *(i.e. `const $start = time::now(); ... outln(f"took {time::now() - $start} ms");`)*.
+/// It follows the system clock, so it can jump if the clock is changed.
+pub number now() = native::now();

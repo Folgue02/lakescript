@@ -200,6 +200,9 @@ impl<'a> Compiler<'a> {
         let f = self.functions.pop().expect("a function is being compiled");
         let mut proto = f.proto;
         proto.captures = f.upvalues.iter().map(|(_, c, _)| *c).collect();
+        proto.regex_cache = proto.regexes.iter().map(|_| Default::default()).collect();
+        proto.field_cache = proto.names.iter().map(|_| Default::default()).collect();
+        proto.method_cache = proto.names.iter().map(|_| Default::default()).collect();
         proto
     }
 

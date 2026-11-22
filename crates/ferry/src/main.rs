@@ -212,18 +212,13 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
 
 /// The flag every engine shares, set on Ctrl+C *(see `on_ctrl_c` in lks)*.
 fn interrupt() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, OnceLock};
     static FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
     FLAG.get_or_init(|| {
         let flag = Arc::new(AtomicBool::new(false));
-        let set = flag.clone();
         // A second Ctrl+C before a script got to the first stops ferry
-        let _ = ctrlc::set_handler(move || {
-            if set.swap(true, Ordering::Relaxed) {
-                std::process::exit(130);
-            }
-        });
+        lakescript::on_ctrl_c(flag.clone());
         flag
     })
     .clone()

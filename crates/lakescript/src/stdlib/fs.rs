@@ -134,7 +134,7 @@ pub fn register(m: &mut Exports) {
     m.function("write", |ctx, values| {
         let a = Args::new("fs::write", values, 2, 2)?;
         let p = a.str(0)?;
-        fs::write(ctx.state.resolve(&p), a.str(1)?).map_err(|e| io_error("write", &p, e))?;
+        fs::write(ctx.state.resolve(&p), a.str(1)?.as_bytes()).map_err(|e| io_error("write", &p, e))?;
         Ok(Value::Null)
     });
     m.function("append", |ctx, values| {
@@ -216,7 +216,7 @@ pub fn register(m: &mut Exports) {
         let a = Args::new("fs::walk", values, 0, 1)?;
         let p = a.str_or(0, ".")?;
         let mut out = Vec::new();
-        walk(&ctx.state.resolve(&p), if p == "." { "" } else { &p }, &mut out)?;
+        walk(&ctx.state.resolve(&p), if &*p == "." { "" } else { &p }, &mut out)?;
         Ok(strings(out))
     });
     m.function("glob", |ctx, values| {
@@ -224,7 +224,7 @@ pub fn register(m: &mut Exports) {
         let pattern = a.str(0)?;
         let (base, shown, rest) = match pattern.strip_prefix('/') {
             Some(rest) => (std::path::PathBuf::from("/"), "/".to_string(), rest.to_string()),
-            None => (ctx.state.cwd.clone(), String::new(), pattern.clone()),
+            None => (ctx.state.cwd.clone(), String::new(), pattern.to_string()),
         };
         let parts: Vec<&str> = rest.split('/').filter(|p| !p.is_empty()).collect();
         let mut out = Vec::new();
@@ -327,7 +327,7 @@ pub fn register(m: &mut Exports) {
         let (target, p) = (a.str(0)?, a.str(1)?);
         let path = ctx.state.resolve(&p);
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &path).map_err(|e| io_error("create the link", &p, e))?;
+        std::os::unix::fs::symlink(&*target, &path).map_err(|e| io_error("create the link", &p, e))?;
         #[cfg(windows)]
         std::os::windows::fs::symlink_file(&target, &path).map_err(|e| io_error("create the link", &p, e))?;
         Ok(Value::Null)

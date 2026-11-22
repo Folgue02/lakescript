@@ -22,6 +22,8 @@ pub struct Host {
     pub inherit_stdio: bool,
     pub exit_allowed: bool,
     pub regexes: HashMap<String, Rc<RegexValue>>,
+    /// Where the characters of the strings being indexed are *(see `strings.rs`)*.
+    pub strings: crate::strings::StringIndex,
     pub state: ScriptState,
     pub loader: Loader,
     /// The built-in functions and the ones the host registered, by number, and their numbers by name.

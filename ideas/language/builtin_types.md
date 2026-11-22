@@ -91,12 +91,11 @@ void help() {
     - They can be indexed and sliced like lists, with negative indexes and ranges. Each element is a one-character string: `'hello'[0]` is `'h'`, `'hello'[-3..]` is `'llo'`. An index outside the string gives `null`, like with lists, so `$text[$i]` is a `?string`.
     - `for ($c in $text)` loops over the characters.
     - `<`, `>`, `<=` and `>=` compare strings alphabetically, character by character *(i.e. `'apple' < 'banana'` is `true`)*.
-- Internally, strings are stored like in Python (PEP 393): every character of a string takes the same number of bytes, chosen by the widest character in it. This is never visible to the user:
-    - 1 byte per character if every character fits in Latin-1 *(i.e. `'hello'`, `'año'`)*.
-    - 2 bytes per character if one doesn't, but all fit in 2 bytes *(i.e. `'привет'`)*.
-    - 4 bytes per character otherwise *(i.e. a string with an emoji)*.
-    
-    Since every character has the same size, `.length()` and indexing are instant for any string. The cost is converting to UTF-8 when the string is written to a file or the terminal, so the UTF-8 version is kept after the first conversion.
+- **`.length()` and indexing are instant for any string**, like in Python, so a loop over the characters of a long string takes time in proportion to its length. How it's stored is never visible to the user:
+    - A string is UTF-8, where a character takes 1 to 4 bytes. Python *(PEP 393)* makes every character of a string the same size instead, 1, 2 or 4 bytes by its widest one, which was the first plan here. It would mean converting every string that reaches a file, a regex or a command, and writing every method of `string` three times.
+    - Instead, the strings a script is indexing are remembered *(the last 8 of 32 bytes or more)*. One that's only ASCII needs nothing else, since its characters are its bytes. For any other, where each character starts is written down the first time it's needed, which takes 4 bytes for each character, about what Python's wider strings take.
+    - So a string that's never indexed costs nothing, and a short one is walked, which is as fast. A loop that indexes more than 8 long strings in turn finds each one out again, at the speed of walking it.
+    - It's in `crates/lakescript/src/strings.rs`, used by `.length()`, `$text[$i]`, slices, `indexOf` and the methods that take positions.
 - Converting a string to another type throws an `Exception` if it isn't valid *(i.e. `'abc'.toNumber()`)*. Use `try` to get a fallback: `(try $input.toNumber()).orElse(0)`.
 
 ### Number

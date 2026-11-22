@@ -1,5 +1,8 @@
 //! `std/html` *(see `ideas/stdlib/html.md`)*.
 
+// Only with the features of the crate these modules need
+#![cfg(feature = "html")]
+
 use lakescript::{CapturedOutput, Completion, Engine};
 
 fn run(source: &str) -> String {

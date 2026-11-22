@@ -1,15 +1,21 @@
 //! The modules of the standard library, under `std/` *(see `ideas/stdlib/`)*.
 
+#[cfg(feature = "csv")]
 mod csv_format;
+#[cfg(feature = "dates")]
+mod dates;
 mod env;
 mod fs;
+#[cfg(feature = "html")]
 mod html;
+#[cfg(feature = "http")]
 mod http;
 mod io;
 mod json;
 mod path;
 mod process;
 mod template;
+#[cfg(feature = "terminal")]
 mod terminal;
 mod test;
 mod time;
@@ -21,34 +27,76 @@ use crate::exceptions::TYPE_ERROR;
 use crate::modules::{Globals, Module};
 use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeResult, Value, VmFn, VmFunction};
 
+/// The modules this build has. The ones that need big crates are features of
+/// this crate, all on by default, so a program that embeds Lakescript can
+/// leave them out *(i.e. `default-features = false, features = ["dates"]`)*.
 pub const MODULES: &[&str] = &[
     "std/env",
+    #[cfg(feature = "csv")]
     "std/format/csv",
     "std/format/json",
     "std/fs",
+    #[cfg(feature = "html")]
     "std/html",
+    #[cfg(feature = "http")]
     "std/http",
     "std/io",
     "std/path",
     "std/process",
     "std/template",
+    #[cfg(feature = "terminal")]
     "std/terminal",
+    #[cfg(feature = "terminal")]
     "std/terminal/Style",
+    #[cfg(feature = "dates")]
     "std/time/zone",
     "std/test",
     "std/time",
 ];
 
+/// The modules that are features of the crate, with their feature, to say
+/// why one is missing.
+const FEATURES: &[(&str, &str)] = &[
+    ("std/format/csv", "csv"),
+    ("std/html", "html"),
+    ("std/http", "http"),
+    ("std/terminal", "terminal"),
+    ("std/terminal/Style", "terminal"),
+    ("std/time/zone", "dates"),
+];
+
+/// The feature of the crate a module needs, when this build doesn't have it.
+pub fn left_out(name: &str) -> Option<&'static str> {
+    FEATURES.iter().find(|(module, _)| *module == name && !MODULES.contains(module)).map(|(_, feature)| *feature)
+}
+
 /// The Rust parts of modules written in Lakescript, which only those modules use.
-const NATIVE: &[&str] = &["std/html/native", "std/http/native", "std/terminal/native", "std/time/native"];
+const NATIVE: &[&str] = &[
+    #[cfg(feature = "html")]
+    "std/html/native",
+    #[cfg(feature = "http")]
+    "std/http/native",
+    #[cfg(feature = "terminal")]
+    "std/terminal/native",
+    "std/time/native",
+];
 
 /// Modules written in Lakescript, which come with the interpreter.
 const SOURCES: &[(&str, &str)] = &[
+    #[cfg(feature = "html")]
     ("std/html", include_str!("html.lks")),
+    #[cfg(feature = "http")]
     ("std/http", include_str!("http.lks")),
+    #[cfg(feature = "terminal")]
     ("std/terminal", include_str!("terminal.lks")),
+    #[cfg(feature = "terminal")]
     ("std/terminal/Style", include_str!("terminal/Style.lks")),
+    #[cfg(feature = "dates")]
     ("std/time", include_str!("time.lks")),
+    // Without dates, `std/time` is only the current time
+    #[cfg(not(feature = "dates"))]
+    ("std/time", include_str!("time_basic.lks")),
+    #[cfg(feature = "dates")]
     ("std/time/zone", include_str!("time/zone.lks")),
 ];
 
@@ -118,10 +166,14 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/env" => env::register(&mut exports),
         "std/fs" => fs::register(&mut exports),
         "std/io" => io::register(&mut exports),
+        #[cfg(feature = "csv")]
         "std/format/csv" => csv_format::register(&mut exports),
         "std/format/json" => json::register(&mut exports),
+        #[cfg(feature = "html")]
         "std/html/native" => html::register(&mut exports),
+        #[cfg(feature = "http")]
         "std/http/native" => http::register(&mut exports),
+        #[cfg(feature = "terminal")]
         "std/terminal/native" => terminal::register(&mut exports),
         "std/path" => path::register(&mut exports),
         "std/process" => process::register(&mut exports),
@@ -176,16 +228,17 @@ impl<'a> Args<'a> {
         NativeError::new(TYPE_ERROR, format!("argument {} of `{}` must be {expected}, not a {got}", i + 1, self.name))
     }
 
-    pub fn str(&self, i: usize) -> Result<String, NativeError> {
+    /// A string argument, shared with the script, not copied.
+    pub fn str(&self, i: usize) -> Result<Rc<str>, NativeError> {
         match self.values.get(i) {
-            Some(Value::Str(s)) => Ok(s.to_string()),
+            Some(Value::Str(s)) => Ok(s.clone()),
             _ => Err(self.wrong(i, "a string")),
         }
     }
 
-    pub fn str_or(&self, i: usize, default: &str) -> Result<String, NativeError> {
+    pub fn str_or(&self, i: usize, default: &str) -> Result<Rc<str>, NativeError> {
         match self.values.get(i) {
-            None | Some(Value::Null) => Ok(default.to_string()),
+            None | Some(Value::Null) => Ok(Rc::from(default)),
             _ => self.str(i),
         }
     }
@@ -221,7 +274,7 @@ impl<'a> Args<'a> {
 
     /// Every argument from `from` on, as strings *(for `...string` parameters)*.
     pub fn rest_strings(&self, from: usize) -> Result<Vec<String>, NativeError> {
-        (from..self.values.len()).map(|i| self.str(i)).collect()
+        (from..self.values.len()).map(|i| self.str(i).map(|s| s.to_string())).collect()
     }
 
     pub fn value(&self, i: usize) -> Value {

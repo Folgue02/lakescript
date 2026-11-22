@@ -48,8 +48,11 @@ pub fn register(m: &mut Exports) {
 }
 
 /// A person at a terminal: stdin and stderr are terminals, and the script
-/// runs on them, not inside a program that captures what it prints.
-fn interactive(ctx: &NativeContext) -> bool {
+/// runs on them, not inside a program that captures what it prints. Every
+/// prompt asks this first, so what the script wrote so far is written out
+/// before anything is asked.
+fn interactive(ctx: &mut NativeContext) -> bool {
+    let _ = ctx.output.flush();
     ctx.inherit_stdio && std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
@@ -231,7 +234,7 @@ fn answer_from_stdin(ctx: &mut NativeContext, question: &str, default: Option<St
 fn optional_str(a: &Args, i: usize) -> Result<Option<String>, NativeError> {
     match a.value(i) {
         Value::Null => Ok(None),
-        _ => a.str(i).map(Some),
+        _ => a.str(i).map(|s| Some(s.to_string())),
     }
 }
 
@@ -257,7 +260,7 @@ fn problem(ctx: &mut NativeContext, values: Vec<Value>) -> Result<Value, NativeE
     let a = Args::new("terminal::ask", values, 1, 1)?;
     let text = a.str(0)?;
     if !interactive(ctx) {
-        return Err(NativeError::new(VALUE_ERROR, text));
+        return Err(NativeError::new(VALUE_ERROR, &*text));
     }
     let paint = crate::terminal::Paint(crate::terminal::When::Auto.colors(true));
     eprintln!("{} {text}", paint.error("✗"));
@@ -417,7 +420,7 @@ fn show_paged(ctx: &mut NativeContext, text: &str) -> Result<(), NativeError> {
 
 fn pager(ctx: &mut NativeContext, values: Vec<Value>) -> Result<Value, NativeError> {
     let a = Args::new("terminal::pager", values, 1, 1)?;
-    let mut text = a.str(0)?;
+    let mut text = a.str(0)?.to_string();
     if !text.ends_with('\n') {
         text.push('\n');
     }
@@ -505,7 +508,7 @@ fn edit(ctx: &mut NativeContext, values: Vec<Value>) -> Result<Value, NativeErro
     let fallback = if cfg!(windows) { "notepad" } else { "vi" };
     let editor = ["VISUAL", "EDITOR"].iter().find_map(|v| ctx.state.env_get(v).filter(|e| !e.trim().is_empty())).unwrap_or_else(|| fallback.to_string());
     let file = std::env::temp_dir().join(format!("lakescript-edit-{}-{}.txt", std::process::id(), Instant::now().elapsed().as_nanos()));
-    std::fs::write(&file, &text).map_err(|e| NativeError::new("IOError", format!("can't write the file to edit: {e}")))?;
+    std::fs::write(&file, text.as_bytes()).map_err(|e| NativeError::new("IOError", format!("can't write the file to edit: {e}")))?;
     let mut words = editor.split_whitespace();
     let program = words.next().unwrap_or(fallback);
     let status = std::process::Command::new(program).args(words).arg(&file).status();

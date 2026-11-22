@@ -13,13 +13,13 @@ use crate::token::{Span, TokenKind};
 use crate::value::{Function, Key, Range, ResultValue, Value, format_number, whole};
 
 /// The arguments of a method call, with helpers that give good errors.
-struct Args {
-    method: String,
+struct Args<'a> {
+    method: &'a str,
     values: Vec<Value>,
     span: Span,
 }
 
-impl Args {
+impl Args<'_> {
     fn fail<T>(&self, message: impl Into<String>) -> Exec<T> {
         error(message, self.span)
     }
@@ -113,7 +113,7 @@ impl Args {
 }
 
 pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec<Value>, span: Span) -> Exec<Value> {
-    let args = Args { method: method.to_string(), values, span };
+    let args = Args { method, values, span };
 
     // Methods every value has
     match method {
@@ -333,10 +333,6 @@ fn merge_sort(interp: &mut Interpreter, items: Vec<Value>, compare: impl Fn(&Val
 
 // ---- string ----
 
-fn char_index(s: &str, byte: usize) -> usize {
-    s[..byte].chars().count()
-}
-
 fn words_of(s: &str) -> Vec<String> {
     // Splits `userName`, `user_name`, `user-name` and `user name` into lowercase words
     let mut words = Vec::new();
@@ -443,7 +439,7 @@ fn captures_list(caps: &regex::Captures) -> Value {
 }
 
 fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
-    let method = a.method.as_str();
+    let method = a.method;
     // The methods that take a regex
     let regex_method = matches!(
         method,
@@ -538,18 +534,18 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
         return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a string. For a regex, use `.{regex_name}()`"));
     }
     let _ = interp;
-    string_method_plain(s, a)
+    string_method_plain(&mut interp.host.strings, s, a)
 }
 
-fn string_method_plain(s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
-    let method = a.method.as_str();
+fn string_method_plain(strings: &mut crate::strings::StringIndex, s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
+    let method = a.method;
     let all_chars = |pred: fn(char) -> bool| !s.is_empty() && s.chars().all(pred);
     let has_letters = s.chars().any(char::is_alphabetic);
     Ok(Some(match method {
         // Information
         "length" => {
             a.count(0, 0)?;
-            int(s.chars().count())
+            int(strings.len(s))
         }
         "empty?" => Value::Bool(s.is_empty()),
         "blank?" => Value::Bool(s.trim().is_empty()),
@@ -590,11 +586,11 @@ fn string_method_plain(s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
             let part = a.str(0)?;
             let from = a.whole_or(1, 0)?.max(0) as usize;
             let skip: usize = s.chars().take(from).map(char::len_utf8).sum();
-            nullable(s[skip..].find(&*part).map(|b| int(char_index(s, skip + b))))
+            nullable(s[skip..].find(&*part).map(|b| int(strings.position_of(s, skip + b))))
         }
         "indexOfLast" => {
             a.count(1, 1)?;
-            nullable(s.rfind(&*a.str(0)?).map(|b| int(char_index(s, b))))
+            nullable(s.rfind(&*a.str(0)?).map(|b| int(strings.position_of(s, b))))
         }
         "indexesOf" => {
             a.count(1, 1)?;
@@ -602,7 +598,7 @@ fn string_method_plain(s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
             if part.is_empty() {
                 return a.fail("`.indexesOf()` needs a string that isn't empty");
             }
-            Value::list(s.match_indices(&*part).map(|(b, _)| int(char_index(s, b))).collect())
+            Value::list(s.match_indices(&*part).map(|(b, _)| int(strings.position_of(s, b))).collect())
         }
         "before" | "after" | "beforeLast" | "afterLast" => {
             a.count(1, 1)?;
@@ -715,11 +711,11 @@ fn string_method_plain(s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
             a.count(2, 2)?;
             let index = a.size(0)?;
             let text = a.str(1)?;
-            let len = s.chars().count();
+            let len = strings.len(s);
             if index > len {
                 return a.fail_as(INDEX_ERROR, format!("index {index} is past the end of the string, which has {len} characters"));
             }
-            let byte: usize = s.chars().take(index).map(char::len_utf8).sum();
+            let byte = strings.byte_of(s, index);
             string(format!("{}{text}{}", &s[..byte], &s[byte..]))
         }
         "repeat" => {
@@ -784,10 +780,10 @@ fn string_method_plain(s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
         "codePoint" => {
             a.count(0, 1)?;
             let index = a.whole_or(0, 0)?;
-            let len = s.chars().count() as i64;
+            let len = strings.len(s) as i64;
             let pos = if index < 0 { len + index } else { index };
-            match s.chars().nth(pos.max(0) as usize) {
-                Some(c) if pos >= 0 => int(c as usize),
+            match strings.char_at(s, pos.max(0) as usize).and_then(|c| c.chars().next()) {
+                Some(c) if pos >= 0 && pos < len => int(c as usize),
                 _ => return a.fail_as(INDEX_ERROR, format!("index {index} is outside the string, which has {len} characters")),
             }
         }
@@ -798,7 +794,7 @@ fn string_method_plain(s: &Rc<str>, a: &Args) -> Exec<Option<Value>> {
 // ---- number ----
 
 fn number_method(interp: &mut Interpreter, n: &Value, a: &Args) -> Exec<Option<Value>> {
-    let method = a.method.as_str();
+    let method = a.method;
     let f = n.as_f64().unwrap();
     let w = n.as_whole();
     Ok(Some(match method {
@@ -960,7 +956,7 @@ fn number_method(interp: &mut Interpreter, n: &Value, a: &Args) -> Exec<Option<V
 // ---- list ----
 
 fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec<Value>>>, a: &Args) -> Exec<Option<Value>> {
-    let method = a.method.as_str();
+    let method = a.method;
     let span = a.span;
     let items = || list.borrow().clone();
     let len = list.borrow().len();
@@ -1304,7 +1300,20 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
         "join" => {
             a.count(0, 1)?;
             let sep = a.str_or(0, "")?;
-            string(items().iter().map(|v| v.to_string()).collect::<Vec<_>>().join(&sep))
+            // Written into one string, without a string for each item
+            let mut text = String::new();
+            for (i, item) in items().iter().enumerate() {
+                if i > 0 {
+                    text.push_str(&sep);
+                }
+                match item {
+                    Value::Str(s) => text.push_str(s),
+                    other => {
+                        let _ = std::fmt::Write::write_fmt(&mut text, format_args!("{other}"));
+                    }
+                }
+            }
+            string(text)
         }
         "reduce" => {
             let f = a.func(0)?;
@@ -1384,7 +1393,7 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
 // ---- map ----
 
 fn map_method(interp: &mut Interpreter, receiver: &Value, map: &Rc<RefCell<IndexMap<Key, Value>>>, a: &Args) -> Exec<Option<Value>> {
-    let method = a.method.as_str();
+    let method = a.method;
     let span = a.span;
     let entries = || map.borrow().clone();
     let key = |i: usize| -> Exec<Key> {
@@ -1613,7 +1622,7 @@ fn command_method(
         let mut ctx = interp.context();
         execute(&command.borrow(), mode, &mut ctx).map_err(|e| flow_error_as(&e.kind, e.message, span))
     };
-    Ok(Some(match a.method.as_str() {
+    Ok(Some(match a.method {
         "run" => {
             a.count(0, 0)?;
             run(interp, Mode::Run)?
@@ -1708,7 +1717,7 @@ fn command_method(
 
 fn result_method(interp: &mut Interpreter, result: &ResultValue, a: &Args) -> Exec<Option<Value>> {
     let span = a.span;
-    Ok(Some(match (a.method.as_str(), result) {
+    Ok(Some(match (a.method, result) {
         ("isOk", r) => Value::Bool(matches!(r, ResultValue::Ok(_))),
         ("isError", r) => Value::Bool(matches!(r, ResultValue::Error(_))),
         ("orElse", r) => {
@@ -1752,14 +1761,14 @@ fn result_method(interp: &mut Interpreter, result: &ResultValue, a: &Args) -> Ex
 // ---- range ----
 
 fn range_method(interp: &mut Interpreter, range: Range, a: &Args) -> Exec<Option<Value>> {
-    let method = a.method.as_str();
+    let method = a.method;
     let span = a.span;
     Ok(Some(match method {
         "start" => Value::Int(range.start),
         "end" => Value::Int(range.end),
         "inclusive?" => Value::Bool(range.inclusive),
-        "length" => int(range.iter().count()),
-        "empty?" => Value::Bool(range.iter().next().is_none()),
+        "length" => int(range.len()),
+        "empty?" => Value::Bool(range.len() == 0),
         "contains" => {
             a.count(1, 1)?;
             Value::Bool(a.value(0).as_whole().is_some_and(|n| range.contains(n)))

@@ -68,7 +68,7 @@ pub fn register(m: &mut Exports) {
     });
     m.function("command", |_, values| {
         let a = Args::new("process::command", values, 1, usize::MAX)?;
-        let program = a.str(0)?;
+        let program = a.str(0)?.to_string();
         let args = a.rest_strings(1)?;
         Ok(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Direct { program, args })))))
     });

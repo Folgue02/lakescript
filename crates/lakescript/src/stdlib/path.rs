@@ -186,7 +186,7 @@ pub fn register(m: &mut Exports) {
     m.function("relative", |ctx, values| {
         let a = Args::new("path::relative", values, 1, 2)?;
         let cwd = ctx.state.cwd.display().to_string();
-        let full = |p: String| {
+        let full = |p: std::rc::Rc<str>| {
             let p = clean(&p);
             normalize(&if absolute_q(&p) { p } else { join(&[cwd.clone(), p]) })
         };
@@ -197,7 +197,7 @@ pub fn register(m: &mut Exports) {
     m.function("expandHome", |ctx, values| {
         let a = Args::new("path::expandHome", values, 1, 1)?;
         let path = a.str(0)?;
-        if path == "~" || path.starts_with("~/") {
+        if &*path == "~" || path.starts_with("~/") {
             let home = home(ctx.state.env_get("HOME").or_else(|| ctx.state.env_get("USERPROFILE")))?;
             return Ok(Value::string(&format!("{home}{}", &path[1..])));
         }

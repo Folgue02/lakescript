@@ -11,6 +11,7 @@ Functions that can always be used, without `use` *(see the module path in [modul
 | `err(any $value = '')` | `void` | Writes the value to stderr |
 | `errln(any $value = '')` | `void` | Same as `err`, followed by a new line |
 
+- **stdout waits in a buffer when it isn't a terminal** *(a pipe or a file)*, like Python's, which is many times faster. On a terminal, each line is written at once. What waits is written before the script reads stdin, asks something or runs a command, and when it ends, or with `io::flush()`. stderr never waits, so into the same pipe its lines can come before earlier ones of stdout.
 - They take a single value. Several values are joined with an f-string *(i.e. `outln(f"{$a} {$b}")`)*.
 - A program that embeds Lakescript decides where stdout and stderr go *(i.e. to a log, or to a window)*.
 

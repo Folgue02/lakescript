@@ -1,6 +1,9 @@
 //! `std/http`, written in Lakescript with a part in Rust, and `std/format/csv`
 //! *(see `ideas/stdlib/http.md` and `ideas/stdlib/format/csv.md`)*.
 
+// Only with the features of the crate these modules need
+#![cfg(all(feature = "http", feature = "csv"))]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;

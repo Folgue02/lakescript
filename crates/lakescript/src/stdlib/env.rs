@@ -34,12 +34,12 @@ pub fn register(m: &mut Exports) {
         if name.is_empty() || name.contains('=') || name.contains('\0') {
             return Err(NativeError::new(VALUE_ERROR, format!("'{name}' isn't a valid environment variable name")));
         }
-        ctx.state.env.insert(name, Some(a.str(1)?));
+        ctx.state.env.insert(name.to_string(), Some(a.str(1)?.to_string()));
         Ok(Value::Null)
     });
     m.function("remove", |ctx, values| {
         let a = Args::new("env::remove", values, 1, 1)?;
-        ctx.state.env.insert(a.str(0)?, None);
+        ctx.state.env.insert(a.str(0)?.to_string(), None);
         Ok(Value::Null)
     });
     m.function("all", |ctx, values| {

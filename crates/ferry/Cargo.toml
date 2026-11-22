@@ -6,7 +6,6 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-ctrlc = "3.5.3"
 lakescript.workspace = true
 pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
 serde = { version = "1.0.229", features = ["derive"] }

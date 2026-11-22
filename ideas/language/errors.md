@@ -91,7 +91,7 @@ try {
 - Not caught, the script stops with the code 130, like shells do, without the message of an error.
 - `try` as an expression and `test::throws` don't catch it either.
 - **How**: the signal of Ctrl+C *(SIGINT)* only sets a flag, and the VM checks it at the start of each loop's turn and each call, which costs a check of a bool. A read of stdin that's waiting, or a command that runs, ends and then it's thrown. A command gets the Ctrl+C itself too, since the terminal sends it to every process in front.
-- `lks` and `ferry` set the flag from a handler of `ctrlc`. A second Ctrl+C before the VM sees the first one *(i.e. while a long call of Rust runs)* stops the script at once, with 130. Engines that embed Lakescript give their own flag with `Engine::set_interrupt_flag`.
+- `lks` and `ferry` set the flag from a small handler of the library, `lakescript::on_ctrl_c(flag)`: `sigaction` on Unix and `SetConsoleCtrlHandler` on Windows, which only write the flag. The library still never handles signals unless the program asks. A second Ctrl+C before the VM sees the first one *(i.e. while a long call of Rust runs)* stops the script at once, with 130. Engines that embed Lakescript give their own flag with `Engine::set_interrupt_flag`.
 - The VM checks it at backward jumps, at each turn of a `for` and at each call. Tests are in `crates/lakescript/tests/interrupt.rs`.
 - In `std/terminal`'s prompts the terminal is in raw mode, where Ctrl+C is a key: they put the terminal back and throw it themselves *(see [terminal.md](../stdlib/terminal.md))*.
 

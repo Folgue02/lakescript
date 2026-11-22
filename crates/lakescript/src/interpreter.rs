@@ -6,6 +6,7 @@
 //! of those checks the stack budget.
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::rc::Rc;
 
 use indexmap::IndexMap;
@@ -239,6 +240,23 @@ impl<'a> Interpreter<'a> {
             return error(TOO_DEEP, span);
         }
         let height = self.stack.len();
+        // One value for each parameter, like the function of `.map()`: they
+        // go straight to the frame, without binding them by name
+        if let Function::User(user) = &**function
+            && user.proto.simple
+            && named.is_empty()
+            && positional.len() == user.proto.params.len()
+        {
+            self.stack.push(Value::Function(function.clone()));
+            let base = self.stack.len();
+            self.stack.extend(positional);
+            if let Err(e) = self.push_frame(function.clone(), base, u64::MAX, span) {
+                self.stack.truncate(height);
+                return Err(e);
+            }
+            let entry = self.frames.len() - 1;
+            return self.execute(entry);
+        }
         if let Err(e) = self.enter(function.clone(), positional, named, span) {
             self.stack.truncate(height);
             return Err(e);
@@ -526,7 +544,11 @@ impl<'a> Interpreter<'a> {
                     _ => None,
                 };
                 match fast {
-                    Some(v) => *l = v,
+                    // Both were numbers: nothing to free
+                    Some(v) => {
+                        std::mem::forget(std::mem::replace(l, v));
+                        std::mem::forget(r);
+                    }
                     None if matches!(&*l, Value::Object(_)) => {
                         // An object gives the operator through its interface *(i.e. `IAdd`)*
                         let left = l.clone();
@@ -543,7 +565,11 @@ impl<'a> Interpreter<'a> {
                 let r = self.pop();
                 let l = self.top();
                 match (&*l, &r) {
-                    (Value::Int(a), Value::Int(b)) => *l = Value::Bool(a $cmp b),
+                    (Value::Int(a), Value::Int(b)) => {
+                        let v = Value::Bool(a $cmp b);
+                        std::mem::forget(std::mem::replace(l, v));
+                        std::mem::forget(r);
+                    }
                     (Value::Object(_), _) => {
                         let left = l.clone();
                         self.frames[fi].ip = ip;
@@ -565,22 +591,20 @@ impl<'a> Interpreter<'a> {
                 Op::Null => self.stack.push(Value::Null),
                 Op::True => self.stack.push(Value::Bool(true)),
                 Op::False => self.stack.push(Value::Bool(false)),
-                Op::Pop => {
-                    self.pop();
-                }
+                Op::Pop => self.pop().discard(),
                 Op::Dup => {
-                    let v = self.top().clone();
+                    let v = self.top().copy();
                     self.stack.push(v);
                 }
 
                 // ---- Variables ----
                 Op::LoadLocal(s) => {
-                    let v = self.stack[base + s as usize].clone();
+                    let v = self.stack[base + s as usize].copy();
                     self.stack.push(v);
                 }
                 Op::StoreLocal(s) => {
                     let v = self.pop();
-                    self.stack[base + s as usize] = v;
+                    std::mem::replace(&mut self.stack[base + s as usize], v).discard();
                 }
                 Op::LoadCell(c) => {
                     let v = self.frames[fi].cells[c as usize].borrow().clone();
@@ -612,7 +636,7 @@ impl<'a> Interpreter<'a> {
                     if !global.declared {
                         return Err(undeclared(&global.key, span!()));
                     }
-                    let v = global.value.clone();
+                    let v = global.value.copy();
                     drop(slots);
                     self.stack.push(v);
                 }
@@ -757,6 +781,23 @@ impl<'a> Interpreter<'a> {
                 Op::JumpIfNot { op, target } => {
                     let r = self.pop();
                     let l = self.pop();
+                    // Two whole numbers, the usual case: compared without anything to free
+                    if let (Value::Int(a), Value::Int(b)) = (&l, &r) {
+                        let holds = match op {
+                            BinaryOp::Lt => a < b,
+                            BinaryOp::Gt => a > b,
+                            BinaryOp::LtEq => a <= b,
+                            BinaryOp::GtEq => a >= b,
+                            BinaryOp::Eq => a == b,
+                            _ => a != b,
+                        };
+                        std::mem::forget(l);
+                        std::mem::forget(r);
+                        if !holds {
+                            ip = target as usize;
+                        }
+                        continue;
+                    }
                     let holds = match (&l, &r, op) {
                         (Value::Int(a), Value::Int(b), BinaryOp::Lt) => a < b,
                         (Value::Int(a), Value::Int(b), BinaryOp::Gt) => a > b,
@@ -838,7 +879,12 @@ impl<'a> Interpreter<'a> {
                     for part in parts {
                         match part {
                             Value::Str(s) => text.push_str(&s),
-                            other => text.push_str(&other.to_string()),
+                            Value::Int(n) => {
+                                let _ = write!(text, "{n}");
+                            }
+                            other => {
+                                let _ = write!(text, "{other}");
+                            }
                         }
                     }
                     self.stack.push(Value::string(&text));
@@ -855,8 +901,16 @@ impl<'a> Interpreter<'a> {
                     self.stack.push(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Direct { program, args })))));
                 }
                 Op::Regex(r) => {
-                    let (pattern, flags) = &proto.regexes[r as usize];
-                    let regex = self.regex(pattern, flags).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span!()))?;
+                    // Compiled the first time this place runs
+                    let regex = match proto.regex_cache[r as usize].0.get() {
+                        Some(regex) => regex.clone(),
+                        None => {
+                            let (pattern, flags) = &proto.regexes[r as usize];
+                            let regex = self.regex(pattern, flags).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span!()))?;
+                            let _ = proto.regex_cache[r as usize].0.set(regex.clone());
+                            regex
+                        }
+                    };
                     self.stack.push(Value::Regex(regex));
                 }
                 Op::RangeBound => {
@@ -878,7 +932,7 @@ impl<'a> Interpreter<'a> {
                         self.frames[fi].ip = ip;
                         self.call_operator_method(&container, "get", "IIndex", "[]", vec![index], span!())?
                     } else {
-                        index_value(container, index, span!())?
+                        index_value(&mut self.host.strings, container, index, span!())?
                     };
                     self.stack.push(v);
                 }
@@ -887,11 +941,11 @@ impl<'a> Interpreter<'a> {
                     let container = self.pop();
                     let len = match &container {
                         Value::List(l) => l.borrow().len(),
-                        Value::Str(s) => s.chars().count(),
+                        Value::Str(s) => self.host.strings.len(s),
                         other => return error(format!("a {} can't be sliced", other.type_name()), span!()),
                     };
                     let range = Range { start, end: len as i64, inclusive: false, step: 1 };
-                    let v = slice(&container, range, len).map_err(|m| index_error(m, span!()))?;
+                    let v = slice(&mut self.host.strings, &container, range, len).map_err(|m| index_error(m, span!()))?;
                     self.stack.push(v);
                 }
                 Op::SetIndex => {
@@ -918,7 +972,7 @@ impl<'a> Interpreter<'a> {
                     let old = if object {
                         self.call_operator_method(&container, "get", "IIndex", "[]", vec![index.clone()], span!())?
                     } else {
-                        index_value(container.clone(), index.clone(), span!())?
+                        index_value(&mut self.host.strings, container.clone(), index.clone(), span!())?
                     };
                     if mode > 0 && old.as_f64().is_none() {
                         return error(format!("`++` and `--` only work on numbers, and this is a {}", old.type_name()), span!());
@@ -978,13 +1032,46 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::GetField(n) => {
                     let object = self.pop();
-                    let v = get_field(&object, &proto.names[n as usize], span!())?;
+                    // The field's number, remembered for objects of the class seen last
+                    let known = match &object {
+                        Value::Object(o) => {
+                            let cache = &proto.field_cache[n as usize];
+                            let slot = cache.get(&o.class).or_else(|| {
+                                let slot = o.class.field(&proto.names[n as usize])?;
+                                cache.remember(&o.class, slot);
+                                Some(slot)
+                            });
+                            slot.map(|slot| o.fields.borrow()[slot].clone())
+                        }
+                        _ => None,
+                    };
+                    let v = match known {
+                        Some(v) => v,
+                        None => get_field(&object, &proto.names[n as usize], span!())?,
+                    };
                     self.stack.push(v);
                 }
                 Op::SetField(n) => {
                     let value = self.pop();
                     let object = self.pop();
-                    set_field(&object, &proto.names[n as usize], value.clone(), span!())?;
+                    let set = match &object {
+                        Value::Object(o) => match proto.field_cache[n as usize].get(&o.class) {
+                            Some(slot) if !o.class.fields[slot].constant || o.building.get() => {
+                                o.fields.borrow_mut()[slot] = value.clone();
+                                true
+                            }
+                            _ => false,
+                        },
+                        _ => false,
+                    };
+                    if !set {
+                        set_field(&object, &proto.names[n as usize], value.clone(), span!())?;
+                        if let Value::Object(o) = &object
+                            && let Some(slot) = o.class.field(&proto.names[n as usize])
+                        {
+                            proto.field_cache[n as usize].remember(&o.class, slot);
+                        }
+                    }
                     self.stack.push(value);
                 }
                 Op::Static { name, variable } => {
@@ -1076,12 +1163,24 @@ impl<'a> Interpreter<'a> {
                     self.frames[fi].ip = ip;
                     let at = self.stack.len() - argc as usize - 1;
                     let class = match &self.stack[at] {
-                        Value::Object(o) => Some(o.class.clone()),
-                        Value::Exception(e) => e.object.as_ref().map(|o| o.class.clone()),
+                        Value::Object(o) => Some(&o.class),
+                        Value::Exception(e) => e.object.as_ref().map(|o| &o.class),
                         _ => None,
                     };
-                    if let Some(class) = class {
-                        if let Some(method) = class.methods.get(&*proto.names[name as usize]).cloned() {
+                    // The method's number, remembered for objects of the class seen last
+                    let method = class.and_then(|class| {
+                        let cache = &proto.method_cache[name as usize];
+                        if let Some(slot) = cache.get(class) {
+                            return Some(class.method_list[slot].clone());
+                        }
+                        let method = class.methods.get(&*proto.names[name as usize])?;
+                        if let Some(slot) = class.method_list.iter().position(|m| Rc::ptr_eq(m, method)) {
+                            cache.remember(class, slot);
+                        }
+                        Some(method.clone())
+                    });
+                    {
+                        if let Some(method) = method {
                             if let Function::User(user) = &*method {
                                 if user.proto.simple && argc as usize + 1 == user.proto.params.len() {
                                     // The method's frame starts at the object, its `@`
@@ -1356,11 +1455,18 @@ impl<'a> Interpreter<'a> {
             }
             None => return error(format!("the module of `{name}` isn't imported yet"), span),
         };
-        let (key, what) = if constant { (format!("${name}"), "constant") } else { (name.to_string(), "function") };
-        if !module.public.contains(&key) {
+        // A function is kept under its own name, so calling one makes no string
+        let with_sigil;
+        let (key, what) = if constant {
+            with_sigil = format!("${name}");
+            (with_sigil.as_str(), "constant")
+        } else {
+            (name, "function")
+        };
+        if !module.public.contains(key) {
             return error(format!("`{}` has no `pub` {what} named `{key}`", module.path), span);
         }
-        match module.globals.get(&key) {
+        match module.globals.get(key) {
             Some(v) => Ok(v),
             None if self.host.loader.in_progress.values().any(|m| Rc::ptr_eq(m, &module)) => error(
                 format!("`{key}` of `{}` isn't ready yet: that module is still loading, because it uses this one. Modules that use each other can only use each other's functions and classes once they're loaded", module.path),
@@ -1547,6 +1653,7 @@ impl Interpreter<'_> {
             interfaces,
             required: info.required.clone(),
             fields,
+            method_list: table.values().cloned().collect(),
             methods: table,
             statics: RefCell::new(static_table),
             constructor,
@@ -1958,7 +2065,7 @@ fn range_at(range: &Range, i: i64) -> Option<i64> {
     inside.then_some(n)
 }
 
-fn index_value(container: Value, index: Value, span: Span) -> Exec<Value> {
+fn index_value(strings: &mut crate::strings::StringIndex, container: Value, index: Value, span: Span) -> Exec<Value> {
     match container {
         Value::Map(map) => {
             let Some(key) = Key::from_value(&index) else { return Err(key_error(&index, span)) };
@@ -1967,11 +2074,11 @@ fn index_value(container: Value, index: Value, span: Span) -> Exec<Value> {
         Value::List(_) | Value::Str(_) => {
             let len = match &container {
                 Value::List(l) => l.borrow().len(),
-                Value::Str(s) => s.chars().count(),
+                Value::Str(s) => strings.len(s),
                 _ => unreachable!(),
             };
             if let Value::Range(range) = index {
-                return slice(&container, range, len).map_err(|m| index_error(m, span));
+                return slice(strings, &container, range, len).map_err(|m| index_error(m, span));
             }
             let Some(i) = index.as_whole() else {
                 return Err(index_error(format!("indexes must be whole numbers, and this is {}", describe(&index)), span));
@@ -1984,7 +2091,7 @@ fn index_value(container: Value, index: Value, span: Span) -> Exec<Value> {
             let pos = pos as usize;
             Ok(match &container {
                 Value::List(l) => l.borrow()[pos].clone(),
-                Value::Str(s) => Value::string(&s.chars().nth(pos).unwrap().to_string()),
+                Value::Str(s) => Value::string(strings.char_at(s, pos).unwrap_or("")),
                 _ => unreachable!(),
             })
         }
@@ -2111,7 +2218,7 @@ fn list_position(index: &Value, len: usize) -> Result<usize, String> {
 
 /// `$list[1..3]`: the ends are positions, negative ones count from the end, and
 /// a slice never counts down.
-fn slice(container: &Value, range: Range, len: usize) -> Result<Value, String> {
+fn slice(strings: &mut crate::strings::StringIndex, container: &Value, range: Range, len: usize) -> Result<Value, String> {
     if range.step != 1 {
         return Err("slices can't use a step".into());
     }
@@ -2124,7 +2231,7 @@ fn slice(container: &Value, range: Range, len: usize) -> Result<Value, String> {
     let (start, end) = (start as usize, (end.max(start)) as usize);
     Ok(match container {
         Value::List(l) => Value::list(l.borrow()[start..end].to_vec()),
-        Value::Str(s) => Value::string(&s.chars().skip(start).take(end - start).collect::<String>()),
+        Value::Str(s) => Value::string(strings.slice(s, start, end)),
         _ => unreachable!(),
     })
 }

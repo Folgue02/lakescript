@@ -38,6 +38,17 @@ pub struct Globals {
 }
 
 impl Globals {
+    /// Drops every value, when the engine is done with them. A function
+    /// keeps the top level it was declared in, and the top level keeps the
+    /// function, so without this neither would ever be freed.
+    pub fn clear(&self) {
+        // Taken out first: dropping a value can drop others that look in here
+        let slots = std::mem::take(&mut *self.slots.borrow_mut());
+        let modules = std::mem::take(&mut *self.modules.borrow_mut());
+        drop(slots);
+        drop(modules);
+    }
+
     /// The number of a global, giving it one if it has none.
     pub fn slot(&self, key: &str) -> u32 {
         if let Some(&i) = self.names.borrow().get(key) {
@@ -159,6 +170,9 @@ impl Loader {
         if path.first().is_some_and(|p| p == "std") {
             // The Rust parts of modules of the standard library are only for them
             let hidden = crate::stdlib::native(&joined) && !importer.starts_with(crate::stdlib::EMBEDDED);
+            if let Some(feature) = crate::stdlib::left_out(&joined) {
+                return Err(format!("`{joined}` isn't in this program: it was built without the `{feature}` feature of Lakescript"));
+            }
             if !crate::stdlib::exists(&joined) || hidden {
                 return Err(format!("there's no module `{joined}` in the standard library"));
             }

@@ -46,20 +46,27 @@ fn run() -> Result<(), String> {
     let capabilities = serde_json::to_value(capabilities).map_err(|e| e.to_string())?;
     connection.initialize(capabilities).map_err(|e| e.to_string())?;
     let mut server = Server::default();
+    // Whether the files changed since they were last checked. Changes that
+    // arrive together *(i.e. the keys typed while a check ran)* are one check:
+    // it runs when nothing else is waiting, or before a question is answered.
+    let mut stale = false;
     for message in &connection.receiver {
         match message {
             Message::Request(request) => {
                 if connection.handle_shutdown(&request).map_err(|e| e.to_string())? {
                     break;
                 }
-                let _ = connection.sender.send(Message::Response(server.answer(request)));
-            }
-            Message::Notification(notification) => {
-                if server.handle(notification) {
+                if std::mem::take(&mut stale) {
                     server.check_all(&connection);
                 }
+                let _ = connection.sender.send(Message::Response(server.answer(request)));
             }
+            Message::Notification(notification) => stale |= server.handle(notification),
             Message::Response(_) => {}
+        }
+        if stale && connection.receiver.is_empty() {
+            stale = false;
+            server.check_all(&connection);
         }
     }
     drop(connection);

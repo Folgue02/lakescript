@@ -68,6 +68,24 @@ pub struct Engine {
     completion: Option<crate::checker::complete::Request>,
 }
 
+/// Frees what its scripts declared: the top level of the script and of every
+/// module it loaded *(see `Globals::clear`)*. Data that refers to itself
+/// *(i.e. a list inside itself)* is the only thing left behind.
+impl Drop for Engine {
+    fn drop(&mut self) {
+        let loader = &mut self.host.loader;
+        let modules: Vec<Rc<crate::modules::Module>> =
+            loader.cache.drain().map(|(_, m)| m).chain(loader.std_cache.drain().map(|(_, m)| m)).chain(loader.in_progress.drain().map(|(_, m)| m)).collect();
+        for (_, globals, _) in loader.pending.drain(..) {
+            globals.clear();
+        }
+        for module in modules {
+            module.globals.clear();
+        }
+        self.globals.clear();
+    }
+}
+
 impl Default for Engine {
     fn default() -> Self {
         Self::new()
@@ -77,7 +95,16 @@ impl Default for Engine {
 impl Engine {
     /// An engine connected to the process's stdin, stdout and stderr, like `lks`.
     pub fn new() -> Self {
-        let mut engine = Self::build(Box::new(std::io::stdout()), Box::new(std::io::stderr()));
+        // Like Python: on a terminal each line is written at once, and into a
+        // pipe or a file output waits in a buffer, which is many times faster.
+        // It's written before the script reads stdin, asks something or runs
+        // a command, and when it ends. stderr never waits.
+        let output: Box<dyn Write> = if std::io::stdout().is_terminal() {
+            Box::new(std::io::stdout())
+        } else {
+            Box::new(std::io::BufWriter::with_capacity(8192, std::io::stdout()))
+        };
+        let mut engine = Self::build(output, Box::new(std::io::stderr()));
         engine.host.input = Box::new(std::io::BufReader::new(std::io::stdin()));
         engine.host.input_piped = !std::io::stdin().is_terminal();
         engine.host.inherit_stdio = true;
@@ -100,6 +127,7 @@ impl Engine {
             inherit_stdio: false,
             exit_allowed: true,
             regexes: HashMap::new(),
+            strings: Default::default(),
             state: ScriptState::new(),
             loader: Loader::new(),
             builtins: Vec::new(),
@@ -353,7 +381,7 @@ impl Engine {
     }
 
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {
-        let prelude = self.prelude.get_or_insert_with(|| Rc::new(crate::checker::prelude::Prelude::load())).clone();
+        let prelude = self.prelude.get_or_insert_with(crate::checker::prelude::Prelude::shared).clone();
         let recover = self.editing();
         let modules = crate::checker::Modules {
             loader: &self.host.loader,
@@ -433,6 +461,7 @@ impl Engine {
                 required: vec![Rc::from(*method)],
                 fields: Vec::new(),
                 methods: HashMap::new(),
+                method_list: Vec::new(),
                 statics: std::cell::RefCell::new(indexmap::IndexMap::new()),
                 constructor: None,
                 init: None,
@@ -451,9 +480,12 @@ impl Engine {
 }
 
 fn print(to: &mut dyn Write, args: Vec<Value>, name: &str, newline: bool) -> NativeResult {
-    let text = match args.as_slice() {
-        [] => String::new(),
-        [value] => value.to_string(),
+    // Written straight into the output, without making a string of it first
+    let end = if newline { "\n" } else { "" };
+    let result = match args.as_slice() {
+        [] => write!(to, "{end}"),
+        [Value::Str(text)] => write!(to, "{text}{end}"),
+        [value] => write!(to, "{value}{end}"),
         _ => {
             return Err(NativeError::new(
                 "TypeError",
@@ -461,7 +493,6 @@ fn print(to: &mut dyn Write, args: Vec<Value>, name: &str, newline: bool) -> Nat
             ));
         }
     };
-    let result = if newline { writeln!(to, "{text}") } else { write!(to, "{text}") };
     result.map_err(|e| NativeError::new("IOError", format!("can't write the output: {e}")))?;
     Ok(Value::Null)
 }

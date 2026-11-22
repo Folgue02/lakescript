@@ -209,12 +209,7 @@ fn test(engine: &mut Engine, script: &str, args: &[String], color: When) -> Exit
 /// ideas/language/errors.md)*. A second one before the script got to it
 /// stops it, for a script stuck waiting *(i.e. reading stdin)*.
 fn on_ctrl_c(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
-    use std::sync::atomic::Ordering;
-    let _ = ctrlc::set_handler(move || {
-        if flag.swap(true, Ordering::Relaxed) {
-            std::process::exit(130);
-        }
-    });
+    lakescript::on_ctrl_c(flag);
 }
 
 /// An error with the line of code it points to, read from the file it's in.

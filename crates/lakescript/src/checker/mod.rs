@@ -134,6 +134,8 @@ pub struct Checker<'a> {
     /// The calls of functions that never return *(`never`)*, by where they are:
     /// a statement that's one of them ends its block, like `return`.
     never_calls: HashSet<(u32, usize, usize)>,
+    /// How many `@super(...)` calls were checked, so a constructor knows whether it has one.
+    super_calls: usize,
 }
 
 type Check<T> = Result<T, Diagnostic>;
@@ -141,7 +143,7 @@ type Check<T> = Result<T, Diagnostic>;
 impl<'a> Checker<'a> {
     pub fn new(prelude: &'a Prelude, modules: Modules<'a>, state: &'a mut State, host_functions: &[String]) -> Self {
         let mut builtins = Scope::default();
-        if let Some(general) = prelude.modules.get("general") {
+        if let Some(general) = prelude.module("general") {
             builtins.funcs.extend(general.functions.clone());
         }
         for (kind, _) in exceptions::TREE {
@@ -183,6 +185,7 @@ impl<'a> Checker<'a> {
             unnarrowed: HashMap::new(),
             unnarrowed_uses: HashMap::new(),
             never_calls: HashSet::new(),
+            super_calls: 0,
         }
     }
 
@@ -1094,7 +1097,7 @@ impl<'a> Checker<'a> {
             Err(message) => return self.fail(message, span),
         };
         match source {
-            crate::modules::ModuleSource::Std(name) => match self.prelude.modules.get(&name) {
+            crate::modules::ModuleSource::Std(name) => match self.prelude.module(&name) {
                 Some(m) => Ok(m.clone()),
                 None => self.fail(format!("there's no module `{name}`"), span),
             },
@@ -1487,6 +1490,7 @@ impl<'a> Checker<'a> {
                 let Some(this) = self.this.last().cloned().filter(|t| t.constructor) else {
                     return self.fail("`@super(...)` can only be used in a constructor", span);
                 };
+                self.super_calls += 1;
                 let parent = this.class.0.body.borrow().parent.clone();
                 let exception = this.class.0.body.borrow().exception.clone();
                 let Some(parent) = parent else {
@@ -2139,9 +2143,9 @@ impl<'a> Checker<'a> {
                 return Ok(Ty::Any);
             }
         };
-        let found = self.prelude.types.get(key).and_then(|t| t.methods.get(method).cloned().map(|m| (m, t.params.clone())));
+        let found = self.prelude.type_sigs(key).and_then(|t| t.methods.get(method).cloned().map(|m| (m, t.params.clone())));
         let found = found.or_else(|| {
-            let any = self.prelude.types.get("any")?;
+            let any = self.prelude.type_sigs("any")?;
             any.methods.get(method).cloned().map(|m| (m, Vec::new()))
         });
         let Some((sig, names)) = found else {

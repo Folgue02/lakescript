@@ -1,6 +1,9 @@
 //! Dates in `std/time` and zones in `std/time/zone` *(see `ideas/stdlib/time.md`)*.
 //! The tests name their zones, so they don't depend on the one of the system.
 
+// Only with the features of the crate these modules need
+#![cfg(feature = "dates")]
+
 use lakescript::{CapturedOutput, Engine};
 
 fn run(code: &str) -> String {

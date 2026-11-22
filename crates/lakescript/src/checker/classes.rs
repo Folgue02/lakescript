@@ -486,13 +486,15 @@ impl Checker<'_> {
                 }
                 MemberKind::Constructor(ctor) => {
                     let sig = class.0.body.borrow().constructor.clone().unwrap();
-                    if parent.is_some() && !calls_super(&ctor.body) {
-                        return self.fail(format!("the constructor of `{}` must call `@super(...)`, the constructor of its superclass", decl.name), member.span);
-                    }
+                    // Counted while its code is checked, so text that looks like the call isn't one
+                    let before = self.super_calls;
                     self.this.push(This { class: class.clone(), self_param: false, is_static: false, constructor: true });
                     let result = self.method_body(ctor, &sig, member.span);
                     self.this.pop();
                     result?;
+                    if parent.is_some() && self.super_calls == before {
+                        return self.fail(format!("the constructor of `{}` must call `@super(...)`, the constructor of its superclass", decl.name), member.span);
+                    }
                 }
             }
         }
@@ -920,16 +922,6 @@ fn all_fields(class: &ClassRef, args: &[Ty]) -> Vec<FieldSig> {
     let mut fields = body.parent.as_ref().map(|p| all_fields(p, &parent_args)).unwrap_or_default();
     fields.extend(body.fields.iter().map(|f| FieldSig { ty: f.ty.substitute(&map), ..f.clone() }));
     fields
-}
-
-/// Whether a constructor's code has a `@super(...)`.
-fn calls_super(body: &FunctionBody) -> bool {
-    // The printed tree has `(@super ...)` for the call, and `(@super.name ...)` for a method
-    let has = |text: String| text.contains("(@super)") || text.contains("(@super ");
-    match body {
-        FunctionBody::Expr(e) => has(e.to_string()),
-        FunctionBody::Block(stmts) => stmts.iter().any(|s| has(s.to_string())),
-    }
 }
 
 thread_local! {

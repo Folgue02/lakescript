@@ -333,6 +333,50 @@ pub struct Import {
     pub items: Vec<(String, bool, u32, String)>,
 }
 
+/// What a place in the code that reads a field or calls a method found out
+/// the last time: for objects of this class, it's the field or the method
+/// with this number. The next time, an object of the same class skips the
+/// search by name. A class never changes once it's made, so what was found
+/// stays right.
+#[derive(Default)]
+pub struct InlineCache {
+    /// The class, by its address. `0` before anything was found.
+    class: std::cell::Cell<usize>,
+    slot: std::cell::Cell<u32>,
+    /// Keeps the address of the class from being used by another one.
+    keep: std::cell::RefCell<Option<std::rc::Weak<crate::value::Class>>>,
+}
+
+impl InlineCache {
+    /// The number found for this class, if it's the one found last.
+    #[inline(always)]
+    pub fn get(&self, class: &Rc<crate::value::Class>) -> Option<usize> {
+        (self.class.get() == Rc::as_ptr(class) as usize).then(|| self.slot.get() as usize)
+    }
+
+    pub fn remember(&self, class: &Rc<crate::value::Class>, slot: usize) {
+        self.class.set(Rc::as_ptr(class) as usize);
+        self.slot.set(slot as u32);
+        *self.keep.borrow_mut() = Some(Rc::downgrade(class));
+    }
+}
+
+impl std::fmt::Debug for InlineCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "InlineCache")
+    }
+}
+
+/// A regex of the code, compiled the first time it runs.
+#[derive(Default)]
+pub struct RegexCache(pub std::cell::OnceCell<Rc<crate::value::RegexValue>>);
+
+impl std::fmt::Debug for RegexCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "RegexCache")
+    }
+}
+
 /// A compiled function, or a whole script or module.
 #[derive(Debug, Default)]
 pub struct Proto {
@@ -347,6 +391,12 @@ pub struct Proto {
     pub names: Vec<Rc<str>>,
     pub types: Vec<TypeExpr>,
     pub regexes: Vec<(String, String)>,
+    /// The compiled regex of each of `regexes`.
+    pub regex_cache: Vec<RegexCache>,
+    /// What the places that read or set a field, and the ones that call a
+    /// method, found out, for each of `names`.
+    pub field_cache: Vec<InlineCache>,
+    pub method_cache: Vec<InlineCache>,
     pub protos: Vec<Rc<Proto>>,
     pub calls: Vec<Vec<ArgKind>>,
     pub imports: Vec<Import>,

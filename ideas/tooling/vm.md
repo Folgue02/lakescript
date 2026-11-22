@@ -39,6 +39,43 @@ Loops and ordinary calls are faster than Python. Deep recursion of tiny function
 - **The bytecode is private to the library.** It can change between versions, so nothing outside the crate depends on it. `lks --bytecode` prints it, for debugging.
 - **No cache yet**: see the [README](../README.md).
 
+## The review after v0.10.0
+
+The code was measured against Python 3.14 and profiled, and what could be fixed without giving anything up was fixed. The same release build before and after, on the same machine *(ms)*:
+
+| | Before | After | Python |
+|---|---|---|---|
+| `fib(32)` | 290 | 251 | 158 |
+| A loop with a `%` test, 3 million times | 75 | 59 | 152 |
+| 2 million calls of a method | 183 | 119 | 124 |
+| 3 million reads of a field | 118 | 74 | 58 |
+| `.map()` and `.filter()` with lambdas, 1 million items | 160 | 115 | 92 |
+| Building and splitting 300,000 strings | 139 | 99 | 92 |
+| A map with string keys, 300,000 updates | 126 | 94 | 71 |
+| 500,000 calls of `path::name()` | 113 | 80 | 103 |
+| 1 million `outln` into a pipe | 545 | 69 | 167 |
+| `$text[$i]` over a string of 200,000 characters | 1800 | 15 | 24 |
+| Starting `lks hello.lks` | 3.4 | 2.2 | 13 |
+
+What changed:
+
+- **Output waits in a buffer when it isn't a terminal**, like Python's: a million lines were a million writes. On a terminal each line is still written at once. It's written out before the script reads stdin, asks something with `std/terminal` or runs a command, and when it ends. stderr never waits, so into the same pipe its lines can come before earlier ones of stdout, as in Python and C.
+- **A place that reads a field or calls a method remembers what it found**, for objects of the class it saw last *(`InlineCache` in `bytecode.rs`)*: the field's or the method's number, so the next object of that class skips the search by name. A class never changes once it's made, so it stays right. The class is remembered through a weak reference, so its address isn't given to another class, and nothing is kept alive.
+- **Regexes written in the code are compiled once for their place**, instead of looked up by their text every time they run.
+- **Calls into Rust make fewer copies**: a method of a built-in type doesn't copy its name, the standard library shares its string arguments with the script, `module::function` makes no string to find the function, and the function of `.map()` gets its values straight in its frame.
+- **Numbers, bools and `null` are copied and dropped without a call**: a fifth of `fib` was those calls.
+- **The release profile**: one codegen unit, LTO and `panic = "abort"`, which is 5 to 15% faster and makes `lks` 6 MB instead of 9.
+- **Starting**: the signatures of the built-in methods *(`prelude.txt`)* are read only for the types and modules a script uses, and once for every engine of a thread. Ctrl+C is a small handler of our own *(`lakescript::on_ctrl_c`)* instead of the `ctrlc` crate, which linked Foundation on macOS and started a thread.
+- **An engine frees what its scripts declared when it's dropped.** A function keeps its top level and the top level keeps the function, so nothing was ever freed, which matters for a program that makes many engines.
+- **`.length()` and indexing of strings are instant**: the strings being indexed are remembered, with where each character starts for the ones that aren't only ASCII *(see Strings in [language/builtin_types.md](../language/builtin_types.md))*. A loop over a long string was quadratic.
+- `.length()` of a range is arithmetic, not a count.
+
+What's left, and why:
+
+- **`fib` is still 1.6 times Python's**: each call copies two shared pointers and makes a frame. Closing it needs a register VM or specialized instructions.
+- **Data that refers to itself is never freed** while a script runs *(i.e. two objects that point at each other)*: values are reference counted, and only a garbage collector would free them. For scripts that end, it doesn't matter.
+- **The VM keeps checking types while it runs**, also after the checker passed: types never change what the code does, and the check can be turned off.
+
 ## Where it lives
 
 - `crates/lakescript/src/bytecode.rs`: the instructions and `Proto`, a compiled function.

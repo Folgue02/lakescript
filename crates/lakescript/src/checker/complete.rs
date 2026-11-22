@@ -171,7 +171,7 @@ impl Checker<'_> {
         let mut items = Vec::new();
         let mut seen = HashSet::new();
         let builtin = |items: &mut Vec<Item>, seen: &mut HashSet<String>, key: &str, args: Vec<Ty>| {
-            if let Some(sigs) = self.prelude.types.get(key) {
+            if let Some(sigs) = self.prelude.type_sigs(key) {
                 let map: HashMap<Rc<str>, Ty> = sigs.params.iter().cloned().zip(args).collect();
                 let mut methods: Vec<_> = sigs.methods.iter().collect();
                 methods.sort_by(|a, b| a.0.cmp(b.0));

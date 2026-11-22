@@ -17,6 +17,7 @@ pub mod docs;
 mod engine;
 mod exceptions;
 mod host;
+mod interrupt;
 mod interpreter;
 pub mod lexer;
 mod methods;
@@ -26,6 +27,7 @@ pub mod parser;
 mod patterns;
 mod stack;
 mod stdlib;
+mod strings;
 pub mod terminal;
 mod testing;
 pub mod token;
@@ -36,6 +38,7 @@ pub use checker::complete::{Completion, Item as CompletionItem, ItemKind as Comp
 pub use checker::names::{Definition, Name};
 pub use diagnostic::{Call, Diagnostic};
 pub use engine::{CapturedOutput, Engine, Outcome};
+pub use interrupt::on_ctrl_c;
 pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use value::{NativeContext, NativeError, NativeResult, Value};
 
