@@ -798,8 +798,12 @@ impl Checker<'_> {
     /// `$object.name`, or `$object?.name`, which is `null` when the object is.
     pub(super) fn field(&mut self, target: &Expr, name: &str, nullable: bool, span: Span) -> Check<Ty> {
         // What a `switch` on this field proved *(i.e. `case Git::Push ->`)*
-        if let (ExprKind::Variable(v), false) = (&target.kind, nullable) {
-            let key = format!("{v}.{name}");
+        let key = match (&target.kind, nullable) {
+            (ExprKind::Variable(v), false) => Some(format!("{v}.{name}")),
+            (ExprKind::This, false) => Some(format!("@{name}")),
+            _ => None,
+        };
+        if let Some(key) = key {
             if let Some(t) = self.scopes.iter().rev().find_map(|s| s.narrowed.get(&key).cloned()) {
                 self.expr(target, None)?;
                 return Ok(t);

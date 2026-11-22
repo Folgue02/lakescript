@@ -4,6 +4,8 @@
 - `lks` checks the types every time before running a script. It costs less than a millisecond for most scripts.
 - A type error stops the script before its first line runs, like a syntax error. There are no type warnings.
 - A check against `null` narrows the type: after `if ($x == null) return;`, or inside `if ($x != null) { ... }`, `$x` isn't nullable anymore, like in TypeScript and Kotlin. The same as `.is()` and `case string ->` already do.
+    - It narrows `const` fields too, of `@` or of a `const` variable *(i.e. `if (@part2 != null) @part2`, `if ($day.part2 != null) ...`)*, since they can't change between the check and the use. Other fields aren't narrowed: any call in between could change them, like in Kotlin.
+- **Each branch of an `if` or a `switch` used as a value must fit the type expected there**, when there is one *(a declared variable, a return type, an argument)*. A branch that doesn't is an error where it is *(i.e. `this is a ValueError, but a (string) -> any is expected here`, for a `throw` that was forgotten)*. Without a type expected, branches of different types give `any`, like a list of values of different types.
 - The check can be turned off completely, for scripts that are shipped already checked. Since types never change what the code does, the script behaves the same.
 - There are no union types *(i.e. `string | number`)*. A value with one of several types is `any`, or the functions that need it are split in two *(i.e. one for a `string` and one for a `regex`)*.
 - When a type isn't written and can't be inferred, it's `any`: function parameters without a type, `let $x = null;`, and values that come from other `any` values. 

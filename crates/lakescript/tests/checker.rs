@@ -232,3 +232,30 @@ fn functions_can_call_each_other_in_any_order() {
     assert!(rejected("void f() {}\nvoid f() {}").contains("a function named `f` already exists"));
 }
 
+
+#[test]
+fn every_branch_of_a_value_fits_the_type_expected() {
+    // Joined, the branches would be `any`, which fits anywhere
+    assert_eq!(rejected("const number $y = if (1 == 1) 2 else 'b';"), "this is a string, but a number is expected here");
+    assert_eq!(rejected("number f(number $p) = switch ($p) { case 1 -> 2; default -> ValueError('x'); };"), "this is a ValueError, but a number is expected here");
+    assert_eq!(
+        rejected("((string) -> any) part(number $n) = if ($n == 1) ($s) -> 1 else ValueError('no part');"),
+        "this is a ValueError, but a (string) -> any is expected here"
+    );
+    assert_eq!(rejected("const ?string $s = null;\nconst string $t = if (1 == 1) $s else 'x';"), "this can be `null`, but a string is expected here");
+    // `throw` takes the type expected, and branches without one can still differ
+    assert_eq!(ok("number f(number $p) = switch ($p) { case 1 -> 2; default -> throw ValueError('x'); };\noutln(f(1));"), "2\n");
+    assert_eq!(ok("const $v = if (1 == 1) 2 else 'b';\noutln($v);"), "2\n");
+}
+
+#[test]
+fn const_fields_narrow_like_variables() {
+    let day = "class Day {\n    const (string) -> any @part1;\n    const ?((string) -> any) @part2;\n    pub ((string) -> any) part(number $n) =\n        if ($n == 1) @part1\n        else if ($n == 2 && @part2 != null) @part2\n        else throw ValueError('no part');\n}\n";
+    assert_eq!(ok(&format!("{day}const $d = Day(($s) -> 1, ($s) -> 2);\noutln($d.part(2)('x'));")), "2\n");
+    assert_eq!(ok("class A {\n    pub const ?string @name;\n}\nconst $a = A('x');\nif ($a.name != null) {\n    outln($a.name.upper());\n}"), "X\n");
+    assert_eq!(ok("class A {\n    const ?string @name;\n    pub string show() {\n        if (@name == null) return '-';\n        return @name;\n    }\n}\noutln(A(null).show());"), "-\n");
+    // A field that isn't `const` can change between the check and its use
+    assert!(rejected("class A {\n    ?string @name = null;\n    pub string show() = if (@name != null) @name else '-';\n}").contains("can be `null`"));
+    // And so can a `let` variable's object
+    assert!(rejected("class A {\n    pub const ?string @name;\n}\nlet $a = A('x');\nif ($a.name != null) {\n    outln($a.name.upper());\n}").contains("null"));
+}

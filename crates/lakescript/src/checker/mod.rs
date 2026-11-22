@@ -1314,13 +1314,14 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Binary { op: op @ (BinaryOp::Eq | BinaryOp::NotEq), left, right } => {
                 self.bool_expr(cond)?;
-                let var = match (&left.kind, &right.kind) {
-                    (ExprKind::Variable(v), ExprKind::Null) | (ExprKind::Null, ExprKind::Variable(v)) => v,
+                let checked = match (&left.kind, &right.kind) {
+                    (_, ExprKind::Null) => left,
+                    (ExprKind::Null, _) => right,
                     _ => return Ok((Vec::new(), Vec::new())),
                 };
-                let Some(declared) = self.lookup_var(var) else { return Ok((Vec::new(), Vec::new())) };
+                let Some((var, declared)) = self.narrowable(checked)? else { return Ok((Vec::new(), Vec::new())) };
                 let not_null = vec![(var.clone(), self.non_null(&declared))];
-                let null = vec![(var.clone(), Ty::Null)];
+                let null = vec![(var, Ty::Null)];
                 Ok(if *op == BinaryOp::Eq { (null, not_null) } else { (not_null, null) })
             }
             ExprKind::TypeCheck { receiver, ty, check: TypeCheckKind::Is, nullable: false } => {
@@ -1339,6 +1340,32 @@ impl<'a> Checker<'a> {
                 }
                 Ok((Vec::new(), Vec::new()))
             }
+        }
+    }
+
+    /// What a check against `null` can narrow, by the name it's kept under,
+    /// and its type: a variable, or a `const` field of `@` or of a `const`
+    /// variable *(i.e. `@part2`, `$day.part2`)*, which can't change between
+    /// the check and its use. Other fields can, from any call in between.
+    fn narrowable(&mut self, e: &Expr) -> Check<Option<(String, Ty)>> {
+        match &e.kind {
+            ExprKind::Variable(v) => Ok(self.lookup_var(v).map(|t| (v.clone(), t))),
+            ExprKind::Field { target, name, nullable: false } => {
+                let key = match &target.kind {
+                    ExprKind::This => format!("@{name}"),
+                    ExprKind::Variable(v) if self.declared_var(v).is_some_and(|i| i.constant) => format!("{v}.{name}"),
+                    _ => return Ok(None),
+                };
+                let target_ty = self.expr(target, None)?;
+                let Ty::Object(class, _) = self.shallow(&target_ty) else { return Ok(None) };
+                let constant = class.find(|b| b.fields.iter().find(|f| f.name == *name).map(|f| f.constant)).is_some_and(|(c, _)| c);
+                if !constant {
+                    return Ok(None);
+                }
+                let ty = self.expr(e, None)?;
+                Ok(Some((key, ty)))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -1694,9 +1721,10 @@ impl<'a> Checker<'a> {
                 let (yes, no) = self.condition(cond)?;
                 let a_ty = self.scoped(&yes, |c| c.branch(then, expected))?;
                 let b_ty = self.scoped(&no, |c| c.branch(otherwise, expected))?;
+                self.fits(&[(&a_ty, branch_span(then)), (&b_ty, branch_span(otherwise))], expected)?;
                 self.join(&a_ty, &b_ty)
             }
-            ExprKind::Switch(switch) => self.switch(switch, true)?,
+            ExprKind::Switch(switch) => self.switch_expecting(switch, true, expected)?,
             ExprKind::Try(inner) => {
                 let t = self.expr(inner, None)?;
                 Ty::Result(Box::new(t), Box::new(Ty::Exception(Rc::from("Exception"))))
@@ -1710,6 +1738,30 @@ impl<'a> Checker<'a> {
                 }
             }
         })
+    }
+
+    /// Checks each branch of an `if` or a `switch` used as a value against
+    /// the type expected there, so a branch of another type is an error where
+    /// it is. Joined, branches of different types would be `any`, which fits
+    /// anywhere *(i.e. a `ValueError` given where a function is expected)*.
+    fn fits(&mut self, branches: &[(&Ty, Span)], expected: Option<&Ty>) -> Check<()> {
+        let Some(expected) = expected else { return Ok(()) };
+        if matches!(self.shallow(expected), Ty::Any | Ty::Var(_)) {
+            return Ok(());
+        }
+        for (ty, span) in branches {
+            if self.assignable(ty, expected) {
+                continue;
+            }
+            let (got, want) = (self.resolve(ty), self.resolve(expected));
+            let message = match &got {
+                Ty::Nullable(inner) if self.assignable(inner, expected) => format!("this can be `null`, but {} is expected here", a(&want)),
+                Ty::Null => format!("this is `null`, but {} is expected here", a(&want)),
+                _ => format!("this is {}, but {} is expected here", a(&got), a(&want)),
+            };
+            return self.fail(message, *span);
+        }
+        Ok(())
     }
 
     fn branch(&mut self, branch: &Branch, expected: Option<&Ty>) -> Check<Ty> {
@@ -1773,6 +1825,11 @@ impl<'a> Checker<'a> {
     }
 
     fn switch(&mut self, switch: &Switch, as_value: bool) -> Check<Ty> {
+        self.switch_expecting(switch, as_value, None)
+    }
+
+    /// A `switch`, with the type expected of its value when it's used as one.
+    fn switch_expecting(&mut self, switch: &Switch, as_value: bool, expected: Option<&Ty>) -> Check<Ty> {
         let subject = self.expr(&switch.subject, None)?;
         let subject_var = match &switch.subject.kind {
             ExprKind::Variable(v) => Some(v.clone()),
@@ -1814,13 +1871,16 @@ impl<'a> Checker<'a> {
         }
         for (facts, body) in bodies {
             let t = self.scoped(&facts, |c| match body {
-                CaseBody::Value(b) => c.branch(b, None),
+                CaseBody::Value(b) => c.branch(b, expected),
                 CaseBody::Stmt(s) => match &s.kind {
                     StmtKind::Block(stmts) => c.block(stmts).map(|_| Ty::Void),
                     _ => c.stmt(s).map(|_| Ty::Void),
                 },
             })?;
             if as_value {
+                if let CaseBody::Value(b) = body {
+                    self.fits(&[(&t, branch_span(b))], expected)?;
+                }
                 result = Some(match result {
                     None => t,
                     Some(prev) => self.join(&prev, &t),
@@ -2359,6 +2419,14 @@ impl<'a> Checker<'a> {
 }
 
 /// The type of the `yield`s of a block, after it's been checked.
+/// Where a branch is, for its errors.
+fn branch_span(branch: &Branch) -> Span {
+    match branch {
+        Branch::Expr(e) => e.span,
+        Branch::Block(_, span) => *span,
+    }
+}
+
 fn yield_type(checker: &mut Checker, stmts: &[Stmt]) -> Ty {
     let mut found: Option<Ty> = None;
     for stmt in stmts {
