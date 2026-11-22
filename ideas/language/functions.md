@@ -6,6 +6,7 @@
 - A list can be spread into the arguments with `...` *(i.e. `greet(...$names)`)*.
 - Should allow calling them while naming parameters. Named and positional arguments can be mixed, but positional ones go first *(i.e. `createFile('daniel', extension: 'jpg')`)*.
 - Must always have a return type. Functions that don't return anything use `void` *(i.e. `void log(string $message) { ... }`)*. This way a definition never looks like a call followed by a block.
+    - A function that never returns *(it always throws or exits)* is going to use `never` *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
 - Should allow generics. The type parameters go after the name *(i.e. `?T first<T>(list<T> $items) = $items[0];`)*. They're inferred when calling, so they're never written in a call: `first($names)`.
 - Functions can call each other in any order: a function can call any function declared in the same block or around it, even one further down, so recursive functions that call each other work *(i.e. a parser with `expr()` and `term()`)*. A function can call itself.
     - The statements of the block itself can only call a function after its declaration, since it doesn't exist before that line runs *(i.e. `f();` above `void f() { ... }` is an error)*. The checker says so before anything runs.

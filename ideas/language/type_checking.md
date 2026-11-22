@@ -20,6 +20,7 @@ $ages['Daniel'] = 24;       // $ages is a map<string, number>
 - The checker doesn't check `any`: it can hold any value, including `null`, and it can be assigned to any typed variable.
 - `any` isn't meant for normal use. It's for values whose type really can't be known, like JSON read without a schema, and they should be turned into a specific type with `.as()` as soon as possible. Types should be as specific as possible: generics instead of `any`, and a proper type instead of a map used as an object *(see the philosophy in [stdlib/README.md](../stdlib/README.md))*.
 - Generic types use `<>`: `list<string>`, `map<string, number>`, `result<string, Exception>`. When generics are nested, the lexer splits `>>` into two `>` *(i.e. `list<map<string, any>>`)*.
+- `.as()` can't take a function type *(i.e. `.as((string) -> any)`)*: a function keeps no types while the script runs, and an untyped lambda never had any, so the only way to check it would be to call it. That stays: a function is given its type where it comes from, or an `any` is assigned to a typed variable *(i.e. `const (string) -> any $f = $solver;`)*, which the checker doesn't check.
 - Types never change what the code does: a script behaves the same whether its types were checked or not. Because of this, there's no overloading (choosing a function by the types of its arguments). `.as()` and `.is()` don't break this rule, because they check the value while the script runs, not its declared type *(see [builtin_types.md](builtin_types.md))*.
 
 ## How the checker works

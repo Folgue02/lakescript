@@ -145,5 +145,6 @@ The author and name of a project are its real ones, as the repository has them *
 
 ## Later
 
+- `ferry new` without sample code by default, and a flag to make it *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
 - Version ranges *(i.e. `^1.4`)*.
 - `ferry uninstall`, `ferry remove` and `ferry update`.

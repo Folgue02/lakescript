@@ -123,6 +123,7 @@ Operands: `bool`. Result: `bool`.
 | `\|`     | OR (always evaluates both) | `true \| false`  | `true`  |
 | `^`      | XOR                        | `true ^ true`    | `false` |
 
+- `!` is going to take any value: on anything that isn't a `bool`, `!$x` is `$x == null`, so `!null` is `true` and `!''` is `false` *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
 - `&&` and `||` stop as soon as the result is known: in `false && check()`, `check()` is never called.
 - `&` and `|` on booleans evaluate both sides, same as in Java. The operand type decides whether `&`, `|` and `^` are bitwise (`number`) or logical (`bool`).
 

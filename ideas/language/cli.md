@@ -64,7 +64,7 @@ $ git.lks push --help
 
 - `Git::parse()` reads the arguments of the script *(i.e. `process::args()`)*. `Git::parse($list)` reads a `list<string>`, which is useful for tests, for wrappers and for programs that embed Lakescript.
 - Arguments that don't match throw a `UsageError`, which is a `ValueError`, whose message says what's wrong and then the usage. With `try` the script can handle it: `const $args = (try Git::parse()).orElse(null);`.
-- If the exception isn't caught, the script stops: `lks` prints the message and the usage to stderr, without the code around it, and exits with code `2`, like most command-line tools.
+- If the exception isn't caught, the script stops: `lks` prints the message and the usage to stderr, without the code around it, and exits with code `2`, like most command-line tools. `ferry run` doesn't yet: it shows it as an error in the script *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
 - `--help` and `-h` print the help, generated from the `///` comments, the types, the choices and the defaults, and exit with code `0`.
 - `Git::help()` returns the help text as a string.
 
