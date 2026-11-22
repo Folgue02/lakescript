@@ -281,7 +281,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ferry"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "ctrlc",
  "lakescript",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "lakescript"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "crossterm",
  "csv",
@@ -488,7 +488,7 @@ checksum = "4744e383959f0db86ede514b809b1c53251889093803c05267acc7d4e7030d70"
 
 [[package]]
 name = "lks"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "ctrlc",
  "lakescript",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "lks-lsp"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "ferry",
  "lakescript",
