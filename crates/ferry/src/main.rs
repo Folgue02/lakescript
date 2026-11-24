@@ -687,7 +687,8 @@ fn launcher_text(id: &str, version: &str, lks: &str, module_path: &str, script: 
 /// `lks` next to `ferry` when it's there, or the one on `PATH`.
 fn lks_program() -> PathBuf {
     let name = if cfg!(windows) { "lks.exe" } else { "lks" };
-    let next_to_ferry = std::env::current_exe().ok().and_then(|exe| exe.canonicalize().ok()).map(|exe| exe.with_file_name(name));
+    // Without Windows' `\\?\` before it, which `cmd` can't always run from a launcher
+    let next_to_ferry = std::env::current_exe().ok().map(|exe| lakescript::canonical(&exe).with_file_name(name));
     match next_to_ferry {
         Some(lks) if lks.is_file() => lks,
         _ => PathBuf::from("lks"),

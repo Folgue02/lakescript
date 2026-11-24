@@ -60,7 +60,7 @@ A repository is where `ferry` downloads packages from. Each one has a name, whic
 
 ## The local repository
 
-Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one folder per user, `~/.ferry/`:
+Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one folder per user, `~/.ferry/`. On Windows it's `%USERPROFILE%\.ferry\`, since Windows doesn't set `HOME`, also from Git Bash, which does, so every shell finds the same one. `FERRY_HOME` gives another folder:
 
 ```
 ~/.ferry/
@@ -74,6 +74,7 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 
 - A package is downloaded once per version, and every project that uses it shares it.
 - Adding `~/.ferry/bin` to `PATH` makes every installed command available everywhere.
+- The launchers run the `lks` next to `ferry`, by its full path, or the one on `PATH`. On Windows that path is written without the `\\?\` Rust gives real paths there, which `cmd` can't always run.
 
 ## Commands
 

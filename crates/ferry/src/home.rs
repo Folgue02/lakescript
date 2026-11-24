@@ -27,13 +27,7 @@ struct Config {
 impl Home {
     /// `FERRY_HOME`, or `~/.ferry`.
     pub fn open() -> Result<Home, Fail> {
-        let dir = match std::env::var_os("FERRY_HOME") {
-            Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-            _ => match std::env::var_os("HOME") {
-                Some(home) => PathBuf::from(home).join(".ferry"),
-                None => return Err("can't find the home folder: set HOME, or FERRY_HOME for where ferry keeps its files".into()),
-            },
-        };
+        let dir = folder(|name| std::env::var_os(name), cfg!(windows))?;
         let mut repositories = BTreeMap::from([("github".to_string(), GITHUB.to_string())]);
         let config = dir.join("config.toml");
         if config.is_file() {
@@ -134,4 +128,45 @@ fn git(dir: Option<&Path>) -> Command {
     // Never wait for a password nobody will type
     command.env("GIT_TERMINAL_PROMPT", "0");
     command
+}
+
+/// Where ferry keeps its files: `FERRY_HOME`, or `.ferry` in the person's
+/// folder. On Windows that's `%USERPROFILE%`, since Windows doesn't set
+/// `HOME`, and also in Git Bash, which does, so every shell finds the same
+/// folder. `HOME` is the fallback there.
+fn folder(var: impl Fn(&str) -> Option<std::ffi::OsString>, windows: bool) -> Result<PathBuf, Fail> {
+    let given = |name: &str| var(name).filter(|v| !v.is_empty());
+    if let Some(dir) = given("FERRY_HOME") {
+        return Ok(PathBuf::from(dir));
+    }
+    let home = if windows { given("USERPROFILE").or_else(|| given("HOME")) } else { given("HOME") };
+    match home {
+        Some(home) => Ok(PathBuf::from(home).join(".ferry")),
+        None if windows => Err("can't find the home folder: set USERPROFILE, or FERRY_HOME for where ferry keeps its files".into()),
+        None => Err("can't find the home folder: set HOME, or FERRY_HOME for where ferry keeps its files".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::folder;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
+    fn with(vars: &[(&str, &str)], windows: bool) -> Result<PathBuf, String> {
+        let vars: Vec<(String, OsString)> = vars.iter().map(|(k, v)| (k.to_string(), OsString::from(v))).collect();
+        folder(|name| vars.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()), windows).map_err(|e| e.0)
+    }
+
+    #[test]
+    fn the_folder_of_each_system() {
+        assert_eq!(with(&[("HOME", "/home/ana")], false).unwrap(), PathBuf::from("/home/ana/.ferry"));
+        assert_eq!(with(&[("FERRY_HOME", "/x"), ("HOME", "/home/ana")], false).unwrap(), PathBuf::from("/x"));
+        // Windows: USERPROFILE, also when Git Bash sets HOME
+        assert_eq!(with(&[("USERPROFILE", r"C:\Users\ana")], true).unwrap(), PathBuf::from(r"C:\Users\ana").join(".ferry"));
+        assert_eq!(with(&[("USERPROFILE", r"C:\Users\ana"), ("HOME", "/c/Users/ana")], true).unwrap(), PathBuf::from(r"C:\Users\ana").join(".ferry"));
+        assert_eq!(with(&[("HOME", "/c/Users/ana")], true).unwrap(), PathBuf::from("/c/Users/ana/.ferry"));
+        assert!(with(&[], true).unwrap_err().contains("set USERPROFILE"));
+        assert!(with(&[("HOME", "")], false).unwrap_err().contains("set HOME"));
+    }
 }

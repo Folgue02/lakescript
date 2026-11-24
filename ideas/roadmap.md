@@ -40,7 +40,7 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 ## Status
 
 - Phases 1 to 11 are done. Phase 12, bundles, is being designed.
-- Phase 11 was released as `v0.11.0`, and `v0.11.1` fixes its build for Windows, which didn't compile, so `v0.11.0` has no binaries:
+- Phase 11 was released as `v0.11.0`, and `v0.11.1` fixes its build for Windows, which didn't compile, so `v0.11.0` has no binaries. `v0.11.2` makes `ferry` work on Windows: it finds its folder through `%USERPROFILE%`, and its launchers name `lks.exe` without `\\?\`:
     - Symbols are gone *(`:active`, `%i[...]`, the type `symbol`)*: enums do what they were for, and better, since the checker catches a typo in an enum's value, checks that a `switch` covers every one, and completes them. Strings do the rest. `process::platform()` gives a `Platform`, an enum in `std/process/Platform` *(see [stdlib/process.md](stdlib/process.md))*.
     - `!` takes any value: on anything but a `bool`, `!$x` is `$x == null` *(see Boolean operators in [language/operators.md](language/operators.md))*.
     - `ferry new` makes no sample code unless asked with `--example`, and `ferry run` shows wrong arguments to a command like `lks` does: the message and the usage, and exit code 2 *(see [tooling/ferry.md](tooling/ferry.md))*.
