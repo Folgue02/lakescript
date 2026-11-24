@@ -130,7 +130,7 @@ impl Server {
             }
             if let Err(error) = result {
                 let file = error.file.as_ref().map(PathBuf::from).unwrap_or_else(|| path.clone());
-                let file = file.canonicalize().unwrap_or(file);
+                let file = lakescript::canonical(&file);
                 let text = self.text_of(&file);
                 let diagnostic = to_lsp(&error, text.as_deref());
                 let list = found.entry(file).or_default();
@@ -216,7 +216,7 @@ impl Server {
             engine.add_module_root(root.clone());
         }
         // A module is checked like ferry does, by using it, so only declarations are allowed in it
-        let src = project.src().canonicalize().unwrap_or_else(|_| project.src());
+        let src = lakescript::canonical(&project.src());
         if let Ok(relative) = path.strip_prefix(&src) {
             if let Some(offset) = complete {
                 engine.set_completion(Some(path.display().to_string()), offset);
@@ -462,19 +462,63 @@ fn offset(text: &str, at: Position) -> usize {
     index
 }
 
-/// The path of a `file://` URI.
+/// The path of a `file://` URI, as the files are known here *(see
+/// `lakescript::canonical`)*.
 fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
-    let rest = uri.as_str().strip_prefix("file://")?;
-    let decoded = percent_decode(rest);
-    // `file:///C:/x` on Windows is `C:/x`
-    let path = if cfg!(windows) { decoded.strip_prefix('/').unwrap_or(&decoded).to_string() } else { decoded };
-    let path = PathBuf::from(path);
-    Some(path.canonicalize().unwrap_or(path))
+    let path = PathBuf::from(uri_path(uri.as_str(), cfg!(windows))?);
+    Some(lakescript::canonical(&path))
 }
 
+/// The path written in a `file://` URI, on Windows or not.
+fn uri_path(uri: &str, windows: bool) -> Option<String> {
+    let rest = uri.strip_prefix("file://")?;
+    let (host, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let path = percent_decode(path);
+    if !windows {
+        return (host.is_empty() || host == "localhost").then_some(path);
+    }
+    let path = path.replace('/', "\\");
+    if !host.is_empty() && host != "localhost" {
+        // `file://server/share/x` is a shared folder, `\\server\share\x`
+        return Some(format!(r"\\{}{path}", percent_decode(host)));
+    }
+    // `file:///C:/x` is `C:\x`
+    Some(path.strip_prefix('\\').unwrap_or(&path).to_string())
+}
+
+/// The `file://` URI of a path.
 fn path_to_uri(path: &Path) -> Option<Uri> {
-    let text = path.to_string_lossy().replace('\\', "/");
-    let text = if text.starts_with('/') { text } else { format!("/{text}") };
+    Uri::from_str(&uri_of(&path.to_string_lossy(), cfg!(windows))).ok()
+}
+
+/// The `file://` URI of a path, on Windows or not. Windows' paths go without
+/// their verbatim prefix *(`\\?\C:\x` is `file:///C:/x`)*, which no editor
+/// reads back.
+fn uri_of(path: &str, windows: bool) -> String {
+    let mut host = String::new();
+    let mut path = path.to_string();
+    if windows {
+        if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+            path = format!(r"\\{unc}");
+        } else if let Some(local) = path.strip_prefix(r"\\?\") {
+            path = local.to_string();
+        }
+        path = path.replace('\\', "/");
+    }
+    // `//server/share/x` is `file://server/share/x`
+    if windows && let Some(shared) = path.strip_prefix("//") {
+        let at = shared.find('/').unwrap_or(shared.len());
+        (host, path) = (shared[..at].to_string(), shared[at..].to_string());
+    }
+    // `C:/x` is `file:///C:/x`
+    if !path.starts_with('/') {
+        path.insert(0, '/');
+    }
+    format!("file://{}{}", encode(&host), encode(&path))
+}
+
+/// Writes the characters a URI can't have as `%` and two hex digits.
+fn encode(text: &str) -> String {
     let mut encoded = String::new();
     for byte in text.bytes() {
         match byte {
@@ -482,7 +526,7 @@ fn path_to_uri(path: &Path) -> Option<Uri> {
             other => encoded.push_str(&format!("%{other:02X}")),
         }
     }
-    Uri::from_str(&format!("file://{encoded}")).ok()
+    encoded
 }
 
 fn percent_decode(text: &str) -> String {
@@ -525,5 +569,25 @@ mod tests {
         assert_eq!(percent_decode("/50%ñ"), "/50%ñ");
         let uri = path_to_uri(Path::new("/tmp/a b/x.lks")).unwrap();
         assert_eq!(uri.as_str(), "file:///tmp/a%20b/x.lks");
+        assert_eq!(uri_path("file:///tmp/a%20b/x.lks", false).as_deref(), Some("/tmp/a b/x.lks"));
+        assert_eq!(uri_path("file://localhost/tmp/x.lks", false).as_deref(), Some("/tmp/x.lks"));
+        assert_eq!(uri_path("file://server/x.lks", false), None);
+    }
+
+    /// Windows' paths, which are only seen on Windows, so they're checked as text.
+    #[test]
+    fn windows_uris_and_paths() {
+        // What `canonicalize` gives there: editors can't read `file:////%3F/C:/…`
+        assert_eq!(uri_of(r"\\?\C:\Users\ana\day1.lks", true), "file:///C:/Users/ana/day1.lks");
+        assert_eq!(uri_of(r"C:\Users\ana\a b.lks", true), "file:///C:/Users/ana/a%20b.lks");
+        assert_eq!(uri_of(r"\\?\UNC\server\share\x.lks", true), "file://server/share/x.lks");
+        assert_eq!(uri_of(r"\\server\share\x.lks", true), "file://server/share/x.lks");
+        assert_eq!(uri_path("file:///C:/Users/ana/a%20b.lks", true).as_deref(), Some(r"C:\Users\ana\a b.lks"));
+        // VS Code writes the drive in lowercase, with its `:` escaped
+        assert_eq!(uri_path("file:///c%3A/Users/ana/day1.lks", true).as_deref(), Some(r"c:\Users\ana\day1.lks"));
+        assert_eq!(uri_path("file://server/share/x.lks", true).as_deref(), Some(r"\\server\share\x.lks"));
+        for path in [r"C:\Users\ana\a b.lks", r"\\server\share\x.lks"] {
+            assert_eq!(uri_path(&uri_of(path, true), true).as_deref(), Some(path));
+        }
     }
 }

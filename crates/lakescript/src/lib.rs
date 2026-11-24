@@ -24,6 +24,7 @@ mod methods;
 mod modules;
 mod operators;
 pub mod parser;
+mod paths;
 mod patterns;
 mod stack;
 mod stdlib;
@@ -39,6 +40,7 @@ pub use checker::names::{Definition, Name};
 pub use diagnostic::{Call, Diagnostic};
 pub use engine::{CapturedOutput, Engine, Outcome};
 pub use interrupt::on_ctrl_c;
+pub use paths::canonical;
 pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use value::{NativeContext, NativeError, NativeResult, Value};
 

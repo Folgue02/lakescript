@@ -386,13 +386,15 @@ fn doc_name(name: &str) -> Result<ExitCode, Fail> {
 }
 
 fn file_url(path: &Path) -> String {
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    format!("file://{}", path.display().to_string().replace('\\', "/"))
+    let path = lakescript::canonical(path).display().to_string().replace('\\', "/");
+    // `C:/x` on Windows is `file:///C:/x`
+    let slash = if path.starts_with('/') { "" } else { "/" };
+    format!("file://{slash}{path}")
 }
 
 fn relative_to_here(path: &Path) -> String {
-    let here = std::env::current_dir().ok().and_then(|d| d.canonicalize().ok());
-    let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let here = std::env::current_dir().ok().map(|d| lakescript::canonical(&d));
+    let real = lakescript::canonical(path);
     match here.as_deref().and_then(|h| real.strip_prefix(h).ok()) {
         Some(short) => short.display().to_string(),
         None => real.display().to_string(),

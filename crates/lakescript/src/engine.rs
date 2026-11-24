@@ -346,7 +346,7 @@ impl Engine {
     /// Uses this text for a file instead of what's on the disk, for every
     /// later check or run: the file an editor has open, before it's saved.
     pub fn set_file_text(&mut self, path: &Path, text: impl Into<String>) {
-        let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let real = crate::paths::canonical(path);
         self.host.loader.overlay.insert(real, text.into());
     }
 
@@ -359,7 +359,7 @@ impl Engine {
 
     /// Reads a script and makes its folder the first place `use` looks.
     pub(crate) fn open_file(&mut self, path: &Path) -> Result<String, Diagnostic> {
-        let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let real = crate::paths::canonical(path);
         let source = self
             .host
             .loader
@@ -370,7 +370,7 @@ impl Engine {
     }
 
     fn use_script_path(&mut self, path: &Path) {
-        let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let real = crate::paths::canonical(path);
         if let Some(folder) = real.parent()
             && !self.host.loader.roots.iter().any(|r| r == folder)
         {

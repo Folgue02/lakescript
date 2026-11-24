@@ -207,7 +207,7 @@ impl Loader {
             [one] => {
                 let root = self.roots.iter().find(|r| r.join(&relative) == *one).cloned().unwrap_or_default();
                 check_case(&root, path)?;
-                Ok(ModuleSource::File(one.canonicalize().unwrap_or_else(|_| one.clone())))
+                Ok(ModuleSource::File(crate::paths::canonical(one)))
             }
             [first, second, ..] => Err(format!(
                 "module `{joined}` is in two places: {} and {}",
