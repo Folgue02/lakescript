@@ -220,6 +220,7 @@ impl Checker<'_> {
             Ty::Number => builtin(&mut items, &mut seen, "number", Vec::new()),
             Ty::Bool => builtin(&mut items, &mut seen, "bool", Vec::new()),
             Ty::Regex => builtin(&mut items, &mut seen, "regex", Vec::new()),
+            Ty::Bytes => builtin(&mut items, &mut seen, "bytes", Vec::new()),
             Ty::Range => builtin(&mut items, &mut seen, "range", Vec::new()),
             Ty::Command => builtin(&mut items, &mut seen, "command", Vec::new()),
             Ty::List(e) => builtin(&mut items, &mut seen, "list", vec![(**e).clone()]),

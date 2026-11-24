@@ -16,6 +16,11 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Str(Rc<str>),
+    /// `bytes`: binary data that doesn't change, like a string of bytes.
+    Bytes(Rc<[u8]>),
+    /// A type given as a value *(i.e. `list<User>`)*, with the top level
+    /// where the names in it are found.
+    Type(Rc<(crate::ast::TypeExpr, std::rc::Weak<crate::modules::Globals>)>),
     List(Rc<RefCell<Vec<Value>>>),
     Map(Rc<RefCell<IndexMap<Key, Value>>>),
     Range(Range),
@@ -38,57 +43,61 @@ pub enum Value {
 
 /// A class while the script runs *(see `ideas/language/classes.md`)*.
 pub struct Class {
-    pub name: Rc<str>,
-    pub interface: bool,
+    pub(crate) name: Rc<str>,
+    pub(crate) interface: bool,
     /// The built-in exception it extends, directly or through its superclasses.
-    pub exception: Option<Rc<str>>,
-    pub is_enum: bool,
+    pub(crate) exception: Option<Rc<str>>,
+    pub(crate) is_enum: bool,
     /// The values of an enum, in order.
-    pub values: RefCell<Vec<Value>>,
-    pub parent: Option<Rc<Class>>,
+    pub(crate) values: RefCell<Vec<Value>>,
+    pub(crate) parent: Option<Rc<Class>>,
     /// Every interface it implements, also through its superclasses and the
     /// interfaces they extend. For an interface, the ones it extends.
-    pub interfaces: Vec<Rc<Class>>,
+    pub(crate) interfaces: Vec<Rc<Class>>,
     /// For an interface: its methods without a default.
-    pub required: Vec<Rc<str>>,
+    pub(crate) required: Vec<Rc<str>>,
     /// Every field of its objects, the superclass's first.
-    pub fields: Vec<FieldSlot>,
+    pub(crate) fields: Vec<FieldSlot>,
     /// Its methods and the ones it inherits, by name.
-    pub methods: std::collections::HashMap<Rc<str>, Rc<Function>>,
+    pub(crate) methods: std::collections::HashMap<Rc<str>, Rc<Function>>,
     /// The same methods by number, which a place that calls one remembers
     /// *(see `bytecode::InlineCache`)*.
-    pub method_list: Vec<Rc<Function>>,
-    pub statics: RefCell<IndexMap<Rc<str>, StaticSlot>>,
+    pub(crate) method_list: Vec<Rc<Function>>,
+    pub(crate) statics: RefCell<IndexMap<Rc<str>, StaticSlot>>,
     /// `new`, or `None` for the one that takes every field.
-    pub constructor: Option<Rc<Function>>,
+    pub(crate) constructor: Option<Rc<Function>>,
     /// Gives the fields declared in this class the values written where they're declared.
-    pub init: Option<Rc<Function>>,
+    pub(crate) init: Option<Rc<Function>>,
     /// For a command: its arguments, and the enums of their types.
-    pub command: Option<(Rc<crate::bytecode::CommandInfo>, Vec<Rc<Class>>)>,
+    pub(crate) command: Option<(Rc<crate::bytecode::CommandInfo>, Vec<Rc<Class>>)>,
 }
 
 #[derive(Clone)]
 pub struct FieldSlot {
-    pub name: Rc<str>,
-    pub constant: bool,
+    pub(crate) name: Rc<str>,
+    pub(crate) constant: bool,
     /// Whether its type is nullable, so the constructor can leave it as `null`.
-    pub nullable: bool,
+    pub(crate) nullable: bool,
     /// Whether it has a value where it's declared.
-    pub has_value: bool,
+    pub(crate) has_value: bool,
+    /// Its type, and the top level of the module of its class, where the
+    /// names in the type are found *(for `json::parse($text, Class)`)*.
+    pub(crate) ty: Option<Rc<crate::ast::TypeExpr>>,
+    pub(crate) home: std::rc::Weak<crate::modules::Globals>,
 }
 
 pub struct StaticSlot {
-    pub value: Value,
-    pub constant: bool,
+    pub(crate) value: Value,
+    pub(crate) constant: bool,
 }
 
 pub struct Object {
-    pub class: Rc<Class>,
+    pub(crate) class: Rc<Class>,
     /// For a value of an enum: its name *(i.e. `SICK`)*.
-    pub enum_name: Option<Rc<str>>,
-    pub fields: RefCell<Vec<Value>>,
+    pub(crate) enum_name: Option<Rc<str>>,
+    pub(crate) fields: RefCell<Vec<Value>>,
     /// While its constructor runs, its `const` fields can still be set.
-    pub building: std::cell::Cell<bool>,
+    pub(crate) building: std::cell::Cell<bool>,
 }
 
 impl Class {
@@ -114,17 +123,17 @@ impl Class {
 
 pub struct ExceptionValue {
     /// `"ValueError"`, `"FileNotFound"`, or the class of a custom one *(i.e. `"ConfigError"`)*.
-    pub kind: Rc<str>,
+    pub(crate) kind: Rc<str>,
     /// The built-in exception it is or extends, for `catch (ValueError $e)`.
-    pub base: Rc<str>,
+    pub(crate) base: Rc<str>,
     /// For an exception of a class that extends a built-in one: its object, with its fields and methods.
-    pub object: Option<Rc<Object>>,
-    pub message: String,
+    pub(crate) object: Option<Rc<Object>>,
+    pub(crate) message: String,
     /// Where it was thrown.
-    pub span: Span,
+    pub(crate) span: Span,
     /// The calls it was thrown through, taken the first time it's thrown, so
     /// throwing it again keeps them. `None` before it's thrown.
-    pub trace: RefCell<Option<Rc<Vec<TraceEntry>>>>,
+    pub(crate) trace: RefCell<Option<Rc<Vec<TraceEntry>>>>,
 }
 
 impl ExceptionValue {
@@ -141,10 +150,10 @@ impl ExceptionValue {
 /// it was in, and where it was in it *(see Tracebacks in ideas/language/errors.md)*.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TraceEntry {
-    pub function: Rc<str>,
-    pub span: Span,
+    pub(crate) function: Rc<str>,
+    pub(crate) span: Span,
     /// More than 1 for a function that called itself from the same place.
-    pub times: u32,
+    pub(crate) times: u32,
 }
 
 pub enum ResultValue {
@@ -154,19 +163,19 @@ pub enum ResultValue {
 
 /// A compiled `%r"..."` regex.
 pub struct RegexValue {
-    pub pattern: String,
-    pub flags: String,
-    pub compiled: regex::Regex,
+    pub(crate) pattern: String,
+    pub(crate) flags: String,
+    pub(crate) compiled: regex::Regex,
 }
 
 /// A range of whole numbers. `end` is excluded unless `inclusive`. It counts
 /// down when `start` is bigger than `end`. `step` is always positive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Range {
-    pub start: i64,
-    pub end: i64,
-    pub inclusive: bool,
-    pub step: i64,
+    pub(crate) start: i64,
+    pub(crate) end: i64,
+    pub(crate) inclusive: bool,
+    pub(crate) step: i64,
 }
 
 impl Range {
@@ -262,10 +271,10 @@ pub enum Function {
 pub type VmFn = for<'a, 'b> fn(&'a mut crate::interpreter::Interpreter<'b>, Vec<Value>, crate::token::Span) -> crate::interpreter::Exec<Value>;
 
 pub struct VmFunction {
-    pub name: String,
+    pub(crate) name: String,
     /// The names of the parameters, so they can be given by name.
-    pub params: Vec<String>,
-    pub func: VmFn,
+    pub(crate) params: Vec<String>,
+    pub(crate) func: VmFn,
 }
 
 /// A function written in Lakescript: its code, the variables of the functions
@@ -323,11 +332,11 @@ pub type NativeResult = Result<Value, NativeError>;
 pub type NativeFn = dyn Fn(&mut NativeContext, Vec<Value>) -> NativeResult;
 
 pub struct NativeFunction {
-    pub name: String,
+    pub(crate) name: String,
     /// The names of the parameters, so they can be given by name *(i.e.
     /// `json::stringify($v, indent: 2)`)*. Empty if they can't.
-    pub params: Vec<String>,
-    pub func: Box<NativeFn>,
+    pub(crate) params: Vec<String>,
+    pub(crate) func: Box<NativeFn>,
 }
 
 impl Function {
@@ -379,6 +388,8 @@ impl Value {
             Value::Bool(_) => "bool",
             Value::Int(_) | Value::Float(_) => "number",
             Value::Str(_) => "string",
+            Value::Bytes(_) => "bytes",
+            Value::Type(_) => "type",
             Value::List(_) => "list",
             Value::Map(_) => "map",
             Value::Range(_) => "range",
@@ -427,6 +438,7 @@ impl Value {
             (Value::Int(a), Value::Int(b)) => a == b,
             (a @ (Value::Int(_) | Value::Float(_)), b @ (Value::Int(_) | Value::Float(_))) => a.as_f64() == b.as_f64(),
             (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Bytes(a), Value::Bytes(b)) => a == b,
             (Value::Range(a), Value::Range(b)) => a == b,
             (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
             (Value::Map(a), Value::Map(b)) => Rc::ptr_eq(a, b),
@@ -540,6 +552,22 @@ pub fn format_number(f: f64) -> String {
     }
 }
 
+/// A size in bytes as people write it *(i.e. `1.5 KB`, `12 bytes`)*, for `.formatBytes()`.
+pub fn format_bytes(f: f64) -> String {
+    const UNITS: [&str; 6] = ["bytes", "KB", "MB", "GB", "TB", "PB"];
+    let mut size = f;
+    let mut unit = 0;
+    while size.abs() >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} bytes", format_number(size))
+    } else {
+        format!("{} {}", format_number((size * 10.0).round() / 10.0), UNITS[unit])
+    }
+}
+
 /// How `outln`, `toString()` and `f"{...}"` show a value.
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -549,6 +577,9 @@ impl fmt::Display for Value {
             Value::Int(n) => write!(f, "{n}"),
             Value::Float(n) => write!(f, "{}", format_number(*n)),
             Value::Str(s) => write!(f, "{s}"),
+            // Bytes aren't text, so they show how many there are *(i.e. `<bytes 1.2 KB>`)*
+            Value::Bytes(b) => write!(f, "<bytes {}>", format_bytes(b.len() as f64)),
+            Value::Type(t) => write!(f, "<type {}>", t.0),
             Value::List(items) => {
                 // A list inside itself is written `[...]`, like in Python
                 let Some(_printing) = Visiting::enter(&PRINTING, (Rc::as_ptr(items) as usize, 0)) else { return write!(f, "[...]") };

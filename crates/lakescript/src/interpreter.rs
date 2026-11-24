@@ -900,6 +900,10 @@ impl<'a> Interpreter<'a> {
                     let (program, args) = split_command(&parts).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span!()))?;
                     self.stack.push(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Direct { program, args })))));
                 }
+                Op::TypeValue(t) => {
+                    let ty = proto.types[t as usize].clone();
+                    self.stack.push(Value::Type(Rc::new((ty, Rc::downgrade(&globals)))));
+                }
                 Op::Regex(r) => {
                     // Compiled the first time this place runs
                     let regex = match proto.regex_cache[r as usize].0.get() {
@@ -942,6 +946,7 @@ impl<'a> Interpreter<'a> {
                     let len = match &container {
                         Value::List(l) => l.borrow().len(),
                         Value::Str(s) => self.host.strings.len(s),
+                        Value::Bytes(b) => b.len(),
                         other => return error(format!("a {} can't be sliced", other.type_name()), span!()),
                     };
                     let range = Range { start, end: len as i64, inclusive: false, step: 1 };
@@ -1447,7 +1452,7 @@ impl<'a> Interpreter<'a> {
     }
 
     /// `name::function` or `name::$constant`, loading the module the first time.
-    fn module_member(&mut self, globals: &Globals, m: usize, name: &str, constant: bool, span: Span) -> Exec<Value> {
+    pub(crate) fn module_member(&mut self, globals: &Globals, m: usize, name: &str, constant: bool, span: Span) -> Exec<Value> {
         let slot = globals.modules.borrow()[m].clone();
         let module = match slot {
             Some(ModuleSlot::Loaded(module)) => module,
@@ -1607,14 +1612,16 @@ impl Interpreter<'_> {
         };
         let mut fields: Vec<FieldSlot> = match &parent {
             Some(p) => p.fields.clone(),
-            None if exception.is_some() => vec![FieldSlot { name: Rc::from("message"), constant: true, nullable: false, has_value: true }],
+            None if exception.is_some() => vec![FieldSlot { name: Rc::from("message"), constant: true, nullable: false, has_value: true, ty: None, home: std::rc::Weak::new() }],
             None => Vec::new(),
         };
-        for (name, constant, nullable, has_value) in &info.fields {
+        let home = Rc::downgrade(&self.globals_of(self.frames.len() - 1));
+        for (i, (name, constant, nullable, has_value)) in info.fields.iter().enumerate() {
             if fields.iter().any(|f| f.name == *name) {
                 return error(format!("`{}` declares the field `{name}` again, which its superclass already has", info.name), span);
             }
-            fields.push(FieldSlot { name: name.clone(), constant: *constant, nullable: *nullable, has_value: *has_value });
+            let ty = info.field_types.get(i).cloned().flatten();
+            fields.push(FieldSlot { name: name.clone(), constant: *constant, nullable: *nullable, has_value: *has_value, ty, home: home.clone() });
         }
         let mut table = parent.as_ref().map(|p| p.methods.clone()).unwrap_or_default();
         for (name, f) in info.methods.iter().zip(methods.into_iter().rev()) {
@@ -2050,6 +2057,7 @@ fn for_sequence(iterable: Value, kind: u8, span: Span) -> Exec<(Value, Value)> {
         // Looped by position, so elements added while looping are seen, like in JavaScript
         (Value::List(_) | Value::Range(_), _) => Ok((iterable, Value::Null)),
         (Value::Str(s), _) => Ok((Value::list(s.chars().map(|c| Value::string(c.encode_utf8(&mut [0; 4]))).collect()), Value::Null)),
+        (Value::Bytes(b), _) => Ok((Value::list(b.iter().map(|n| Value::Int(*n as i64)).collect()), Value::Null)),
         _ => error(format!("can't loop over a {}", iterable.type_name()), span),
     }
 }
@@ -2074,10 +2082,11 @@ fn index_value(strings: &mut crate::strings::StringIndex, container: Value, inde
             let Some(key) = Key::from_value(&index) else { return Err(key_error(&index, span)) };
             Ok(map.borrow().get(&key).cloned().unwrap_or(Value::Null))
         }
-        Value::List(_) | Value::Str(_) => {
+        Value::List(_) | Value::Str(_) | Value::Bytes(_) => {
             let len = match &container {
                 Value::List(l) => l.borrow().len(),
                 Value::Str(s) => strings.len(s),
+                Value::Bytes(b) => b.len(),
                 _ => unreachable!(),
             };
             if let Value::Range(range) = index {
@@ -2095,6 +2104,7 @@ fn index_value(strings: &mut crate::strings::StringIndex, container: Value, inde
             Ok(match &container {
                 Value::List(l) => l.borrow()[pos].clone(),
                 Value::Str(s) => Value::string(strings.char_at(s, pos).unwrap_or("")),
+                Value::Bytes(b) => Value::Int(b[pos] as i64),
                 _ => unreachable!(),
             })
         }
@@ -2116,6 +2126,7 @@ fn set_index(container: &Value, index: Value, value: Value, span: Span) -> Exec<
             Ok(())
         }
         Value::Str(_) => error("strings can't be changed. Build a new one instead", span),
+        Value::Bytes(_) => error("bytes can't be changed. Build new ones instead", span),
         other => error(format!("a {} can't be indexed", other.type_name()), span),
     }
 }
@@ -2235,6 +2246,7 @@ fn slice(strings: &mut crate::strings::StringIndex, container: &Value, range: Ra
     Ok(match container {
         Value::List(l) => Value::list(l.borrow()[start..end].to_vec()),
         Value::Str(s) => Value::string(strings.slice(s, start, end)),
+        Value::Bytes(b) => Value::Bytes(Rc::from(&b[start..end])),
         _ => unreachable!(),
     })
 }
@@ -2352,6 +2364,7 @@ pub fn arithmetic(op: BinaryOp, l: &Value, r: &Value) -> Result<Value, String> {
             s.push_str(b);
             Ok(Value::string(&s))
         }
+        (Value::Bytes(a), Value::Bytes(b)) if op == Add => Ok(Value::Bytes(a.iter().chain(b.iter()).copied().collect())),
         (Value::Str(_), _) | (_, Value::Str(_)) if op == Add => Err(format!(
             "`+` joins two strings, but got a {} and a {}. Use an f-string instead *(i.e. f\"Age: {{$age}}\")*",
             l.type_name(),

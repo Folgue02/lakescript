@@ -1123,6 +1123,7 @@ impl<'a> Compiler<'a> {
             init: false,
             constructor: false,
             fields: Vec::new(),
+            field_types: Vec::new(),
             methods: Vec::new(),
             static_methods: Vec::new(),
             command: None,
@@ -1169,6 +1170,7 @@ impl<'a> Compiler<'a> {
                 MemberKind::Field { constant, ty, name, value, .. } if !member.is_static => {
                     let nullable = matches!(ty.kind, TypeKind::Nullable(_));
                     info.fields.push((Rc::from(name.as_str()), *constant, nullable, value.is_some()));
+                    info.field_types.push(Some(Rc::new(ty.clone())));
                 }
                 MemberKind::Constructor(ctor) => {
                     if info.constructor {
@@ -1188,6 +1190,7 @@ impl<'a> Compiler<'a> {
         if !decl.subcommands.is_empty() {
             // The subcommand that was given, set by `parse()`
             info.fields.push((Rc::from("subcommand"), true, decl.optional_subcommand, false));
+            info.field_types.push(None);
         }
         // Methods of several `implement` blocks with the same name *(i.e. `mul`
         // of `IMul<number>` and `IMul<Vector>`)*: each one is a method of its
@@ -1392,6 +1395,14 @@ impl<'a> Compiler<'a> {
                     }
                 }
                 self.emit(Op::Interpolate(parts.len() as u32));
+            }
+            ExprKind::Type(ty) => {
+                let t = self.ty(ty);
+                self.emit(Op::TypeValue(t));
+            }
+            ExprKind::Bytes(bytes) => {
+                let c = self.constant(Value::Bytes(Rc::from(bytes.as_slice())));
+                self.emit(Op::Const(c));
             }
             ExprKind::Regex { pattern, flags } => {
                 let regexes = &mut self.f().proto.regexes;
@@ -2148,6 +2159,8 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         | ExprKind::Float(_)
         | ExprKind::Str(_)
         | ExprKind::Regex { .. }
+        | ExprKind::Bytes(_)
+        | ExprKind::Type(_)
         | ExprKind::Bool(_)
         | ExprKind::Null
         | ExprKind::ModuleFunction { .. }

@@ -40,11 +40,12 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [todo.lks](todo.lks) | A `command` with subcommands, flags, an enum, `--help` and usage errors | `lks examples/todo.lks add 'docs' -p high` |
 | [wordcount.lks](wordcount.lks) | Reading piped input | `cat ideas/README.md \| lks examples/wordcount.lks 5` |
 | [commands.lks](commands.lks) | `%x"..."` commands, safe quoting, `process::command()` | |
+| [bytes.lks](bytes.lks) | `bytes`: the `%b"..."` literal, text as UTF-8, hex and base64 with `std/bytes`, and a binary file written and read | |
 | [archive.lks](archive.lks) | `std/archive`: a backup as a `.tar.gz` with a folder and a text file, its entries, reading one, and extracting it, in a temporary folder | |
 | [random.lks](random.lks) | `std/random`: dice, a coin, choosing and shuffling lists, a seed that makes it repeatable, and a UUID | |
 | [platform.lks](platform.lks) | `process::platform()` and the `Platform` enum in a `switch` | |
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
-| [json.lks](json.lks) | `std/format/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
+| [json.lks](json.lks) | `std/format/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()`, and reading into classes with `json::parse($text, list<Package>)` | |
 | [csv.lks](csv.lks) | `std/format/csv`: rows as lists or as maps by the names of the columns, quotes, other separators | |
 | [html.lks](html.lks) | `std/html`: a page, CSS selectors, text and attributes, repaired HTML, the JSON in a `<script>` | |
 | [terminal.lks](terminal.lks) | `std/terminal`: styles with `Style`, `ask` with a check, `choose`, `confirm`, a progress bar and a table; answers from a pipe without a terminal | `printf 'Ann\\n\\ntea\\ny\\n' \| lks examples/terminal.lks` |

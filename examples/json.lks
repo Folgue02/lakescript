@@ -45,3 +45,12 @@ try {
 } catch (ValueError $e) {
     outln($e.message());
 }
+
+// Into types: objects of classes, filled in and checked as they're read
+class Package {
+    pub string @name;
+    pub list<string> @keywords = [];
+}
+const $packages = json::parse('[{"name": "lakescript", "keywords": ["scripts", "types"]}, {"name": "ferry"}]', list<Package>);
+for ($p in $packages)
+    outln(f"{$p.name}: {$p.keywords.length()} keywords");

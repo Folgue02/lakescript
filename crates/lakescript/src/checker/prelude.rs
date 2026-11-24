@@ -164,6 +164,7 @@ fn convert(ty: &TypeExpr, receiver: &[Rc<str>], generics: &mut Vec<Rc<str>>) -> 
         TypeKind::Named { name, args } => {
             let arg = |i: usize, generics: &mut Vec<Rc<str>>| args.get(i).map(|a| convert(a, receiver, generics)).unwrap_or(Ty::Any);
             match name.as_str() {
+                "type" if !args.is_empty() => Ty::TypeOf(Box::new(arg(0, generics))),
                 "any" | "type" => Ty::Any,
                 "void" => Ty::Void,
                 "never" => Ty::Never,
@@ -171,6 +172,7 @@ fn convert(ty: &TypeExpr, receiver: &[Rc<str>], generics: &mut Vec<Rc<str>>) -> 
                 "number" => Ty::Number,
                 "string" => Ty::Str,
                 "regex" => Ty::Regex,
+                "bytes" => Ty::Bytes,
                 "range" => Ty::Range,
                 "command" => Ty::Command,
                 "list" => Ty::List(Box::new(arg(0, generics))),

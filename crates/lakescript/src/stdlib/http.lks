@@ -14,19 +14,24 @@ pub class Response {
     pub const string @body;
     /// The address that answered, after following redirects.
     pub const string @url;
+    const bytes @data;
 
     /// `true` for a status from 200 to 299.
     pub bool ok?() = @status >= 200 && @status < 300;
 
-    /// The body read as JSON. Throws a `ValueError` if it isn't JSON.
-    pub any json() = json::parse(@body);
+    /// The body exactly as it came, for what isn't text *(i.e. an image)*.
+    pub bytes bytes() = @data;
+
+    /// The body read as JSON, into a type when one is given *(i.e.
+    /// `$response.json(User)`)*. Throws a `ValueError` if it isn't JSON.
+    pub T json<T>(?type<T> $type = null) = json::parse(@body, $type);
 
     /// A header by its name, in any case, or `null` *(i.e. `$response.header('Content-Type')`)*.
     pub ?string header(string $name) = @headers[$name.lower()];
 }
 
 /// Sends a request with any method *(i.e. `'PUT'`)*. A string body is sent as
-/// it is, and other values as JSON. Throws a `NetworkError` if there's no answer.
+/// it is, bytes as `application/octet-stream`, and other values as JSON. Throws a `NetworkError` if there's no answer.
 pub Response request(string $method, string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30) =
     answer(native::send($method, $url, $body, $headers, $timeout, null));
 
@@ -60,4 +65,5 @@ Response answer(map<string, any> $r) = Response(
     $r['headers'].as(map<string, string>),
     $r['body'].as(string),
     $r['url'].as(string),
+    $r['bytes'].as(bytes),
 );

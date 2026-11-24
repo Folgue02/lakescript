@@ -108,6 +108,8 @@ pub enum Op {
     /// Splits the parts into a program and its arguments, for `%x"..."`.
     Command(u32),
     Regex(u32),
+    /// A type as a value: the number of a type of the proto.
+    TypeValue(u32),
     /// Checks the value on top is a whole number, for the ends of a range.
     RangeBound,
     Range { inclusive: bool },
@@ -260,6 +262,8 @@ pub struct ClassInfo {
     pub constructor: bool,
     /// The fields declared in the class itself: name, `const`, nullable, has a value.
     pub fields: Vec<(Rc<str>, bool, bool, bool)>,
+    /// The type of each field, for `json::parse($text, Class)`.
+    pub field_types: Vec<Option<Rc<TypeExpr>>>,
     pub methods: Vec<Rc<str>>,
     pub static_methods: Vec<Rc<str>>,
     /// For a command: its arguments. The enums of its fields are pushed after the interfaces.

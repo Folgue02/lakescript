@@ -46,6 +46,10 @@ fn send(ctx: &mut NativeContext, values: Vec<Value>) -> Result<Value, NativeErro
     let body: Vec<u8> = match a.value(2) {
         Value::Null => Vec::new(),
         Value::Str(text) => text.as_bytes().to_vec(),
+        Value::Bytes(bytes) => {
+            content_type = Some("application/octet-stream");
+            bytes.to_vec()
+        }
         other => {
             content_type = Some("application/json");
             super::json::stringify(&other, None)?.into_bytes()
@@ -94,19 +98,20 @@ fn send(ctx: &mut NativeContext, values: Vec<Value>) -> Result<Value, NativeErro
             let mut out = std::fs::File::create(&file).map_err(|e| io_error("write", &p, e))?;
             let mut reader = response.body_mut().as_reader();
             std::io::copy(&mut reader, &mut out).map_err(|e| read_failed(&url, e))?;
-            String::new()
+            Vec::new()
         }
         _ => {
             let mut bytes = Vec::new();
             response.body_mut().as_reader().read_to_end(&mut bytes).map_err(|e| read_failed(&url, e))?;
-            String::from_utf8_lossy(&bytes).into_owned()
+            bytes
         }
     };
 
     let mut map = IndexMap::new();
     map.insert(Key::Str(Rc::from("status")), Value::Int(status as i64));
     map.insert(Key::Str(Rc::from("headers")), Value::Map(Rc::new(RefCell::new(headers))));
-    map.insert(Key::Str(Rc::from("body")), Value::string(&body));
+    map.insert(Key::Str(Rc::from("body")), Value::string(&String::from_utf8_lossy(&body)));
+    map.insert(Key::Str(Rc::from("bytes")), Value::Bytes(Rc::from(body)));
     map.insert(Key::Str(Rc::from("url")), Value::string(&final_url));
     Ok(Value::Map(Rc::new(RefCell::new(map))))
 }

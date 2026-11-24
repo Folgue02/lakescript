@@ -1,5 +1,5 @@
 # Made by tools/docs/stdlib.py from ideas/stdlib. Don't change it by hand.
-overview = "What comes with Lakescript. Its modules are under `std/` and are imported with `use` *(i.e. `use std/fs;`, see the module path in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*. `out`, `outln`, `err`, `errln`, `exit` and the built-in exceptions can be used without `use`.\n\n## Philosophy\n\n- **If people keep writing the same helper in their scripts, the standard library is missing something.** Common operations get a function or a method, even the simple ones *(i.e. `$text.capitalize()`, `$list.unique()`, `$path.removeSuffix('.log')`)*. A script should read as what it does, not as the helpers it needed first.\n- **Methods, not procedural functions.** Operations on a value are methods on that value: `$list.length()`, not `len($list)`, and `$list.push($item)`, not `array_push($list, $item)`. Global functions are only for things that don't belong to a value *(i.e. `outln`, `exit`)*.\n- **Primitive types first.** If a built-in type is enough, it's used, so day-to-day scripts don't need to learn extra types. Paths are strings, the files of a folder are a `list<string>`, an exit code is a `number` *(like Python's `os.listdir()` and `os.path.join()`)*.\n- **A new type only when the built-in ones aren't enough, never a map pretending to be one.** A map with fixed keys used as an object *(i.e. `{'size' => 10, 'modified' => ...}` for a file)* means a real type is missing. Older modules use separate functions instead *(i.e. `fs::size()`, `fs::modified()`)*, from before the standard library could declare classes. Maps are only for data whose keys aren't known in advance *(i.e. `env::all()`, JSON)*.\n- **Types as specific as possible.** Signatures use generics instead of `any` *(i.e. `sortBy<K>((T) -> K $key)`)*. `any` is only for values whose type really can't be known *(i.e. JSON read without a schema)* or functions that accept every value *(i.e. `outln`)*.\n- **Values, not class hierarchies.** Classes of the standard library are values that functions give back *(i.e. the `http::Response` of `http::get()`)*: scripts read their fields and call their methods, but never have to create them, extend them or implement interfaces to use a module.\n- **Full names.** `length()`, not `len()`. `trimStart()`, not `lstrip()`. Abbreviations are only used when they're the common name of the thing *(i.e. `toJson()`, `max()`)*.\n\n## Naming conventions\n\n- **Questions end with `?`.** Methods that take no arguments and ask something about the value end with `?` *(i.e. `$list.empty?()`, `$n.even?()`, `$text.blank?()`)*. Methods that take an argument read as a sentence and don't *(i.e. `$text.startsWith('a')`, `$list.contains(5)`)*.\n- **Strings and ranges never change.** Their methods always return a new value *(i.e. `$name.upper()` returns a new string, `$name` is the same)*.\n- **Lists and maps: verbs change, past participles copy.** `$list.sort()` sorts the list itself, `$list.sorted()` returns a sorted copy and leaves the list as it was. The same goes for `reverse`/`reversed`, `shuffle`/`shuffled` and `merge`/`merged`. Methods that build something new from the values *(i.e. `map`, `filter`, `unique`)* always return a new list or map.\n- **Missing things are `null`, broken things throw.** Searching for something that isn't there returns `null` *(i.e. `'abc'.indexOf('z')`, `[].first()`)*. Asking for something invalid throws *(i.e. `'abc'.toNumber()`, `$list.removeAt(10)`)*.\n- **Errors** are the built-in exceptions *(`ValueError`, `IndexError`, ... see [errors](https://github.com/Folgue02/lakescript/blob/master/ideas/language/errors.md))*.\n\n## Leaving modules out\n\nA program that embeds Lakescript can leave out the modules that need big crates. They're features of the `lakescript` crate, all on by default, so `lks` and `ferry` have every module:\n\n| Feature | Module | Crates it needs |\n|---------|--------|-----------------|\n| `csv` | `std/format/csv` | `csv` |\n| `dates` | The dates of `std/time`, and `std/time/zone`. `time::now()` is always there | `jiff` |\n| `html` | `std/html` | `scraper` |\n| `http` | `std/http` | `ureq`, with TLS |\n| `terminal` | `std/terminal` | `inquire`, `crossterm` |\n\n- `lakescript = { version = \"...\", default-features = false, features = [\"dates\"] }` has only the dates. Without any, the crate needs 14 crates instead of 163.\n- A script that uses a module that was left out is told so *(i.e. `` `std/http` isn't in this program: it was built without the `http` feature of Lakescript ``)*.\n- Regexes aren't a feature: they're part of the language."
+overview = "What comes with Lakescript. Its modules are under `std/` and are imported with `use` *(i.e. `use std/fs;`, see the module path in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*. `out`, `outln`, `err`, `errln`, `exit` and the built-in exceptions can be used without `use`.\n\n## Philosophy\n\n- **If people keep writing the same helper in their scripts, the standard library is missing something.** Common operations get a function or a method, even the simple ones *(i.e. `$text.capitalize()`, `$list.unique()`, `$path.removeSuffix('.log')`)*. A script should read as what it does, not as the helpers it needed first.\n- **Methods, not procedural functions.** Operations on a value are methods on that value: `$list.length()`, not `len($list)`, and `$list.push($item)`, not `array_push($list, $item)`. Global functions are only for things that don't belong to a value *(i.e. `outln`, `exit`)*.\n- **Primitive types first.** If a built-in type is enough, it's used, so day-to-day scripts don't need to learn extra types. Paths are strings, the files of a folder are a `list<string>`, an exit code is a `number` *(like Python's `os.listdir()` and `os.path.join()`)*.\n- **A new type only when the built-in ones aren't enough, never a map pretending to be one.** A map with fixed keys used as an object *(i.e. `{'size' => 10, 'modified' => ...}` for a file)* means a real type is missing. Older modules use separate functions instead *(i.e. `fs::size()`, `fs::modified()`)*, from before the standard library could declare classes. Maps are only for data whose keys aren't known in advance *(i.e. `env::all()`, JSON)*.\n- **Types as specific as possible.** Signatures use generics instead of `any` *(i.e. `sortBy<K>((T) -> K $key)`)*. `any` is only for values whose type really can't be known *(i.e. JSON read without a schema)* or functions that accept every value *(i.e. `outln`)*.\n- **Values, not class hierarchies.** Classes of the standard library are values that functions give back *(i.e. the `http::Response` of `http::get()`)*: scripts read their fields and call their methods, but never have to create them, extend them or implement interfaces to use a module.\n- **Full names.** `length()`, not `len()`. `trimStart()`, not `lstrip()`. Abbreviations are only used when they're the common name of the thing *(i.e. `toJson()`, `max()`)*.\n\n## Naming conventions\n\n- **Questions end with `?`.** Methods that take no arguments and ask something about the value end with `?` *(i.e. `$list.empty?()`, `$n.even?()`, `$text.blank?()`)*. Methods that take an argument read as a sentence and don't *(i.e. `$text.startsWith('a')`, `$list.contains(5)`)*.\n- **Strings and ranges never change.** Their methods always return a new value *(i.e. `$name.upper()` returns a new string, `$name` is the same)*.\n- **Lists and maps: verbs change, past participles copy.** `$list.sort()` sorts the list itself, `$list.sorted()` returns a sorted copy and leaves the list as it was. The same goes for `reverse`/`reversed`, `shuffle`/`shuffled` and `merge`/`merged`. Methods that build something new from the values *(i.e. `map`, `filter`, `unique`)* always return a new list or map.\n- **Missing things are `null`, broken things throw.** Searching for something that isn't there returns `null` *(i.e. `'abc'.indexOf('z')`, `[].first()`)*. Asking for something invalid throws *(i.e. `'abc'.toNumber()`, `$list.removeAt(10)`)*.\n- **Errors** are the built-in exceptions *(`ValueError`, `IndexError`, ... see [errors](https://github.com/Folgue02/lakescript/blob/master/ideas/language/errors.md))*.\n\n## Leaving modules out\n\nA program that embeds Lakescript can leave out the modules that need big crates. They're features of the `lakescript` crate, all on by default, so `lks` and `ferry` have every module:\n\n| Feature | Module | Crates it needs |\n|---------|--------|-----------------|\n| `archive` | `std/archive`. It needs `dates` too | `zip`, `tar`, `flate2` |\n| `csv` | `std/format/csv` | `csv` |\n| `dates` | The dates of `std/time`, `std/time/zone`, and `fs::modified()` as a date. `time::now()` is always there, and without dates `fs::modified()` gives seconds | `jiff` |\n| `html` | `std/html` | `scraper` |\n| `http` | `std/http` | `ureq`, with TLS |\n| `terminal` | `std/terminal` | `inquire`, `crossterm` |\n\n- `lakescript = { version = \"...\", default-features = false, features = [\"dates\"] }` has only the dates. Without any, the crate needs 14 crates instead of 163.\n- A script that uses a module that was left out is told so *(i.e. `` `std/http` isn't in this program: it was built without the `http` feature of Lakescript ``)*.\n- Regexes aren't a feature: they're part of the language."
 
 [[modules]]
 short = "general"
@@ -621,6 +621,13 @@ group = "Converting"
 
 [[modules.items.members]]
 kind = "method"
+name = "toBytes"
+code = "bytes toBytes()"
+text = "The text as bytes, in UTF-8 *(i.e. `'é'.toBytes().length()` is `2`)*. `$b.text()` reads them back"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
 name = "toBool"
 code = "bool toBool()"
 text = "`'true'` and `'false'`, ignoring case. Throws a `ValueError` otherwise"
@@ -1093,14 +1100,14 @@ group = "Ordering"
 
 [[modules.items.members]]
 kind = "method"
-name = "sortBy<K>((T) -> K $key)"
+name = "sortBy"
 code = "list<T> sortBy<K>((T) -> K $key)"
 text = "Sorts the list by what `$key` returns *(i.e. `$files.sortBy(($f) -> $f.length())`)*"
 group = "Ordering"
 
 [[modules.items.members]]
 kind = "method"
-name = "sortedBy<K>((T) -> K $key)"
+name = "sortedBy"
 code = "list<T> sortedBy<K>((T) -> K $key)"
 text = "A copy sorted by what `$key` returns"
 group = "Ordering"
@@ -1191,7 +1198,7 @@ group = "Transforming"
 
 [[modules.items.members]]
 kind = "method"
-name = "uniqueBy<K>((T) -> K $key)"
+name = "uniqueBy"
 code = "list<T> uniqueBy<K>((T) -> K $key)"
 text = "Without elements with a repeated `$key`"
 group = "Transforming"
@@ -1324,6 +1331,13 @@ group = "Searching"
 
 [[modules.items.members]]
 kind = "method"
+name = "toBytes"
+code = "bytes toBytes()"
+text = "A list of numbers as bytes *(i.e. `[255, 0].toBytes()`)*. Throws a `ValueError` for an element that isn't a whole number from 0 to 255"
+group = "Combining"
+
+[[modules.items.members]]
+kind = "method"
 name = "join"
 code = "string join(string $separator = '')"
 text = "The elements as text, with `$separator` between them *(i.e. `['a', 'b'].join(', ')` is `'a, b'`)*"
@@ -1380,14 +1394,14 @@ group = "Combining"
 
 [[modules.items.members]]
 kind = "method"
-name = "minBy<K>((T) -> K $key)"
+name = "minBy"
 code = "?T minBy<K>((T) -> K $key)"
 text = "The element with the smallest `$key`, or `null`"
 group = "Combining"
 
 [[modules.items.members]]
 kind = "method"
-name = "maxBy<K>((T) -> K $key)"
+name = "maxBy"
 code = "?T maxBy<K>((T) -> K $key)"
 text = "The element with the biggest `$key`, or `null` *(i.e. `$files.maxBy(($f) -> $f.size())`)*"
 group = "Combining"
@@ -1554,7 +1568,7 @@ group = "Changing"
 
 [[modules.items.members]]
 kind = "method"
-name = "sortBy<S>((K, V) -> S $key)"
+name = "sortBy"
 code = "map<K, V> sortBy<S>((K, V) -> S $key)"
 text = "Reorders the keys by what `$key` returns *(i.e. `$scores.sortBy(($name, $score) -> -$score)`)*"
 group = "Changing"
@@ -1617,7 +1631,7 @@ group = "Transforming"
 
 [[modules.items.members]]
 kind = "method"
-name = "sortedBy<S>((K, V) -> S $key)"
+name = "sortedBy"
 code = "map<K, V> sortedBy<S>((K, V) -> S $key)"
 text = "A copy ordered by what `$key` returns"
 group = "Transforming"
@@ -1830,6 +1844,81 @@ group = "Information"
 
 [[modules.items]]
 kind = "type"
+name = "bytes"
+code = "bytes"
+text = "Binary data: what files, HTTP bodies and archives hold when it isn't text *(i.e. an image)*. Like a string, a value that doesn't change, compared by its contents with `==` *(see Bytes in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*.\n\n```\nconst $png = %b\"\\x89PNG\\r\\n\\x1a\\n\";\nconst $file = fs::readBytes('logo.png');\nif ($file.startsWith($png)) outln(f\"A PNG of {$file.length().formatBytes()}\");\n\nconst $b = 'héllo'.toBytes();      // UTF-8\noutln($b);                         // <bytes 6 bytes>\noutln($b[0]);                      // 104, a number from 0 to 255\noutln($b[1..3].hex());             // 'c3a9'\noutln($b.text());                  // 'héllo'\n```\n\n- Made with the literal `%b\"...\"`, where characters are written as UTF-8 and `\\xFF` is one byte, with `$text.toBytes()`, `$numbers.toBytes()`, `bytes::fromHex()` and `bytes::fromBase64()` *(see [`std/bytes`](bytes.html))*, and by `fs::readBytes()`, `$response.bytes()` and `$archive.readBytes()`.\n- `$b[$i]` is the byte at `$i`, a number from 0 to 255, or `null` past the end. Negative indexes count from the end. `$b[1..3]` gives bytes.\n- `$a + $b` joins them. `for ($n in $b)` loops over the numbers.\n- They print as how many there are *(i.e. `<bytes 1.2 KB>`)*, since they aren't text: `.text()` reads them as text.\n- They can't be map keys, and `std/format/json` can't write them: `.base64()` can."
+
+[[modules.items.groups]]
+name = "Information"
+
+[[modules.items.groups]]
+name = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "length"
+code = "number length()"
+text = "How many bytes there are"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "empty?"
+code = "bool empty?()"
+text = "`true` if there are none"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "startsWith"
+code = "bool startsWith(bytes $prefix)"
+text = "`true` if they start with those bytes *(i.e. the header of a file)*"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "endsWith"
+code = "bool endsWith(bytes $suffix)"
+text = "`true` if they end with those bytes"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "indexOf"
+code = "?number indexOf(bytes $part)"
+text = "Where those bytes first are, or `null`"
+group = "Information"
+
+[[modules.items.members]]
+kind = "method"
+name = "text"
+code = "string text()"
+text = "The bytes read as UTF-8 text. Throws a `ValueError` that says where if they aren't valid UTF-8"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "hex"
+code = "string hex()"
+text = "In hex, two lowercase digits per byte *(i.e. `'89504e47'`)*"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "base64"
+code = "string base64()"
+text = "In standard base64, with `=` at the end, like the `base64` command and most APIs"
+group = "Converting"
+
+[[modules.items.members]]
+kind = "method"
+name = "toList"
+code = "list<number> toList()"
+text = "The bytes as numbers from 0 to 255"
+group = "Converting"
+
+[[modules.items]]
+kind = "type"
 name = "command"
 code = "command"
 text = "A shell command created with `%x\"...\"` *(see Command in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. It only runs when `run()`, `output()`, `lines()` or `status()` is called. The setup methods return the same command, so they can be chained."
@@ -2002,7 +2091,13 @@ text = "Its files and folders, in the order they're in it"
 kind = "method"
 name = "read"
 code = "string read(string $name)"
-text = "The text of a file in it *(i.e. `$zip.read('docs/notes.txt')`)*. Throws a `FileNotFound` if it isn't there, and a `ValueError` if it isn't text: `extract()` writes any file"
+text = "The text of a file in it *(i.e. `$zip.read('docs/notes.txt')`)*. Throws a `FileNotFound` if it isn't there, and a `ValueError` if it isn't text: `readBytes()` reads any file"
+
+[[modules.items.members]]
+kind = "method"
+name = "readBytes"
+code = "bytes readBytes(string $name)"
+text = "The bytes of a file in it, for what isn't text *(i.e. an image, see [bytes](types.bytes.html))*. Throws a `FileNotFound` if it isn't there"
 
 [[modules.items.members]]
 kind = "method"
@@ -2021,6 +2116,12 @@ kind = "method"
 name = "addText"
 code = "void addText(string $name, string $text)"
 text = "Adds a file with that text"
+
+[[modules.items.members]]
+kind = "method"
+name = "addBytes"
+code = "void addBytes(string $name, bytes $bytes)"
+text = "Adds a file with those bytes"
 
 [[modules.items.members]]
 kind = "method"
@@ -2059,6 +2160,30 @@ code = "bool dir?()"
 text = "`true` for a folder"
 
 [[modules]]
+short = "bytes"
+path = "std/bytes"
+title = "std/bytes"
+text = "Bytes from the ways text writes them: hex and base64. `use std/bytes;`, then `bytes::fromHex('ff00')`. The type itself, and its methods, are in [`std/bytes`](types.bytes.html)."
+
+[[modules.groups]]
+name = "Functions"
+text = "- `$b.hex()` and `$b.base64()` write them back."
+
+[[modules.items]]
+kind = "function"
+name = "fromHex"
+code = "bytes fromHex(string $text)"
+text = "Bytes written in hex, in any case, with or without spaces *(i.e. `bytes::fromHex('89 50 4E 47')`)*. Throws a `ValueError` if it isn't hex"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "fromBase64"
+code = "bytes fromBase64(string $text)"
+text = "Bytes written in base64, standard or for URLs *(with `-` and `_`)*, with or without the `=` at the end. Line breaks are ignored. Throws a `ValueError` if it isn't base64"
+group = "Functions"
+
+[[modules]]
 short = "fs"
 path = "std/fs"
 title = "std/fs"
@@ -2095,9 +2220,23 @@ group = "Reading"
 
 [[modules.items]]
 kind = "function"
+name = "readBytes"
+code = "bytes readBytes(string $path)"
+text = "The whole file as bytes, for files that aren't text *(i.e. an image, see [bytes](types.bytes.html))*"
+group = "Reading"
+
+[[modules.items]]
+kind = "function"
 name = "write"
 code = "void write(string $path, string $text)"
 text = "Replaces the file with `$text`, creating it if needed. The folder must exist"
+group = "Writing"
+
+[[modules.items]]
+kind = "function"
+name = "writeBytes"
+code = "void writeBytes(string $path, bytes $bytes)"
+text = "Replaces the file with those bytes, creating it if needed"
 group = "Writing"
 
 [[modules.items]]
@@ -2586,7 +2725,7 @@ notes = "## Errors\n\n- **A status of 4xx or 5xx isn't an error.** It's an answe
 
 [[modules.groups]]
 name = "Functions"
-text = "Every function takes `$headers`, sent with the request *(i.e. `headers: {'Authorization' => f\"Bearer {$token}\"}`)*, and `$timeout`, the seconds the whole request can take, or `null` to wait forever.\n\n\n- **The body:** a string is sent as it is. Any other value is sent as JSON, with the header `Content-Type: application/json` unless `$headers` gives one. `null` sends nothing.\n- **Redirects** are followed, up to 10.\n- Every request says it comes from `lakescript/<version>`, in the header `User-Agent`. `$headers` can give another."
+text = "Every function takes `$headers`, sent with the request *(i.e. `headers: {'Authorization' => f\"Bearer {$token}\"}`)*, and `$timeout`, the seconds the whole request can take, or `null` to wait forever.\n\n\n- **The body:** a string is sent as it is, and bytes too, with the header `Content-Type: application/octet-stream` unless `$headers` gives one *(see [bytes](types.bytes.html))*. Any other value is sent as JSON, with the header `Content-Type: application/json` unless `$headers` gives one. `null` sends nothing.\n- **Redirects** are followed, up to 10.\n- Every request says it comes from `lakescript/<version>`, in the header `User-Agent`. `$headers` can give another."
 
 [[modules.items]]
 kind = "function"
@@ -2675,9 +2814,15 @@ text = "`true` for a status from 200 to 299"
 
 [[modules.items.members]]
 kind = "method"
+name = "bytes"
+code = "bytes bytes()"
+text = "The body exactly as it came, for what isn't text *(i.e. an image, see [bytes](types.bytes.html))*. Empty after `download()`"
+
+[[modules.items.members]]
+kind = "method"
 name = "json"
-code = "any json()"
-text = "The body read as JSON. Throws a `ValueError` if it isn't *(see [`std/format/json`](format.json.html))*"
+code = "T json<T>(?type<T> $type = null)"
+text = "The body read as JSON, into a type when one is given *(i.e. `$response.json(User)`, see Into types in [`std/format/json`](format.json.html))*, and `any` without one. Throws a `ValueError` if it isn't JSON"
 
 [[modules.items.members]]
 kind = "method"
@@ -2823,7 +2968,7 @@ short = "format/json"
 path = "std/format/json"
 title = "std/format/json"
 text = "Reading and writing JSON. `use std/format/json;`, then `json::parse($text)`.\n\n```\nuse std/format/json;\n\nconst $data = json::parse('{\"name\": \"Daniel\", \"tags\": [\"a\", \"b\"]}');\nconst $name = $data['name'].as(string);\noutln(json::stringify($data, indent: 2));\n```"
-notes = "## Reading\n\nThere's no schema: the values become the built-in types, and the result is `any`. Scripts use `.as()` to get typed values out of it.\n\n| JSON | Lakescript |\n|------|------------|\n| object | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |\n| `true`, `false` | `bool` |\n| `null` | `null` |\n\n- Only strict JSON is accepted: no comments and no trailing commas, so a file Lakescript reads is also valid for other tools.\n- Invalid JSON throws a `ValueError` with the line and column.\n\n## Writing\n\n| Lakescript | JSON |\n|------------|------|\n| `map` | object. Number keys become strings, since JSON keys can only be strings |\n| `list` | array |\n| `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |\n| `string`, `number`, `bool`, `null` | the same |\n\n- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.\n- `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented."
+notes = "## Reading\n\nWithout a type, the values become the built-in types, and the result is `any`. Scripts use `.as()` to get typed values out of it, or give a type *(see [Into types](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/format/#into-types))*.\n\n| JSON | Lakescript |\n|------|------------|\n| object | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |\n| `true`, `false` | `bool` |\n| `null` | `null` |\n\n- Only strict JSON is accepted: no comments and no trailing commas, so a file Lakescript reads is also valid for other tools.\n- Invalid JSON throws a `ValueError` with the line and column.\n\n## Into types\n\n`json::parse($text, User)` reads the JSON into that type, like Rust's serde or Java's Jackson: objects of classes, with their fields filled in, and the result has that type for the checker. The type is written as an argument, a class like `User` or a built-in type like `list<User>` or `map<string, User>`.\n\n```\nclass Tag {\n    pub string @name;\n}\nclass User {\n    pub string @name;\n    pub ?string @email;\n    pub list<Tag> @tags = [];\n    pub Role @role = Role::USER;\n}\nenum Role { USER, ADMIN }\n\nconst $users = json::parse($text, list<User>);   // list<User>\noutln($users[0]!.tags.map(($t) -> $t.name));\nconst $me = http::get($url).json(User);         // User\n```\n\n- **Classes**: a JSON object, by the names of the fields. Their values are read into the types of the fields, so nested classes are filled in too. A field that isn't in the object gets its default, or `null` if it's nullable, and one without either throws. Keys the class doesn't have are ignored, since APIs add fields. A class with its own `new` gets the keys as named arguments of it.\n- **Enums**: the name of a value, as a string *(i.e. `\"ADMIN\"`)*.\n- **Built-in types**: `string`, `number`, `bool`, `any`, `list<T>`, `map<string, T>`, and `?T` for `null` or a `T`.\n- A value of the wrong type throws a `TypeError` that says where it is *(i.e. `` `$[2].age` is a string, not a number ``, `` `$.user` has no `name`, which `User` needs ``)*.\n- A type given as an argument is a value of the type `type<T>` *(see Types as values in [type_checking](https://github.com/Folgue02/lakescript/blob/master/ideas/language/type_checking.md))*.\n\n## Writing\n\n| Lakescript | JSON |\n|------------|------|\n| `map` | object. Number keys become strings, since JSON keys can only be strings |\n| `list` | array |\n| `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |\n| `string`, `number`, `bool`, `null` | the same |\n\n- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.\n- `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented."
 
 [[modules.groups]]
 name = "Functions"
@@ -2831,15 +2976,15 @@ name = "Functions"
 [[modules.items]]
 kind = "function"
 name = "parse"
-code = "any parse(string $text)"
-text = "The value the JSON text holds. Throws a `ValueError` with the line and column if it isn't valid"
+code = "T parse<T>(string $text, ?type<T> $type = null)"
+text = "The value the JSON text holds. Throws a `ValueError` with the line and column if it isn't valid. With a type, the value read into it *(i.e. `json::parse($text, User)`, see [Into types](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/format/#into-types))*, and `any` without one"
 group = "Functions"
 
 [[modules.items]]
 kind = "function"
 name = "parseAll"
-code = "list<any> parseAll(string $text)"
-text = "Every value in a text that holds several, separated by whitespace: streams like `{\"a\":1} {\"a\":2}` and JSON Lines, also when a value spans several lines. An empty text gives `[]`"
+code = "list<T> parseAll<T>(string $text, ?type<T> $type = null)"
+text = "Every value in a text that holds several, separated by whitespace: streams like `{\"a\":1} {\"a\":2}` and JSON Lines, also when a value spans several lines. An empty text gives `[]`. With a type, each value read into it"
 group = "Functions"
 
 [[modules.items]]
@@ -2852,8 +2997,8 @@ group = "Functions"
 [[modules.items]]
 kind = "function"
 name = "read"
-code = "any read(string $path)"
-text = "Reads and parses a file, like `json::parse(fs::read($path))`"
+code = "T read<T>(string $path, ?type<T> $type = null)"
+text = "Reads and parses a file, like `json::parse(fs::read($path), $type)`"
 group = "Functions"
 
 [[modules.items]]
@@ -2958,8 +3103,8 @@ name = "The terminal"
 text = "- A person is at a terminal when stdin and stderr are terminals, and the script isn't run by a program that captures what it writes *(i.e. the tests of the engine)*."
 
 [[modules.groups]]
-name = "Progress"
-text = "```\nconst $bar = terminal::progress($files.length(), 'Copying');\nfor ($f in $files) {\n    copy($f);\n    $bar.advance();\n}\n$bar.finish();\n\n// Without a total, it's a spinner that turns with each `advance()`\nconst $pages = terminal::progress(null, 'Reading pages');\nwhile ($next != null) {\n    $next = scrape($next);\n    $pages.advance();\n}\n$pages.finish();\n```\n\n\nA `Progress` has `advance(number $n = 1)`, which moves it forward, and `finish()`, which leaves it full and goes to the next line. Its fields `total`, `label` and `done` can be read.\n\n- It's drawn on stderr, and only when stderr is a terminal, so a log or a pipe never gets it. It's drawn at most every 40 ms, so a fast loop doesn't slow down for it.\n\n- **No spinner that turns on its own** while the script's code runs *(i.e. `spinner('Downloading', () -> ...)`)*. It would need a thread drawing while the VM runs, which collides with what the script prints, with the commands it runs and with Ctrl+C: a small concurrency system hidden in one function, in a language without concurrency. `progress(null)` turns with each `advance()` instead, which covers loops. For one long call, a line like `Downloading...` is enough. It can come back if the language gets concurrency."
+name = "Progress bars"
+text = "```\nconst $bar = terminal::progress($files.length(), 'Copying');\nfor ($f in $files) {\n    copy($f);\n    $bar.advance();\n}\n$bar.finish();\n\n// Without a total, it's a spinner that turns with each `advance()`\nconst $pages = terminal::progress(null, 'Reading pages');\nwhile ($next != null) {\n    $next = scrape($next);\n    $pages.advance();\n}\n$pages.finish();\n```"
 
 [[modules.groups]]
 name = "Ready-made pieces"
@@ -3060,7 +3205,43 @@ kind = "function"
 name = "progress"
 code = "Progress progress(?number $total, string $label = '')"
 text = "A bar that fills up to `$total`. With `null`, a spinner that shows that something is happening, without a percentage"
-group = "Progress"
+group = "Progress bars"
+
+[[modules.items]]
+kind = "class"
+name = "Progress"
+code = "class Progress"
+text = "A bar or a spinner, from `progress()`.\n\n\n\n- It's drawn on stderr, and only when stderr is a terminal, so a log or a pipe never gets it. It's drawn at most every 40 ms, so a fast loop doesn't slow down for it.\n\n- **No spinner that turns on its own** while the script's code runs *(i.e. `spinner('Downloading', () -> ...)`)*. It would need a thread drawing while the VM runs, which collides with what the script prints, with the commands it runs and with Ctrl+C: a small concurrency system hidden in one function, in a language without concurrency. `progress(null)` turns with each `advance()` instead, which covers loops. For one long call, a line like `Downloading...` is enough. It can come back if the language gets concurrency."
+
+[[modules.items.members]]
+kind = "field"
+name = "total"
+code = "?number @total"
+text = "What it fills up to, or `null` for a spinner"
+
+[[modules.items.members]]
+kind = "field"
+name = "label"
+code = "string @label"
+text = "What it's doing *(i.e. `Copying`)*"
+
+[[modules.items.members]]
+kind = "field"
+name = "done"
+code = "number @done"
+text = "How far it got"
+
+[[modules.items.members]]
+kind = "method"
+name = "advance"
+code = "void advance(number $n = 1)"
+text = "Moves it forward by `$n`"
+
+[[modules.items.members]]
+kind = "method"
+name = "finish"
+code = "void finish()"
+text = "Leaves it full, and goes to the next line"
 
 [[modules.items]]
 kind = "function"
@@ -3119,7 +3300,7 @@ text = "- A date without a time is midnight.\n- A date written with an offset bu
 
 [[modules.groups]]
 name = "Zones"
-text = "`use std/time/zone;`. A zone is a class of its own, `Zone`, like Java's `ZoneId` and Python's `zoneinfo`, so a misspelled zone fails where it's named, and `std/time` stays about dates.\n\n\nA `Zone` has a field `name` *(i.e. `Europe/Madrid`, or `+01:00` for an offset)*, and two zones with the same name are equal."
+text = "`use std/time/zone;`. A zone is a class of its own, `Zone`, like Java's `ZoneId` and Python's `zoneinfo`, so a misspelled zone fails where it's named, and `std/time` stays about dates."
 
 [[modules.items]]
 kind = "function"
@@ -3254,3 +3435,15 @@ name = "all"
 code = "list<string> all()"
 text = "The names of every zone the system knows, sorted"
 group = "Zones"
+
+[[modules.items]]
+kind = "class"
+name = "Zone"
+code = "class Zone"
+text = "A time zone, from `std/time/zone`. Two zones with the same name are equal."
+
+[[modules.items.members]]
+kind = "field"
+name = "name"
+code = "string @name"
+text = "Its IANA name *(i.e. `Europe/Madrid`)*, `UTC`, or an offset *(i.e. `+01:00`)*"

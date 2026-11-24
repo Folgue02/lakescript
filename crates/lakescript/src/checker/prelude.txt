@@ -76,6 +76,7 @@ list<string> lines();
 list<string> words();
 list<string> chars();
 number toNumber();
+bytes toBytes();
 bool toBool();
 number codePoint(number $index = 0);
 string escapeRegex();
@@ -120,6 +121,17 @@ type regex
 string pattern();
 string flags();
 string toString();
+
+type bytes
+number length();
+bool empty?();
+bool startsWith(bytes $prefix);
+bool endsWith(bytes $suffix);
+?number indexOf(bytes $part);
+string text();
+string hex();
+string base64();
+list<number> toList();
 
 type range
 number start();
@@ -214,6 +226,7 @@ map<K, T> toMap((T) -> K $key);
 bool any((T) -> bool $fn);
 bool all((T) -> bool $fn);
 bool none((T) -> bool $fn);
+bytes toBytes();
 string join(string $separator = '');
 ?T reduce((T, T) -> T $fn);
 U fold(U $initial, (U, T) -> U $fn);
@@ -270,6 +283,10 @@ void err(any $value = '');
 void errln(any $value = '');
 never exit(number $code = 0);
 
+module std/bytes
+bytes fromHex(string $text);
+bytes fromBase64(string $text);
+
 module std/path
 string join(...string $parts);
 string withExtension(string $path, string $extension);
@@ -310,10 +327,10 @@ string uuid();
 void seed(number $seed);
 
 module std/format/json
-any parse(string $text);
-list<any> parseAll(string $text);
+T parse<T>(string $text, ?type<T> $type = null);
+list<T> parseAll<T>(string $text, ?type<T> $type = null);
 string stringify(any $value, ?number $indent = null);
-any read(string $path);
+T read<T>(string $path, ?type<T> $type = null);
 void write(string $path, any $value, ?number $indent = 2);
 
 module std/format/csv
@@ -334,7 +351,9 @@ exception throws(() -> any $code);
 module std/fs
 string read(string $path);
 list<string> readLines(string $path);
+bytes readBytes(string $path);
 void write(string $path, string $text);
+void writeBytes(string $path, bytes $bytes);
 void append(string $path, string $text);
 void writeLines(string $path, list<string> $lines);
 bool exists?(string $path);
@@ -360,7 +379,9 @@ void link(string $target, string $path);
 module std/fs/native
 string read(string $path);
 list<string> readLines(string $path);
+bytes readBytes(string $path);
 void write(string $path, string $text);
+void writeBytes(string $path, bytes $bytes);
 void append(string $path, string $text);
 void writeLines(string $path, list<string> $lines);
 bool exists?(string $path);
@@ -405,10 +426,11 @@ map<string, any> send(string $method, string $url, any $body, map<string, string
 module std/archive/native
 list<list<any>> entries(string $path);
 string read(string $path, string $name);
+bytes readBytes(string $path, string $name);
 void extract(string $path, string $dir);
 void format(string $path);
 void check(string $path);
-void write(string $path, list<list<string>> $added);
+void write(string $path, list<list<any>> $added);
 
 module std/process/native
 list<string> args();

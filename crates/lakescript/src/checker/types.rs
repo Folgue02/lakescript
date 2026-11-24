@@ -19,6 +19,9 @@ pub enum Ty {
     Number,
     Str,
     Regex,
+    Bytes,
+    /// A type given as a value: `type<User>` for `User` or `list<User>` written as an argument.
+    TypeOf(Box<Ty>),
     Range,
     Command,
     /// One of the built-in exceptions *(i.e. `"ValueError"`)*.
@@ -265,6 +268,7 @@ impl Ty {
             Ty::Param(name) => map.get(name).cloned().unwrap_or_else(|| self.clone()),
             Ty::Result(a, b) => Ty::Result(Box::new(a.substitute(map)), Box::new(b.substitute(map))),
             Ty::List(a) => Ty::List(Box::new(a.substitute(map))),
+            Ty::TypeOf(a) => Ty::TypeOf(Box::new(a.substitute(map))),
             Ty::Map(a, b) => Ty::Map(Box::new(a.substitute(map)), Box::new(b.substitute(map))),
             Ty::Nullable(a) => Ty::Nullable(Box::new(a.substitute(map))),
             Ty::Object(c, args) => Ty::Object(c.clone(), args.iter().map(|a| a.substitute(map)).collect()),
@@ -292,11 +296,13 @@ impl fmt::Display for Ty {
             Ty::Number => write!(f, "number"),
             Ty::Str => write!(f, "string"),
             Ty::Regex => write!(f, "regex"),
+            Ty::Bytes => write!(f, "bytes"),
             Ty::Range => write!(f, "range"),
             Ty::Command => write!(f, "command"),
             Ty::Exception(kind) => write!(f, "{kind}"),
             Ty::Result(a, b) => write!(f, "result<{a}, {b}>"),
             Ty::List(a) => write!(f, "list<{a}>"),
+            Ty::TypeOf(a) => write!(f, "type<{a}>"),
             Ty::Map(a, b) => write!(f, "map<{a}, {b}>"),
             Ty::Nullable(a) => match **a {
                 Ty::Func(_) => write!(f, "?({a})"),
@@ -328,6 +334,8 @@ pub fn a(ty: &Ty) -> String {
         Ty::Null => "`null`".into(),
         Ty::Void => "nothing (`void`)".into(),
         Ty::Never => "nothing (`never`)".into(),
+        Ty::Bytes => "bytes".into(),
+        Ty::TypeOf(t) => format!("the type `{t}`"),
         Ty::Nullable(_) => format!("a {ty}, which can be `null`"),
         other => {
             let text = other.to_string();

@@ -85,7 +85,7 @@ Each one is usable on its own, with tests that send real protocol messages to th
 
 ## Importing types from completion
 
-*Decided, not built yet.* Like Java's in IntelliJ: completion also gives the types that aren't imported, and choosing one writes its `use` line.
+Built. Like Java's in IntelliJ: completion also gives the types that aren't imported, and choosing one writes its `use` line.
 
 - **Only types**: classes, interfaces and enums. Functions and constants aren't offered, since there would be too many of them.
 - They come from the project's `src/`, the dependencies already downloaded and the standard library *(i.e. `Date`, `Zone`, `Style`)*. A script outside a project sees the standard library and the files next to it. Each one says its module, so two `Point`s can be told apart, and they come after the names already in scope.
@@ -95,7 +95,8 @@ Each one is usable on its own, with tests that send real protocol messages to th
     - **Their order**: the standard library first, an empty line, then the rest, each group in alphabetical order. Two groups, like Go's `goimports`, not three like Python's *(the standard library, dependencies, the project)*: a project's modules and its dependencies are written alike *(`folgue02/...`, `acme/...`)*, and only `ferry.toml` tells them apart. A new line goes in its place in that order. Lines that are already there aren't moved: that's for a formatter, which will follow the same rule.
 - The edit goes with the completion, as `additionalTextEdits`, which farsub already applies.
 - No quick fix that imports an unknown type from its error.
-- Building it needs an index of the `pub` types of every module that can be reached, made by parsing them only *(everything `pub` has its type written)*, kept by the time each file changed, and read again on save.
+- They're offered for a name that starts with a capital letter, like types do, so a variable or a function being written doesn't get a list of every type.
+- It's an index of the `pub` types of every module that can be reached, made by parsing them only *(everything `pub` has its type written)*, kept by the time each file changed, so a saved file is read again. Open files use the editor's text. It's in `lks-lsp/src/imports.rs`, and the standard library's come from `lakescript::std_source()`.
 
 ## Using it
 

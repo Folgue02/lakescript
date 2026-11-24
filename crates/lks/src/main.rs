@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use std::process::ExitCode;
 
 use lakescript::terminal::{Paint, When};
-use lakescript::{Engine, lexer, parser};
+use lakescript::Engine;
 
 /// The interpreter walks the syntax tree with Rust's own stack, so scripts
 /// run on a thread with a big one. Only the pages that are used take memory.
@@ -219,36 +219,25 @@ fn show(diagnostic: &lakescript::Diagnostic, script: &str) -> String {
 }
 
 fn debug_print(path: &str, source: &str, options: &Options) -> ExitCode {
-    let (show_tokens, show_ast) = (options.show_tokens, options.show_ast);
-    let result = lexer::tokenize(source).and_then(|tokens| {
-        if show_tokens {
-            for token in &tokens {
-                println!("{}:{}\t{:?}", token.span.line, token.span.column, token.kind);
+    let engine = Engine::new();
+    let mut parts = Vec::new();
+    if options.show_tokens {
+        parts.push(engine.tokens(source));
+    }
+    if options.show_ast {
+        parts.push(engine.syntax_tree(source));
+    }
+    if options.show_bytecode {
+        parts.push(Engine::new().bytecode(source));
+    }
+    for part in parts {
+        match part {
+            Ok(text) => print!("{text}"),
+            Err(diagnostic) => {
+                eprintln!("{}", show(&diagnostic, path));
+                return ExitCode::FAILURE;
             }
-        }
-        parser::parse(tokens)
-    });
-    match result {
-        Ok(program) => {
-            if show_ast {
-                for stmt in &program {
-                    println!("{stmt}");
-                }
-            }
-            if options.show_bytecode {
-                match Engine::new().bytecode(source) {
-                    Ok(listing) => print!("{listing}"),
-                    Err(diagnostic) => {
-                        eprintln!("{}", show(&diagnostic, path));
-                        return ExitCode::FAILURE;
-                    }
-                }
-            }
-            ExitCode::SUCCESS
-        }
-        Err(diagnostic) => {
-            eprintln!("{}", show(&diagnostic, path));
-            ExitCode::FAILURE
         }
     }
+    ExitCode::SUCCESS
 }

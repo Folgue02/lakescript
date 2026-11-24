@@ -6,24 +6,25 @@
 //! - never prints or exits on its own: errors are returned as values,
 //! - never panics because of what a script does.
 
-pub mod ast;
+mod ast;
 mod bytecode;
+mod bytes;
 mod checker;
 mod cli;
 mod command;
 mod compiler;
-pub mod diagnostic;
+mod diagnostic;
 pub mod docs;
 mod engine;
 mod exceptions;
 mod host;
 mod interrupt;
 mod interpreter;
-pub mod lexer;
+mod lexer;
 mod methods;
 mod modules;
 mod operators;
-pub mod parser;
+mod parser;
 mod paths;
 mod patterns;
 mod stack;
@@ -31,9 +32,9 @@ mod stdlib;
 mod strings;
 pub mod terminal;
 mod testing;
-pub mod token;
+mod token;
 mod types;
-pub mod value;
+mod value;
 
 pub use checker::complete::{Completion, Item as CompletionItem, ItemKind as CompletionKind};
 pub use checker::names::{Definition, Name};
@@ -42,11 +43,18 @@ pub use engine::{CapturedOutput, Engine, Outcome};
 pub use interrupt::on_ctrl_c;
 pub use paths::canonical;
 pub use testing::{TestResult, render_result, render_summary, test_names};
-pub use value::{NativeContext, NativeError, NativeResult, Value};
+pub use token::Span;
+pub use value::{Key, NativeContext, NativeError, NativeResult, Value};
 
 /// The modules of the standard library this build has *(i.e. `std/fs`)*.
 pub fn std_modules() -> &'static [&'static str] {
     stdlib::MODULES
+}
+
+/// The source of a module of the standard library written in Lakescript
+/// *(i.e. `std/http`)*, to read its docs and types. `None` for the ones in Rust.
+pub fn std_source(module: &str) -> Option<&'static str> {
+    stdlib::source_of(module)
 }
 
 /// Reads a whole script into its syntax tree.

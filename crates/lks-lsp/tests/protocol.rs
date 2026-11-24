@@ -403,3 +403,39 @@ fn use_paths_are_completed_and_their_folders_documented() {
     assert_eq!(server.at("textDocument/completion", &script, 0, 14), json!([]));
     server.stop();
 }
+
+#[test]
+fn completion_imports_types() {
+    let dir = temp("imports");
+    std::fs::write(dir.join("shapes.lks"), "pub class Circle {\n    pub number @r;\n}\npub class Square {\n    pub number @s;\n}\n").unwrap();
+    std::fs::create_dir_all(dir.join("people")).unwrap();
+    std::fs::write(dir.join("people/Person.lks"), "pub class Person {\n    pub string @name;\n}\n").unwrap();
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    server.open(&script, "use std/fs;\n\nconst $c = Ci\n");
+    server.diagnostics_for(&script);
+    let found = server.at("textDocument/completion", &script, 2, 13);
+    let item = |label: &str| found.as_array().unwrap().iter().find(|i| i["label"] == label).cloned().unwrap_or_else(|| panic!("no {label} in {found}"));
+    let circle = item("Circle");
+    assert_eq!(circle["labelDetails"]["description"], "shapes");
+    assert_eq!(circle["additionalTextEdits"][0]["newText"], "\nuse shapes::Circle;\n", "{circle}");
+    assert_eq!(circle["additionalTextEdits"][0]["range"]["start"], json!({ "line": 1, "character": 0 }));
+    // The standard library goes first, and a type module is imported as itself
+    let date = item("Date");
+    assert_eq!(date["additionalTextEdits"][0]["newText"], "use std/time::Date;\n");
+    assert_eq!(item("Style")["additionalTextEdits"][0]["newText"], "use std/terminal/Style;\n");
+    assert_eq!(item("Person")["additionalTextEdits"][0]["newText"], "\nuse people/Person;\n");
+    // What's imported already isn't offered again, and a second name joins the braces
+    server.change(&script, "use shapes::Circle;\n\nconst $c = Sq\n", 2);
+    server.diagnostics_for(&script);
+    let found = server.at("textDocument/completion", &script, 2, 13);
+    let names = labels(&found);
+    assert_eq!(names.iter().filter(|l| *l == "Circle").count(), 1, "{names:?}");
+    let square = found.as_array().unwrap().iter().find(|i| i["label"] == "Square").unwrap();
+    assert_eq!(square["additionalTextEdits"][0]["newText"], "use shapes::{Circle, Square};\n");
+    // Only for a name that starts like a type
+    server.change(&script, "const $c = ci\n", 3);
+    server.diagnostics_for(&script);
+    assert!(!labels(&server.at("textDocument/completion", &script, 0, 13)).contains(&"Circle".to_string()));
+    server.stop();
+}

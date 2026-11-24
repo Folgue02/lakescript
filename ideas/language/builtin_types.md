@@ -138,6 +138,26 @@ let $anything = null;           // OK, `any` can hold null
 
 - `?.` and `??` are used to work with nullable values *(see [operators.md](operators.md))*.
 
+### Bytes
+
+Type: `bytes`
+
+Binary data, for files, HTTP bodies and archives that aren't text *(i.e. an image)*. Like a string, a value that doesn't change, compared by its contents with `==`. Its methods are in [types/bytes.md](../stdlib/types/bytes.md).
+
+```
+const $png = %b"\x89PNG\r\n\x1a\n";        // a literal: UTF-8 text, and `\xFF` for one byte
+const $logo = fs::readBytes('logo.png');
+if ($logo.startsWith($png)) outln($logo.length().formatBytes());
+const $b = 'héllo'.toBytes();                 // the text as UTF-8
+$b[0];                                        // 104: a number from 0 to 255, `null` past the end
+$b[1..3];                                     // bytes
+$b + %b"!";                                   // bytes, joined
+```
+
+- The escapes of `%b"..."` are `\xFF`, `\n`, `\t`, `\r`, `\0`, `\\` and `\"`. It has no `{...}`.
+- They print as how many there are *(i.e. `<bytes 1.2 KB>`)*, since they aren't text, and `.text()` reads them as UTF-8.
+- Why not a `list<number>`: a list takes a whole value for each byte *(16 times the memory, so a download of 10 MB would take 160 MB)*, can hold `300` or `1.5`, so writing it means checking every element, and can be changed, so whatever gives one would copy it every time. A type of its own also has the methods that fit *(`.text()`, `.hex()`, `.base64()`)*, and the checker and editors know what it is.
+
 ## Collections
 
 ### List

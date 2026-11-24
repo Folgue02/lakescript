@@ -182,7 +182,7 @@ Operands: a variable declared with `let`. `$x op= $y` is the same as `$x = $x op
 
 ### String concatenation
 
-`+` with two strings joins them: `'Hello ' + 'world'` is `'Hello world'`. Both sides must be strings *(see Strings in [builtin_types.md](builtin_types.md))*.
+`+` with two strings joins them: `'Hello ' + 'world'` is `'Hello world'`. Both sides must be strings *(see Strings in [builtin_types.md](builtin_types.md))*. With two `bytes`, it joins them too *(see Bytes in [builtin_types.md](builtin_types.md))*.
 
 ### Null operators
 

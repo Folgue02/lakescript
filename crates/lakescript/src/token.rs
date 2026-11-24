@@ -142,6 +142,8 @@ pub enum TokenKind {
     Str(String),
     FStr(Vec<StringPart>),
     Regex { pattern: String, flags: String },
+    /// `%b"..."`
+    Bytes(Vec<u8>),
     Command(Vec<StringPart>),
     WordList(Vec<String>),
 
@@ -239,6 +241,7 @@ impl TokenKind {
             Float(n) => return n.to_string(),
             Str(_) | FStr(_) => "a string",
             Regex { .. } => "a regex",
+            Bytes(_) => "bytes",
             Command(_) => "a command",
             WordList(_) => "a %w list",
             Variable(name) => return format!("${name}"),

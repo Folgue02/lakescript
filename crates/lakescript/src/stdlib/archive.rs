@@ -31,6 +31,11 @@ pub fn register(m: &mut Exports) {
             .map(|text| Value::string(&text))
             .map_err(|_| NativeError::new(VALUE_ERROR, format!("'{name}' in '{shown}' isn't text: `extract()` writes it as a file")))
     });
+    m.function("readBytes", |ctx, values| {
+        let a = Args::new("archive::readBytes", values, 2, 2)?;
+        let (shown, name) = (a.str(0)?, a.str(1)?);
+        Ok(Value::Bytes(std::rc::Rc::from(read(&shown, &ctx.state.resolve(&shown), &name)?)))
+    });
     m.function("extract", |ctx, values| {
         let a = Args::new("archive::extract", values, 2, 2)?;
         let (shown, dir) = (a.str(0)?, a.str(1)?);
@@ -55,11 +60,13 @@ pub fn register(m: &mut Exports) {
         let mut adds = Vec::new();
         for item in items.borrow().iter() {
             let Value::List(parts) = item else { continue };
-            let parts: Vec<String> = parts.borrow().iter().map(|v| v.to_string()).collect();
+            let parts = parts.borrow();
             let [kind, source, name] = parts.as_slice() else { continue };
-            adds.push(match kind.as_str() {
-                "text" => Add::Text { name: name.clone(), text: source.clone() },
-                _ => Add::Path { shown: source.clone(), path: ctx.state.resolve(source), name: name.clone() },
+            let name = name.to_string();
+            adds.push(match (kind.to_string().as_str(), source) {
+                ("text", text) => Add::Data { name, data: text.to_string().into_bytes() },
+                ("bytes", Value::Bytes(bytes)) => Add::Data { name, data: bytes.to_vec() },
+                (_, source) => Add::Path { shown: source.to_string(), path: ctx.state.resolve(&source.to_string()), name },
             });
         }
         write(&shown, &ctx.state.resolve(&shown), adds)?;
@@ -233,7 +240,8 @@ fn extract(shown: &str, file: &Path, dir_shown: &str, dir: &Path) -> Result<(), 
 enum Add {
     /// A file or a folder, with everything in it, under `name`.
     Path { shown: String, path: PathBuf, name: String },
-    Text { name: String, text: String },
+    /// A file with these contents.
+    Data { name: String, data: Vec<u8> },
 }
 
 /// A file or folder to write in an archive, and its name there.
@@ -277,7 +285,7 @@ fn write(shown: &str, file: &Path, adds: Vec<Add>) -> Result<(), NativeError> {
                 };
                 walk(&shown, &path, &name, &mut items)?
             }
-            Add::Text { name, text } => texts.push((name.trim_matches('/').to_string(), text)),
+            Add::Data { name, data } => texts.push((name.trim_matches('/').to_string(), data)),
         }
     }
     // Names that would be extracted outside the folder they're extracted in
@@ -318,7 +326,7 @@ fn write(shown: &str, file: &Path, adds: Vec<Add>) -> Result<(), NativeError> {
             }
             for (name, text) in &texts {
                 zip.start_file(name, options(now)).map_err(|e| failed(&e))?;
-                zip.write_all(text.as_bytes()).map_err(|e| failed(&e))?;
+                zip.write_all(text).map_err(|e| failed(&e))?;
             }
             zip.finish().map_err(|e| failed(&e))?.flush().map_err(|e| failed(&e))?;
         }
@@ -345,7 +353,7 @@ fn write(shown: &str, file: &Path, adds: Vec<Add>) -> Result<(), NativeError> {
                 header.set_mode(0o644);
                 header.set_mtime(seconds);
                 header.set_entry_type(tar::EntryType::Regular);
-                tar.append_data(&mut header, name, text.as_bytes()).map_err(|e| failed(&e))?;
+                tar.append_data(&mut header, name, &text[..]).map_err(|e| failed(&e))?;
             }
             let mut writer = tar.into_inner().map_err(|e| failed(&e))?;
             writer.flush().map_err(|e| failed(&e))?;

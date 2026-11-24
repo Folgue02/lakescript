@@ -53,6 +53,14 @@ fn server(count: usize) -> String {
             let mut body = vec![0; length];
             reader.read_exact(&mut body).unwrap();
             let path = head[0].split(' ').nth(1).unwrap().to_string();
+            // `/raw` answers with the body it got, exactly, and its content type
+            if path == "/raw" {
+                let kind = head.iter().find_map(|h| h.to_ascii_lowercase().strip_prefix("content-type:").map(|t| t.trim().to_string())).unwrap_or_default();
+                let mut answer = format!("HTTP/1.1 200 OK\r\nX-Sent-As: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+                answer.extend_from_slice(&body);
+                stream.write_all(&answer).unwrap();
+                continue;
+            }
             let status: u16 = path.trim_start_matches('/').parse().unwrap_or(200);
             let text = format!("{}\n{}", head.join("\n"), String::from_utf8_lossy(&body));
             let answer = format!(
@@ -220,4 +228,30 @@ fn csv_files_and_errors() {
     assert!(error("use std/format/csv;\ncsv::stringify([[[1]]]);").contains("TypeError: a value of CSV can be a string"));
     assert!(error("use std/format/csv;\ncsv::stringify([{'a' => 1}, {'b' => 2}]);").contains("a row has the key 'b'"));
     assert!(error("use std/format/csv;\ncsv::read('/nonexistent/x.csv');").contains("FileNotFound"));
+}
+
+#[test]
+fn bodies_can_be_bytes() {
+    let url = server(1);
+    let out = run(&format!(
+        "use std/http;\n\
+         const $r = http::post('{url}/raw', %b\"\\x89PNG\\xff\\x00\");\n\
+         outln($r.header('x-sent-as'));\n\
+         outln($r.bytes().hex());\n\
+         outln($r.bytes().length());\n\
+         outln($r.body.contains('\\u{{FFFD}}'));\n"
+    ));
+    assert_eq!(out, "application/octet-stream\n89504e47ff00\n6\ntrue\n");
+}
+
+#[test]
+fn a_response_is_read_into_a_type() {
+    let url = server(1);
+    let out = run(&format!(
+        "use std/http;\n\
+         class Repo {{\n    pub string @name;\n    pub number @stars;\n}}\n\
+         const $r = http::post('{url}/raw', '{{\"name\": \"lakescript\", \"stars\": 7}}').json(Repo);\n\
+         outln(f\"{{$r.name}} {{$r.stars + 1}}\");\n"
+    ));
+    assert_eq!(out, "lakescript 8\n");
 }

@@ -81,7 +81,7 @@ The values of `Style` *(as many as terminals can show, with plain names)*:
 
 - A person is at a terminal when stdin and stderr are terminals, and the script isn't run by a program that captures what it writes *(i.e. the tests of the engine)*.
 
-## Progress
+## Progress bars
 
 ```
 const $bar = terminal::progress($files.length(), 'Copying');
@@ -104,7 +104,20 @@ $pages.finish();
 |----------|---------|-------------|
 | `progress(?number $total, string $label = '')` | `Progress` | A bar that fills up to `$total`. With `null`, a spinner that shows that something is happening, without a percentage |
 
-A `Progress` has `advance(number $n = 1)`, which moves it forward, and `finish()`, which leaves it full and goes to the next line. Its fields `total`, `label` and `done` can be read.
+## Progress
+
+A bar or a spinner, from `progress()`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | `?number` | What it fills up to, or `null` for a spinner |
+| `label` | `string` | What it's doing *(i.e. `Copying`)* |
+| `done` | `number` | How far it got |
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `advance(number $n = 1)` | `void` | Moves it forward by `$n` |
+| `finish()` | `void` | Leaves it full, and goes to the next line |
 
 - It's drawn on stderr, and only when stderr is a terminal, so a log or a pipe never gets it. It's drawn at most every 40 ms, so a fast loop doesn't slow down for it.
 

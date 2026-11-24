@@ -100,6 +100,7 @@ fn system_examples() {
     let json = run_ok(&["examples/json.lks"]);
     assert!(json.contains("lakescript by folgue02, indent 4"));
     assert!(json.contains("['start', 'stop']"));
+    assert!(json.contains("lakescript: 2 keywords\nferry: 0 keywords"), "{json}");
     let csv = run_ok(&["examples/csv.lks"]);
     assert!(csv.contains("Smith, John | 17 | Boston"), "{csv}");
     assert!(csv.contains("{ 'Lisbon' => 2, 'Boston' => 1 }"), "{csv}");
@@ -249,6 +250,12 @@ fn todo() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("`--priority` must be one of low, normal, high, not `soon`"), "{stderr}");
     assert!(stderr.contains("Usage: todo.lks add [options] <task>"), "{stderr}");
+}
+
+#[test]
+fn bytes() {
+    let out = run_ok(&["examples/bytes.lks"]);
+    assert_eq!(out, "<bytes 8 bytes>: 89504e470d0a1a0a\n'héllo' is 6 bytes, and starts with 104\nhéllo\naGVsbG8=\nhello\nLKS\nRead 10 bytes, a PNG: true\n");
 }
 
 #[test]

@@ -1393,6 +1393,10 @@ impl Parser {
                 self.advance();
                 ExprKind::Regex { pattern, flags }
             }
+            TokenKind::Bytes(bytes) => {
+                self.advance();
+                ExprKind::Bytes(bytes)
+            }
             TokenKind::WordList(words) => {
                 self.advance();
                 let items = words.into_iter().map(|w| Expr { kind: ExprKind::Str(w), span: start }).collect();
@@ -1450,6 +1454,10 @@ impl Parser {
                         ExprKind::Function(name)
                     }
                 }
+            }
+            // A built-in type as a value *(i.e. `list<User>` in `json::parse($text, list<User>)`)*
+            TokenKind::Ident(name) if BUILT_IN_TYPES.contains(&name.as_str()) && !matches!(self.peek_at(1), TokenKind::ColonColon | TokenKind::LParen) => {
+                ExprKind::Type(self.parse_type()?)
             }
             TokenKind::Ident(name) if is_type_name(&name) && self.peek_at(1) == &TokenKind::ColonColon => {
                 self.advance();
@@ -1774,6 +1782,9 @@ fn pascal(name: &str) -> String {
     }).collect()
 }
 
+/// The built-in types that can be written as values, like classes can.
+const BUILT_IN_TYPES: &[&str] = &["any", "string", "number", "bool", "bytes", "list", "map"];
+
 pub fn is_type_name(name: &str) -> bool {
     name == "Self" || name.starts_with(|c: char| c.is_ascii_uppercase())
 }
@@ -1849,7 +1860,7 @@ fn path_test_op(name: &str) -> Option<PathTestOp> {
 fn can_start_expression(kind: &TokenKind) -> bool {
     use TokenKind::*;
     match kind {
-        Int(_) | Float(_) | Str(_) | FStr(_) | Regex { .. } | Command(_) | WordList(_)
+        Int(_) | Float(_) | Str(_) | FStr(_) | Regex { .. } | Bytes(_) | Command(_) | WordList(_)
         | Variable(_) | Ident(_) | LParen | LBracket | LBrace | Lt | Minus | Plus | Bang | Tilde | PlusPlus
         | MinusMinus => true,
         Keyword(k) => matches!(k, self::Keyword::True | self::Keyword::False | self::Keyword::Null | self::Keyword::If | self::Keyword::Switch | self::Keyword::Try),

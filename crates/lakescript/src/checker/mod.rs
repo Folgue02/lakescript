@@ -232,6 +232,7 @@ impl<'a> Checker<'a> {
                 None => ty.clone(),
             },
             Ty::List(e) => Ty::List(Box::new(self.resolve(e))),
+            Ty::TypeOf(e) => Ty::TypeOf(Box::new(self.resolve(e))),
             Ty::Map(k, v) => Ty::Map(Box::new(self.resolve(k)), Box::new(self.resolve(v))),
             Ty::Result(t, e) => Ty::Result(Box::new(self.resolve(t)), Box::new(self.resolve(e))),
             Ty::Nullable(t) => self.resolve(t).nullable(),
@@ -282,6 +283,7 @@ impl<'a> Checker<'a> {
             (f, Ty::Nullable(t)) => self.assignable(f, t),
             (Ty::Exception(k), Ty::Exception(j)) => exceptions::is_a(k, j),
             (Ty::List(f), Ty::List(t)) => self.assignable(f, t) && self.assignable(t, f),
+            (Ty::TypeOf(f), Ty::TypeOf(t)) => self.assignable(f, t) && self.assignable(t, f),
             (Ty::Map(fk, fv), Ty::Map(tk, tv)) => {
                 self.assignable(fk, tk) && self.assignable(tk, fk) && self.assignable(fv, tv) && self.assignable(tv, fv)
             }
@@ -486,6 +488,11 @@ impl<'a> Checker<'a> {
                     "number" => Ty::Number,
                     "string" => Ty::Str,
                     "regex" => Ty::Regex,
+                    "bytes" => Ty::Bytes,
+                    "type" => match args.as_slice() {
+                        [one] => Ty::TypeOf(Box::new(self.ty(one)?)),
+                        _ => return self.fail("`type` takes one type *(i.e. `type<User>`)*", ty.span),
+                    },
                     "range" => Ty::Range,
                     "command" => Ty::Command,
                     "list" => {
@@ -747,6 +754,7 @@ impl<'a> Checker<'a> {
                         Ty::List(e) => (**e).clone(),
                         Ty::Range => Ty::Number,
                         Ty::Str => Ty::Str,
+                        Ty::Bytes => Ty::Number,
                         Ty::Map(k, _) => (**k).clone(),
                         Ty::Any | Ty::Var(_) => Ty::Any,
                         other => return c.fail(format!("can't loop over {}", a(other)), iterable.span),
@@ -1553,6 +1561,8 @@ impl<'a> Checker<'a> {
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Null => Ty::Null,
             ExprKind::Regex { .. } => Ty::Regex,
+            ExprKind::Bytes(_) => Ty::Bytes,
+            ExprKind::Type(te) => Ty::TypeOf(Box::new(self.ty(te)?)),
             ExprKind::Interpolated(parts) => {
                 for p in parts {
                     if let StringPart::Expr(x) = p {
@@ -1634,6 +1644,14 @@ impl<'a> Checker<'a> {
                 }
                 None => return self.fail(format!("`${name}` isn't declared"), span),
             },
+            // A class where a type is expected *(i.e. `User` in `json::parse($text, User)`)*
+            ExprKind::Function(name)
+                if expected.is_some_and(|t| self.wants_type(t)) && !self.not_declared_yet(name) && self.class_named(name).is_some() =>
+            {
+                let class = self.class_named(name).unwrap();
+                self.note_class(&class, span, span.start, name);
+                Ty::TypeOf(Box::new(Ty::Object(class, Vec::new())))
+            }
             // A class's constructor, read when it's used: in modules that use each
             // other, it's only known once the class's signature is complete
             ExprKind::Function(name)
@@ -2106,7 +2124,30 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        // A type that wasn't given is `any` *(i.e. `json::parse($text)` gives `any`)*
+        for (i, declared) in sig.params.iter().enumerate() {
+            let declared = match declared {
+                Ty::Nullable(inner) => inner.as_ref(),
+                other => other,
+            };
+            if let Ty::TypeOf(inner) = declared
+                && let Ty::Param(g) = inner.as_ref()
+                && !given.get(i).copied().unwrap_or(false)
+                && let Some(Ty::Var(v)) = map.get(g).map(|t| self.shallow(t))
+            {
+                self.state.vars[v] = Some(Ty::Any);
+            }
+        }
         Ok(sig.ret.substitute(&map))
+    }
+
+    /// `true` for `type<...>`, or a nullable one: where a class can be given as a type.
+    fn wants_type(&self, ty: &Ty) -> bool {
+        match self.shallow(ty) {
+            Ty::TypeOf(_) => true,
+            Ty::Nullable(inner) => matches!(self.shallow(&inner), Ty::TypeOf(_)),
+            _ => false,
+        }
     }
 
     fn method(&mut self, receiver: &Expr, method: &str, args: &[Arg], nullable: bool, span: Span) -> Check<Ty> {
@@ -2156,6 +2197,7 @@ impl<'a> Checker<'a> {
             Ty::Number => ("number", vec![]),
             Ty::Bool => ("bool", vec![]),
             Ty::Regex => ("regex", vec![]),
+            Ty::Bytes => ("bytes", vec![]),
             Ty::Range => ("range", vec![]),
             Ty::Command => ("command", vec![]),
             Ty::List(e) => ("list", vec![(**e).clone()]),
@@ -2247,6 +2289,14 @@ impl<'a> Checker<'a> {
                     other => return self.fail(format!("string indexes are numbers, not {}", a(&other)), index.span),
                 }
             }
+            Ty::Bytes => {
+                let i = self.expr(index, None)?;
+                match self.shallow(&i) {
+                    Ty::Range => Ty::Bytes,
+                    Ty::Number | Ty::Any | Ty::Var(_) => Ty::Number.nullable(),
+                    other => return self.fail(format!("indexes of bytes are numbers, not {}", a(&other)), index.span),
+                }
+            }
             Ty::Map(k, v) => {
                 let kt = self.expr(index, Some(k))?;
                 if !self.assignable(&kt, k) {
@@ -2306,7 +2356,13 @@ impl<'a> Checker<'a> {
         let both = |c: &mut Self, t: &Ty| c.assignable(&l, t) && c.assignable(&r, t);
         Ok(match op {
             Add => {
-                if matches!(ls, Ty::Str) || matches!(rs, Ty::Str) {
+                if matches!(ls, Ty::Bytes) || matches!(rs, Ty::Bytes) {
+                    if !both(self, &Ty::Bytes) {
+                        let (l, r) = (self.resolve(&l), self.resolve(&r));
+                        return self.fail(format!("`+` joins two bytes, but got {} and {}. `.toBytes()` makes bytes of a string", a(&l), a(&r)), span);
+                    }
+                    Ty::Bytes
+                } else if matches!(ls, Ty::Str) || matches!(rs, Ty::Str) {
                     if !both(self, &Ty::Str) {
                         let (l, r) = (self.resolve(&l), self.resolve(&r));
                         return self.fail(
@@ -2447,6 +2503,7 @@ impl<'a> Checker<'a> {
                         *v
                     }
                     Ty::Str => return self.fail("strings can't be changed. Build a new one instead", target.span),
+                    Ty::Bytes => return self.fail("bytes can't be changed. Build new ones instead", target.span),
                     Ty::Any | Ty::Var(_) => {
                         self.expr(index, None)?;
                         Ty::Any

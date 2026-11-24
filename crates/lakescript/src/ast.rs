@@ -40,6 +40,10 @@ pub enum ExprKind {
     /// `f"Hello {$name}"`
     Interpolated(Vec<StringPart>),
     Regex { pattern: String, flags: String },
+    /// `%b"..."`
+    Bytes(Vec<u8>),
+    /// A type given as a value *(i.e. `list<User>` in `json::parse($text, list<User>)`)*.
+    Type(TypeExpr),
     /// `%x"rm {$file}"`
     Command(Vec<StringPart>),
     Bool(bool),
@@ -517,6 +521,8 @@ impl fmt::Display for Expr {
             Str(s) => write!(f, "{s:?}"),
             Interpolated(parts) => write!(f, "(f {})", join(parts, " ")),
             Regex { pattern, flags } => write!(f, "(regex {pattern:?} {flags:?})"),
+            Bytes(b) => write!(f, "(bytes {b:?})"),
+            Type(t) => write!(f, "(type {t})"),
             Command(parts) => write!(f, "(x {})", join(parts, " ")),
             Bool(b) => write!(f, "{b}"),
             Null => write!(f, "null"),

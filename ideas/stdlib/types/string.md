@@ -107,6 +107,7 @@ All the `indexOf` methods return `null` when the text isn't found.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `toNumber()` | `number` | Reads a number in any of the literal forms *(i.e. `'42'`, `'-2.5'`, `'0xFF'`, `'1_000'`)*. Whitespace around it is ignored. Throws a `ValueError` otherwise |
+| `toBytes()` | `bytes` | The text as bytes, in UTF-8 *(i.e. `'é'.toBytes().length()` is `2`)*. `$b.text()` reads them back |
 | `toBool()` | `bool` | `'true'` and `'false'`, ignoring case. Throws a `ValueError` otherwise |
 | `codePoint(number $index = 0)` | `number` | The Unicode code of the character at `$index` *(i.e. `'A'.codePoint()` is `65`)* |
 | `escapeRegex()` | `string` | Escapes the characters that mean something in a regex, so it can be matched literally *(i.e. `'1+1'.escapeRegex()` is `'1\+1'`)* |

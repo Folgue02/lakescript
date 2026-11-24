@@ -98,7 +98,13 @@ The letters of Java's `DateTimeFormatter`, the most used ones:
 | `local()` | `Zone` | The zone of the system, or the one in `TZ` |
 | `all()` | `list<string>` | The names of every zone the system knows, sorted |
 
-A `Zone` has a field `name` *(i.e. `Europe/Madrid`, or `+01:00` for an offset)*, and two zones with the same name are equal.
+## Zone
+
+A time zone, from `std/time/zone`. Two zones with the same name are equal.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Its IANA name *(i.e. `Europe/Madrid`)*, `UTC`, or an offset *(i.e. `+01:00`)* |
 
 ## How it's made
 

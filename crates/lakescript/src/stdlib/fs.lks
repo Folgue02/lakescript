@@ -13,10 +13,16 @@ pub string read(string $path) = native::read($path);
 /// The lines of the file, without their new lines.
 pub list<string> readLines(string $path) = native::readLines($path);
 
+/// The whole file as bytes, for files that aren't text *(i.e. an image)*.
+pub bytes readBytes(string $path) = native::readBytes($path);
+
 // ---- Writing ----
 
 /// Replaces the file with `$text`, creating it if needed. The folder must exist.
 pub void write(string $path, string $text) = native::write($path, $text);
+
+/// Replaces the file with those bytes, creating it if needed.
+pub void writeBytes(string $path, bytes $bytes) = native::writeBytes($path, $bytes);
 
 /// Adds `$text` at the end of the file, creating it if needed.
 pub void append(string $path, string $text) = native::append($path, $text);

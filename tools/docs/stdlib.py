@@ -23,9 +23,9 @@ here = Path(__file__).resolve().parent
 repo = here.parent.parent
 root = repo / 'ideas' / 'stdlib'
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'crates' / 'ferry' / 'src' / 'stdlib.toml'
-TYPES = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'regex', 'command']
+TYPES = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'regex', 'bytes', 'command']
 # The file of each module
-MODULES = ['archive', 'fs', 'path', 'env', 'io', 'process', 'random', 'http', 'html', 'format/json', 'format/csv', 'template', 'terminal', 'test', 'time']
+MODULES = ['archive', 'bytes', 'fs', 'path', 'env', 'io', 'process', 'random', 'http', 'html', 'format/json', 'format/csv', 'template', 'terminal', 'test', 'time']
 MEMBER_HEADERS = ('Method', 'Function', 'Constant', 'Field')
 # Sections for the people who make Lakescript, not for the ones who use it
 INTERNAL = ('Backlog', "How it's made", 'Later', 'Not doing', 'Still open', 'Being discussed')
@@ -58,6 +58,10 @@ def text(lines):
         if href.startswith(('http://', 'https://')):
             return m.group(0)
         name = Path(href.split('#')[0]).stem
+        # A type and a module can share a name *(i.e. `bytes`)*: the folder says which
+        target = (folder / href.split('#')[0]).resolve()
+        if target.parent.name == 'types' and name in TYPES:
+            return f'[{TITLES.get(name, name) if label.endswith(".md") else label}](types.{name}.html)'
         if name not in PAGES:
             target = (folder / href).resolve()
             try:
@@ -115,7 +119,8 @@ def member(header, name, kind, desc, group=None):
     """A row of a table as an item: its kind, name and declaration."""
     name = name.strip('`')
     kind = kind.strip('`')
-    m = re.match(r'([\w?$]+)\(', name)
+    # The name before its parentheses, also with generics *(i.e. `sortBy<K>(...)`)*
+    m = re.match(r'([\w?$]+)(?:<[^(]*>)?\(', name)
     short = m.group(1) if m else name
     if header == 'Field':
         return {'kind': 'field', 'name': short, 'code': f'{kind} @{name}', 'text': text([desc]), 'group': group}

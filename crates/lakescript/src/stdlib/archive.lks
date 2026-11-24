@@ -25,7 +25,7 @@ pub class Archive {
     /// The path of its file.
     pub const string @path;
     const bool @writing;
-    list<list<string>> @added = [];
+    list<list<any>> @added = [];
     bool @closed = false;
 
     /// Its files and folders, in the order they're in it.
@@ -43,6 +43,13 @@ pub class Archive {
     pub string read(string $name) {
         @mustRead('read');
         return native::read(@path, $name);
+    }
+
+    /// The bytes of a file in it, for what isn't text *(i.e. an image)*.
+    /// Throws a `FileNotFound` if it isn't there.
+    pub bytes readBytes(string $name) {
+        @mustRead('readBytes');
+        return native::readBytes(@path, $name);
     }
 
     /// Writes everything in it into a folder, which is created if needed.
@@ -66,6 +73,12 @@ pub class Archive {
     pub void addText(string $name, string $text) {
         @mustWrite('addText');
         @added.push(['text', $text, $name]);
+    }
+
+    /// Adds a file with those bytes.
+    pub void addBytes(string $name, bytes $bytes) {
+        @mustWrite('addBytes');
+        @added.push(['bytes', $bytes, $name]);
     }
 
     /// Writes a new archive, with what was added. An archive that's read

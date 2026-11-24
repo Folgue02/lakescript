@@ -19,11 +19,11 @@ out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'crates' / 'lakescript'
 # The type each file describes, with the names of its type parameters
 TYPES = {
     'any': 'any', 'string': 'string', 'number': 'number', 'bool': 'bool',
-    'regex': 'regex', 'range': 'range', 'command': 'command', 'list': 'list<T>', 'map': 'map<K, V>',
+    'regex': 'regex', 'bytes': 'bytes', 'range': 'range', 'command': 'command', 'list': 'list<T>', 'map': 'map<K, V>',
 }
 # The modules written in Rust, by their file. The ones written in Lakescript
 # (i.e. std/http) get their types from their own code
-MODULES = {'general': 'general', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
+MODULES = {'general': 'general', 'bytes': 'std/bytes', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
            'random': 'std/random', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
            'template': 'std/template', 'test': 'std/test'}
 
@@ -51,10 +51,11 @@ map<string, any> send(string $method, string $url, any $body, map<string, string
 module std/archive/native
 list<list<any>> entries(string $path);
 string read(string $path, string $name);
+bytes readBytes(string $path, string $name);
 void extract(string $path, string $dir);
 void format(string $path);
 void check(string $path);
-void write(string $path, list<list<string>> $added);
+void write(string $path, list<list<any>> $added);
 
 module std/process/native
 list<string> args();

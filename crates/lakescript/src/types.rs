@@ -8,7 +8,7 @@ use crate::value::Value;
 pub fn is_class_name(name: &str) -> bool {
     !matches!(
         name,
-        "any" | "string" | "number" | "bool" | "range" | "regex" | "result" | "command" | "list" | "map" | "void" | "never"
+        "any" | "string" | "number" | "bool" | "bytes" | "type" | "range" | "regex" | "result" | "command" | "list" | "map" | "void" | "never"
     ) && !crate::exceptions::is_exception_type(name)
 }
 
@@ -31,6 +31,8 @@ pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Resu
                 "bool" => no_args(matches!(value, Value::Bool(_))),
                 "range" => no_args(matches!(value, Value::Range(_))),
                 "regex" => no_args(matches!(value, Value::Regex(_))),
+                "bytes" => no_args(matches!(value, Value::Bytes(_))),
+                "type" => Ok(matches!(value, Value::Type(_) | Value::Class(_))),
                 "result" => Ok(matches!(value, Value::Result(_))),
                 "command" => no_args(matches!(value, Value::Command(_))),
                 name if crate::exceptions::is_exception_type(name) => {

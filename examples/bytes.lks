@@ -1,0 +1,30 @@
+#!/usr/bin/env lks
+// `bytes`: binary data, from a literal, text, hex and base64, written to a
+// file and read back, in a temporary folder.
+//
+//   lks examples/bytes.lks
+
+use std/bytes;
+use std/fs;
+use std/path;
+
+// A literal: text as UTF-8, and `\xFF` for one byte
+const $png = %b"\x89PNG\r\n\x1a\n";
+outln(f"{$png}: {$png.hex()}");
+
+// Text and bytes
+const $word = 'héllo'.toBytes();
+outln(f"'héllo' is {$word.length()} bytes, and starts with {$word[0]}");
+outln($word.text());
+
+// Hex and base64, both ways
+outln('hello'.toBytes().base64());
+outln(bytes::fromBase64('aGVsbG8=').text());
+outln(bytes::fromHex('4c 4b 53').text());
+
+// Files keep every byte
+const $file = path::join(fs::tempDir(), 'image.png');
+fs::writeBytes($file, $png + [0, 255].toBytes());
+const $read = fs::readBytes($file);
+outln(f"Read {$read.length()} bytes, a PNG: {$read.startsWith($png)}");
+fs::removeAll(path::parent($file)!);

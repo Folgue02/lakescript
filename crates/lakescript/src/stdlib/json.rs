@@ -5,15 +5,148 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 
+use std::rc::Weak;
+
 use super::{Args, Exports, io_error};
+use crate::ast::{TypeExpr, TypeKind};
 use crate::exceptions::{TYPE_ERROR, VALUE_ERROR};
-use crate::value::{Key, NativeError, Value, format_number};
+use crate::interpreter::{Exec, Interpreter, error_as, native_error};
+use crate::modules::Globals;
+use crate::token::Span;
+use crate::value::{Class, Key, NativeError, Value, format_number};
 
 /// How deep arrays and objects can be nested, so a huge or circular value
 /// can't overflow the stack.
 const MAX_DEPTH: usize = 512;
 
 // ---- Reading ----
+
+/// The value read into a type, when one is given *(i.e. `json::parse($text, User)`)*.
+fn typed(vm: &mut Interpreter, value: Value, target: &Value, span: Span) -> Exec<Value> {
+    if matches!(target, Value::Null) { Ok(value) } else { convert_to(vm, value, target, "$", span) }
+}
+
+/// Into a class or a type given as a value. `path` says where the value is,
+/// for errors *(i.e. `$[2].age`)*.
+fn convert_to(vm: &mut Interpreter, value: Value, target: &Value, path: &str, span: Span) -> Exec<Value> {
+    match target {
+        Value::Class(class) => into_class(vm, value, class, path, span),
+        Value::Type(t) => convert(vm, value, &t.0, &t.1, path, span),
+        other => error_as(TYPE_ERROR, format!("the type to read JSON into must be a type *(i.e. `User` or `list<User>`)*, not a {}", other.type_name()), span),
+    }
+}
+
+fn wrong<T>(value: &Value, path: &str, expected: &str, span: Span) -> Exec<T> {
+    let got = match value {
+        Value::Null => "`null`".to_string(),
+        Value::Map(_) => "an object".to_string(),
+        Value::List(_) => "an array".to_string(),
+        other => format!("a {}", other.type_name()),
+    };
+    error_as(TYPE_ERROR, format!("`{path}` is {got}, not {expected}"), span)
+}
+
+fn convert(vm: &mut Interpreter, value: Value, ty: &TypeExpr, home: &Weak<Globals>, path: &str, span: Span) -> Exec<Value> {
+    let TypeKind::Named { name, args } = &ty.kind else {
+        if let TypeKind::Nullable(inner) = &ty.kind {
+            return if matches!(value, Value::Null) { Ok(Value::Null) } else { convert(vm, value, inner, home, path, span) };
+        }
+        return error_as(TYPE_ERROR, format!("`{ty}` can't be read from JSON"), span);
+    };
+    let ok = |good: bool, expected: &str| if good { Ok(value.clone()) } else { wrong(&value, path, expected, span) };
+    match name.as_str() {
+        "any" => Ok(value),
+        "string" => ok(matches!(value, Value::Str(_)), "a string"),
+        "number" => ok(matches!(value, Value::Int(_) | Value::Float(_)), "a number"),
+        "bool" => ok(matches!(value, Value::Bool(_)), "a bool"),
+        "list" => {
+            let Value::List(items) = &value else { return wrong(&value, path, &format!("an array for `{ty}`"), span) };
+            let items: Vec<Value> = items.borrow().clone();
+            let mut out = Vec::with_capacity(items.len());
+            for (i, item) in items.into_iter().enumerate() {
+                out.push(match args.first() {
+                    Some(t) => convert(vm, item, t, home, &format!("{path}[{i}]"), span)?,
+                    None => item,
+                });
+            }
+            Ok(Value::list(out))
+        }
+        "map" => {
+            let Value::Map(entries) = &value else { return wrong(&value, path, &format!("an object for `{ty}`"), span) };
+            if let Some(TypeExpr { kind: TypeKind::Named { name: key, .. }, .. }) = args.first()
+                && key != "string"
+                && key != "any"
+            {
+                return error_as(TYPE_ERROR, format!("the keys of JSON objects are strings, so `{ty}` can't be read: use `map<string, ...>`"), span);
+            }
+            let entries: Vec<(Key, Value)> = entries.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            let mut out = IndexMap::new();
+            for (key, item) in entries {
+                let at = format!("{path}['{}']", key.to_value());
+                let item = match args.get(1) {
+                    Some(t) => convert(vm, item, t, home, &at, span)?,
+                    None => item,
+                };
+                out.insert(key, item);
+            }
+            Ok(Value::Map(Rc::new(RefCell::new(out))))
+        }
+        class => match find_class(vm, class, home, span)? {
+            Some(c) => into_class(vm, value, &c, path, span),
+            None => error_as(TYPE_ERROR, format!("`{class}` can't be read from JSON: it isn't a class, an enum, or a type JSON has"), span),
+        },
+    }
+}
+
+/// A class by the name written in a type, in the top level it was written in.
+fn find_class(vm: &mut Interpreter, name: &str, home: &Weak<Globals>, span: Span) -> Exec<Option<Rc<Class>>> {
+    let Some(globals) = home.upgrade() else { return Ok(None) };
+    let found = match name.split_once("::") {
+        // A module is loaded when it's first used, which may be now
+        Some((module, member)) => match globals.find_module(module) {
+            Some(slot) => Some(vm.module_member(&globals, slot as usize, member, false, span)?),
+            None => None,
+        },
+        None => globals.get(name),
+    };
+    Ok(match found {
+        Some(Value::Class(c)) => Some(c),
+        _ => None,
+    })
+}
+
+fn into_class(vm: &mut Interpreter, value: Value, class: &Rc<Class>, path: &str, span: Span) -> Exec<Value> {
+    if class.is_enum {
+        let Value::Str(name) = &value else { return wrong(&value, path, &format!("the name of a value of `{}`", class.name), span) };
+        let values = class.values.borrow();
+        if let Some(found) = values.iter().find(|v| matches!(v, Value::Object(o) if o.enum_name.as_deref() == Some(&**name))) {
+            return Ok(found.clone());
+        }
+        let names: Vec<String> = values.iter().filter_map(|v| match v { Value::Object(o) => o.enum_name.as_ref().map(|n| n.to_string()), _ => None }).collect();
+        return error_as(TYPE_ERROR, format!("`{path}` is '{name}', which isn't a value of `{}`: {}", class.name, names.join(", ")), span);
+    }
+    let Value::Map(entries) = &value else { return wrong(&value, path, &format!("an object for `{}`", class.name), span) };
+    let entries = entries.borrow().clone();
+    let mut named = Vec::new();
+    for field in &class.fields {
+        match entries.get(&Key::Str(field.name.clone())) {
+            Some(item) => {
+                let at = format!("{path}.{}", field.name);
+                let item = match &field.ty {
+                    Some(ty) => convert(vm, item.clone(), ty, &field.home, &at, span)?,
+                    None => item.clone(),
+                };
+                named.push((field.name.to_string(), item, span));
+            }
+            // Only the constructor that takes every field says which ones it needs
+            None if class.constructor.is_none() && !field.has_value && !field.nullable => {
+                return error_as(TYPE_ERROR, format!("`{path}` has no `{}`, which `{}` needs", field.name, class.name), span);
+            }
+            None => {}
+        }
+    }
+    vm.construct_object(class, named, span)
+}
 
 struct Reader<'a> {
     text: &'a str,
@@ -354,23 +487,35 @@ fn indent_of(a: &Args, i: usize, default: Option<usize>) -> Result<Option<usize>
 }
 
 pub fn register(m: &mut Exports) {
-    m.function("parse", |_, values| {
-        let a = Args::new("json::parse", values, 1, 1)?;
-        parse(&a.str(0)?)
+    m.vm_function("parse", &["text", "type"], |vm, values, span| {
+        let a = Args::new("json::parse", values, 1, 2).map_err(|e| native_error(e, span))?;
+        let value = parse(&a.str(0).map_err(|e| native_error(e, span))?).map_err(|e| native_error(e, span))?;
+        typed(vm, value, &a.value(1), span)
     });
-    m.function("parseAll", |_, values| {
-        let a = Args::new("json::parseAll", values, 1, 1)?;
-        parse_all(&a.str(0)?)
+    m.vm_function("parseAll", &["text", "type"], |vm, values, span| {
+        let a = Args::new("json::parseAll", values, 1, 2).map_err(|e| native_error(e, span))?;
+        let all = parse_all(&a.str(0).map_err(|e| native_error(e, span))?).map_err(|e| native_error(e, span))?;
+        let Value::List(items) = &all else { return Ok(all) };
+        if matches!(a.value(1), Value::Null) {
+            return Ok(all);
+        }
+        let items: Vec<Value> = items.borrow().clone();
+        let mut out = Vec::with_capacity(items.len());
+        for (i, item) in items.into_iter().enumerate() {
+            out.push(convert_to(vm, item, &a.value(1), &format!("$[{i}]"), span)?);
+        }
+        Ok(Value::list(out))
     });
     m.function_named("stringify", &["value", "indent"], |_, values| {
         let a = Args::new("json::stringify", values, 1, 2)?;
         Ok(Value::string(&stringify(&a.value(0), indent_of(&a, 1, None)?)?))
     });
-    m.function("read", |ctx, values| {
-        let a = Args::new("json::read", values, 1, 1)?;
-        let p = a.str(0)?;
-        let text = std::fs::read_to_string(ctx.state.resolve(&p)).map_err(|e| io_error("read", &p, e))?;
-        parse(&text).map_err(|e| NativeError::new(&e.kind, format!("{} (in '{p}')", e.message)))
+    m.vm_function("read", &["path", "type"], |vm, values, span| {
+        let a = Args::new("json::read", values, 1, 2).map_err(|e| native_error(e, span))?;
+        let p = a.str(0).map_err(|e| native_error(e, span))?;
+        let text = std::fs::read_to_string(vm.host.state.resolve(&p)).map_err(|e| native_error(io_error("read", &p, e), span))?;
+        let value = parse(&text).map_err(|e| native_error(NativeError::new(&e.kind, format!("{} (in '{p}')", e.message)), span))?;
+        typed(vm, value, &a.value(1), span)
     });
     m.function_named("write", &["path", "value", "indent"], |ctx, values| {
         let a = Args::new("json::write", values, 2, 3)?;

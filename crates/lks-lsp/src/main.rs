@@ -8,6 +8,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+mod imports;
+
 use lakescript::{CapturedOutput, Diagnostic, Engine, Name};
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::notification::{DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Notification as _, PublishDiagnostics};
@@ -82,6 +84,8 @@ struct Server {
     published: HashSet<PathBuf>,
     /// What the checker found about the names of each open file, for hover and go to definition.
     names: HashMap<PathBuf, Vec<Name>>,
+    /// The `pub` types of the modules that can be reached, for importing them from completion.
+    index: imports::Index,
 }
 
 impl Server {
@@ -531,6 +535,34 @@ impl Server {
             Context::Variable => found.scope.iter().filter(|i| i.label.starts_with('$')).map(|i| item(i, start - 1)).collect(),
             Context::Word => {
                 let mut items: Vec<CompletionItem> = found.scope.iter().map(|i| item(i, start)).collect();
+                // Types that aren't imported yet, with the `use` line that imports them
+                let typed: String = chars[start..cursor].iter().collect();
+                if typed.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    let in_scope: HashSet<&str> = found.scope.iter().map(|i| i.label.as_str()).collect();
+                    for t in self.index.types(&self.module_roots(&path), &self.documents, &path) {
+                        if in_scope.contains(t.name.as_str()) {
+                            continue;
+                        }
+                        let Some(edit) = imports::use_edit(&original, &t) else { continue };
+                        let kind = match t.kind {
+                            lakescript::docs::ItemKind::Interface => CompletionItemKind::INTERFACE,
+                            lakescript::docs::ItemKind::Enum => CompletionItemKind::ENUM,
+                            _ => CompletionItemKind::CLASS,
+                        };
+                        let edit = TextEdit { range: Range { start: position(&original, edit.start), end: position(&original, edit.end) }, new_text: edit.text };
+                        items.push(CompletionItem {
+                            label: t.name.clone(),
+                            kind: Some(kind),
+                            detail: Some(format!("{} {} from {}", t.kind.word(), t.name, t.module)),
+                            label_details: Some(lsp_types::CompletionItemLabelDetails { detail: None, description: Some(t.module.clone()) }),
+                            // After the names already in scope
+                            sort_text: Some(format!("~{}", t.name)),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: range(start), new_text: t.name.clone() })),
+                            additional_text_edits: Some(vec![edit]),
+                            ..Default::default()
+                        });
+                    }
+                }
                 for keyword in KEYWORDS {
                     items.push(CompletionItem {
                         label: keyword.to_string(),
@@ -584,7 +616,7 @@ enum Context {
 const KEYWORDS: &[&str] = &[
     "let", "const", "if", "else", "for", "in", "while", "switch", "case", "default", "break", "continue", "return", "yield", "try", "catch", "finally", "throw", "assert",
     "true", "false", "null", "use", "pub", "class", "interface", "enum", "command", "static", "new", "override", "implement", "extends", "any", "void", "never", "bool",
-    "number", "string", "regex", "range", "list", "map", "result",
+    "number", "string", "bytes", "regex", "range", "list", "map", "result",
 ];
 
 fn item_kind(kind: lakescript::CompletionKind) -> CompletionItemKind {
@@ -737,51 +769,6 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn positions_count_utf16_units() {
-        let text = "ab\nñé𝄞x";
-        assert_eq!(position(text, 0), Position { line: 0, character: 0 });
-        assert_eq!(position(text, 3), Position { line: 1, character: 0 });
-        // `𝄞` is two UTF-16 units
-        assert_eq!(position(text, 6), Position { line: 1, character: 4 });
-        for i in 0..=text.chars().count() {
-            assert_eq!(offset(text, position(text, i)), i);
-        }
-    }
-
-    #[test]
-    fn uris_and_paths() {
-        assert_eq!(percent_decode("/a%20b/c%C3%B1.lks"), "/a b/cñ.lks");
-        assert_eq!(percent_decode("/50%ñ"), "/50%ñ");
-        let uri = path_to_uri(Path::new("/tmp/a b/x.lks")).unwrap();
-        assert_eq!(uri.as_str(), "file:///tmp/a%20b/x.lks");
-        assert_eq!(uri_path("file:///tmp/a%20b/x.lks", false).as_deref(), Some("/tmp/a b/x.lks"));
-        assert_eq!(uri_path("file://localhost/tmp/x.lks", false).as_deref(), Some("/tmp/x.lks"));
-        assert_eq!(uri_path("file://server/x.lks", false), None);
-    }
-
-    /// Windows' paths, which are only seen on Windows, so they're checked as text.
-    #[test]
-    fn windows_uris_and_paths() {
-        // What `canonicalize` gives there: editors can't read `file:////%3F/C:/…`
-        assert_eq!(uri_of(r"\\?\C:\Users\ana\day1.lks", true), "file:///C:/Users/ana/day1.lks");
-        assert_eq!(uri_of(r"C:\Users\ana\a b.lks", true), "file:///C:/Users/ana/a%20b.lks");
-        assert_eq!(uri_of(r"\\?\UNC\server\share\x.lks", true), "file://server/share/x.lks");
-        assert_eq!(uri_of(r"\\server\share\x.lks", true), "file://server/share/x.lks");
-        assert_eq!(uri_path("file:///C:/Users/ana/a%20b.lks", true).as_deref(), Some(r"C:\Users\ana\a b.lks"));
-        // VS Code writes the drive in lowercase, with its `:` escaped
-        assert_eq!(uri_path("file:///c%3A/Users/ana/day1.lks", true).as_deref(), Some(r"c:\Users\ana\day1.lks"));
-        assert_eq!(uri_path("file://server/share/x.lks", true).as_deref(), Some(r"\\server\share\x.lks"));
-        for path in [r"C:\Users\ana\a b.lks", r"\\server\share\x.lks"] {
-            assert_eq!(uri_path(&uri_of(path, true), true).as_deref(), Some(path));
-        }
-    }
-}
-
 /// A call the cursor is inside of: where its `(` is, which argument the
 /// cursor is in, from 0, and the name of a named argument *(i.e. `times` in
 /// `greet('Ana', times: 2)`)*.
@@ -922,4 +909,49 @@ fn first_paragraph(text: &str) -> Option<String> {
         .map(str::trim)
         .find(|p| !p.is_empty() && !(p.starts_with('#') && !p.contains('\n')))?;
     Some(paragraph.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positions_count_utf16_units() {
+        let text = "ab\nñé𝄞x";
+        assert_eq!(position(text, 0), Position { line: 0, character: 0 });
+        assert_eq!(position(text, 3), Position { line: 1, character: 0 });
+        // `𝄞` is two UTF-16 units
+        assert_eq!(position(text, 6), Position { line: 1, character: 4 });
+        for i in 0..=text.chars().count() {
+            assert_eq!(offset(text, position(text, i)), i);
+        }
+    }
+
+    #[test]
+    fn uris_and_paths() {
+        assert_eq!(percent_decode("/a%20b/c%C3%B1.lks"), "/a b/cñ.lks");
+        assert_eq!(percent_decode("/50%ñ"), "/50%ñ");
+        let uri = path_to_uri(Path::new("/tmp/a b/x.lks")).unwrap();
+        assert_eq!(uri.as_str(), "file:///tmp/a%20b/x.lks");
+        assert_eq!(uri_path("file:///tmp/a%20b/x.lks", false).as_deref(), Some("/tmp/a b/x.lks"));
+        assert_eq!(uri_path("file://localhost/tmp/x.lks", false).as_deref(), Some("/tmp/x.lks"));
+        assert_eq!(uri_path("file://server/x.lks", false), None);
+    }
+
+    /// Windows' paths, which are only seen on Windows, so they're checked as text.
+    #[test]
+    fn windows_uris_and_paths() {
+        // What `canonicalize` gives there: editors can't read `file:////%3F/C:/…`
+        assert_eq!(uri_of(r"\\?\C:\Users\ana\day1.lks", true), "file:///C:/Users/ana/day1.lks");
+        assert_eq!(uri_of(r"C:\Users\ana\a b.lks", true), "file:///C:/Users/ana/a%20b.lks");
+        assert_eq!(uri_of(r"\\?\UNC\server\share\x.lks", true), "file://server/share/x.lks");
+        assert_eq!(uri_of(r"\\server\share\x.lks", true), "file://server/share/x.lks");
+        assert_eq!(uri_path("file:///C:/Users/ana/a%20b.lks", true).as_deref(), Some(r"C:\Users\ana\a b.lks"));
+        // VS Code writes the drive in lowercase, with its `:` escaped
+        assert_eq!(uri_path("file:///c%3A/Users/ana/day1.lks", true).as_deref(), Some(r"c:\Users\ana\day1.lks"));
+        assert_eq!(uri_path("file://server/share/x.lks", true).as_deref(), Some(r"\\server\share\x.lks"));
+        for path in [r"C:\Users\ana\a b.lks", r"\\server\share\x.lks"] {
+            assert_eq!(uri_path(&uri_of(path, true), true).as_deref(), Some(path));
+        }
+    }
 }

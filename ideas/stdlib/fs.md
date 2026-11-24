@@ -10,12 +10,14 @@ Every function throws when the disk says no: `FileNotFound` if the path doesn't 
 |----------|---------|-------------|
 | `read(string $path)` | `string` | The whole file as text. Throws a `ValueError` if it isn't valid UTF-8 *(i.e. `fs::read('notes.txt')`)* |
 | `readLines(string $path)` | `list<string>` | The lines of the file, without their new lines, like `read($path).lines()` |
+| `readBytes(string $path)` | `bytes` | The whole file as bytes, for files that aren't text *(i.e. an image, see [bytes](types/bytes.md))* |
 
 ## Writing
 
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `write(string $path, string $text)` | `void` | Replaces the file with `$text`, creating it if needed. The folder must exist |
+| `writeBytes(string $path, bytes $bytes)` | `void` | Replaces the file with those bytes, creating it if needed |
 | `append(string $path, string $text)` | `void` | Adds `$text` at the end of the file, creating it if needed |
 | `writeLines(string $path, list<string> $lines)` | `void` | Writes the lines with a new line after each one |
 

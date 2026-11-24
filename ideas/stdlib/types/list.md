@@ -103,6 +103,7 @@ These always return a new list.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
+| `toBytes()` | `bytes` | A list of numbers as bytes *(i.e. `[255, 0].toBytes()`)*. Throws a `ValueError` for an element that isn't a whole number from 0 to 255 |
 | `join(string $separator = '')` | `string` | The elements as text, with `$separator` between them *(i.e. `['a', 'b'].join(', ')` is `'a, b'`)* |
 | `reduce((T, T) -> T $fn)` | `?T` | Combines the elements from left to right, starting with the first one. `null` if the list is empty *(i.e. `$parts.reduce(($a, $b) -> $a + '/' + $b)`)* |
 | `fold(U $initial, (U, T) -> U $fn)` | `U` | Like `reduce`, starting from `$initial` |

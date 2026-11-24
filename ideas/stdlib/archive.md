@@ -38,10 +38,12 @@ From `open()` to read it, or from `create()` to write a new one.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `entries()` | `list<Entry>` | Its files and folders, in the order they're in it |
-| `read(string $name)` | `string` | The text of a file in it *(i.e. `$zip.read('docs/notes.txt')`)*. Throws a `FileNotFound` if it isn't there, and a `ValueError` if it isn't text: `extract()` writes any file |
+| `read(string $name)` | `string` | The text of a file in it *(i.e. `$zip.read('docs/notes.txt')`)*. Throws a `FileNotFound` if it isn't there, and a `ValueError` if it isn't text: `readBytes()` reads any file |
+| `readBytes(string $name)` | `bytes` | The bytes of a file in it, for what isn't text *(i.e. an image, see [bytes](types/bytes.md))*. Throws a `FileNotFound` if it isn't there |
 | `extract(string $dir = '.')` | `void` | Writes everything in it into a folder, which is created if needed. Throws a `ValueError` for an entry that would be written outside it *(i.e. `../x` or `/etc/x`)*, before writing that entry |
 | `add(string $path, ?string $as = null)` | `void` | Adds a file, or a folder with everything in it, under the name `$as`, or its own name *(i.e. `photos` for `/home/ana/photos/`)*. `.` adds what's inside the current folder. Throws a `FileNotFound` if it doesn't exist |
 | `addText(string $name, string $text)` | `void` | Adds a file with that text |
+| `addBytes(string $name, bytes $bytes)` | `void` | Adds a file with those bytes |
 | `close()` | `void` | Writes a new archive with what was added, in that order. An archive that's read needs no `close()` |
 
 - Reading methods on an archive from `create()`, adding to one from `open()`, or adding after `close()`, throw a `ValueError` that says which to use.
@@ -72,5 +74,4 @@ A file or a folder in an archive, from `entries()`.
 
 ## Backlog
 
-- Reading files that aren't text, once there's a type for bytes.
 - More formats *(i.e. `.tar.xz`, `.tar.zst`)*, if scripts need them.

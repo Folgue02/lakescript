@@ -30,7 +30,7 @@ Every function takes `$headers`, sent with the request *(i.e. `headers: {'Author
 | `request(string $method, string $url, any $body = null, map<string, string> $headers = {}, ?number $timeout = 30)` | `Response` | A request with any method *(i.e. `http::request('HEAD', $url)`)* |
 | `download(string $url, string $path, map<string, string> $headers = {}, ?number $timeout = 300)` | `Response` | Writes what's at `$url` to the file `$path`, without keeping it in memory, if the status is from 200 to 299. The response's body is then empty. With another status, the file isn't touched and the body is the server's answer |
 
-- **The body:** a string is sent as it is. Any other value is sent as JSON, with the header `Content-Type: application/json` unless `$headers` gives one. `null` sends nothing.
+- **The body:** a string is sent as it is, and bytes too, with the header `Content-Type: application/octet-stream` unless `$headers` gives one *(see [bytes](types/bytes.md))*. Any other value is sent as JSON, with the header `Content-Type: application/json` unless `$headers` gives one. `null` sends nothing.
 - **Redirects** are followed, up to 10.
 - Every request says it comes from `lakescript/<version>`, in the header `User-Agent`. `$headers` can give another.
 
@@ -48,7 +48,8 @@ What a server answered.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `ok?()` | `bool` | `true` for a status from 200 to 299 |
-| `json()` | `any` | The body read as JSON. Throws a `ValueError` if it isn't *(see [format/json.md](format/json.md))* |
+| `bytes()` | `bytes` | The body exactly as it came, for what isn't text *(i.e. an image, see [bytes](types/bytes.md))*. Empty after `download()` |
+| `json<T>(?type<T> $type = null)` | `T` | The body read as JSON, into a type when one is given *(i.e. `$response.json(User)`, see Into types in [format/json.md](format/json.md))*, and `any` without one. Throws a `ValueError` if it isn't JSON |
 | `header(string $name)` | `?string` | A header by its name, in any case, or `null` *(i.e. `$response.header('Content-Type')`)* |
 
 ## Errors
@@ -65,5 +66,4 @@ It's written in Lakescript, in `crates/lakescript/src/stdlib/http.lks`, with its
 
 - Forms *(i.e. `form: {'name' => 'Ana'}`)* and uploading files.
 - Query parameters as a map *(i.e. `query: {'q' => 'lake script'}`)*, with their characters escaped.
-- Binary bodies, once there's a type for bytes.
 - Sessions that keep cookies and connections between requests.

@@ -149,6 +149,7 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
 
     let result = match &receiver {
         Value::Str(s) => string_method(interp, s, &args)?,
+        Value::Bytes(b) => bytes_method(b, &args)?,
         Value::Regex(r) => match method {
             "pattern" => Some(string(&r.pattern)),
             "flags" => Some(string(&r.flags)),
@@ -756,6 +757,7 @@ fn string_method_plain(strings: &mut crate::strings::StringIndex, s: &Rc<str>, a
             Some(n) => n,
             None => return a.fail_as(VALUE_ERROR, format!("'{s}' isn't a number")),
         },
+        "toBytes" => Value::Bytes(Rc::from(s.as_bytes())),
         "toBool" => match s.to_lowercase().as_str() {
             "true" => Value::Bool(true),
             "false" => Value::Bool(false),
@@ -908,20 +910,7 @@ fn number_method(interp: &mut Interpreter, n: &Value, a: &Args) -> Exec<Option<V
                 None => format!("{sign}{grouped}"),
             })
         }
-        "formatBytes" => {
-            const UNITS: [&str; 6] = ["bytes", "KB", "MB", "GB", "TB", "PB"];
-            let mut size = f;
-            let mut unit = 0;
-            while size.abs() >= 1024.0 && unit < UNITS.len() - 1 {
-                size /= 1024.0;
-                unit += 1;
-            }
-            if unit == 0 {
-                string(format!("{} bytes", format_number(size)))
-            } else {
-                string(format!("{} {}", format_number((size * 10.0).round() / 10.0), UNITS[unit]))
-            }
-        }
+        "formatBytes" => string(crate::value::format_bytes(f)),
         "toChar" => match w.and_then(|x| u32::try_from(x).ok()).and_then(char::from_u32) {
             Some(c) => string(c.to_string()),
             None => return a.fail(format!("{} isn't a valid unicode code", n)),
@@ -940,6 +929,34 @@ fn number_method(interp: &mut Interpreter, n: &Value, a: &Args) -> Exec<Option<V
 
 // ---- list ----
 
+fn bytes_method(b: &Rc<[u8]>, a: &Args) -> Exec<Option<Value>> {
+    let other = |a: &Args| -> Exec<Rc<[u8]>> {
+        match a.get(0) {
+            Some(Value::Bytes(o)) => Ok(o.clone()),
+            _ => a.wrong(0, "bytes"),
+        }
+    };
+    Ok(Some(match a.method {
+        "length" => int(b.len()),
+        "empty?" => Value::Bool(b.is_empty()),
+        "text" => match std::str::from_utf8(b) {
+            Ok(text) => string(text),
+            Err(e) => return a.fail_as(VALUE_ERROR, format!("these bytes aren't text: byte {} isn't valid UTF-8", e.valid_up_to())),
+        },
+        "hex" => string(crate::bytes::hex(b)),
+        "base64" => string(crate::bytes::base64(b)),
+        "toList" => Value::list(b.iter().map(|n| Value::Int(*n as i64)).collect()),
+        "startsWith" => Value::Bool(b.starts_with(&other(a)?)),
+        "endsWith" => Value::Bool(b.ends_with(&other(a)?)),
+        "indexOf" => {
+            let needle = other(a)?;
+            let found = if needle.is_empty() { Some(0) } else { b.windows(needle.len()).position(|w| *w == *needle) };
+            found.map(int).unwrap_or(Value::Null)
+        }
+        _ => return Ok(None),
+    }))
+}
+
 fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec<Value>>>, a: &Args) -> Exec<Option<Value>> {
     let method = a.method;
     let span = a.span;
@@ -957,6 +974,16 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
         // Information
         "length" => int(len),
         "empty?" => Value::Bool(len == 0),
+        "toBytes" => {
+            let mut bytes = Vec::with_capacity(len);
+            for (i, v) in list.borrow().iter().enumerate() {
+                match v.as_whole() {
+                    Some(n @ 0..=255) => bytes.push(n as u8),
+                    _ => return a.fail_as(VALUE_ERROR, format!("a byte is a whole number from 0 to 255, and element {i} is {v}")),
+                }
+            }
+            Value::Bytes(Rc::from(bytes))
+        }
         "contains" => {
             a.count(1, 1)?;
             Value::Bool(list.borrow().iter().any(|v| v.equals(&a.value(0))))

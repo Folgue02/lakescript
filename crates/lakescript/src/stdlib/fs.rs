@@ -130,7 +130,23 @@ pub fn register(m: &mut Exports) {
         Ok(strings(read_text(&ctx.state.resolve(&p), &p)?.lines().map(String::from)))
     });
 
+    m.function("readBytes", |ctx, values| {
+        let a = Args::new("fs::readBytes", values, 1, 1)?;
+        let p = a.str(0)?;
+        let bytes = fs::read(ctx.state.resolve(&p)).map_err(|e| io_error("read", &p, e))?;
+        Ok(Value::Bytes(std::rc::Rc::from(bytes)))
+    });
+
     // Writing
+    m.function("writeBytes", |ctx, values| {
+        let a = Args::new("fs::writeBytes", values, 2, 2)?;
+        let p = a.str(0)?;
+        let Value::Bytes(bytes) = a.value(1) else {
+            return Err(crate::value::NativeError::new(crate::exceptions::TYPE_ERROR, format!("argument 2 of `fs::writeBytes` must be bytes, not a {}", a.value(1).type_name())));
+        };
+        fs::write(ctx.state.resolve(&p), &bytes[..]).map_err(|e| io_error("write", &p, e))?;
+        Ok(Value::Null)
+    });
     m.function("write", |ctx, values| {
         let a = Args::new("fs::write", values, 2, 2)?;
         let p = a.str(0)?;

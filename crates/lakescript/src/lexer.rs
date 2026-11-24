@@ -266,6 +266,10 @@ impl Lexer {
                     self.advance();
                     self.lex_command(start)?
                 }
+                (Some('b'), Some('"')) => {
+                    self.advance();
+                    self.lex_bytes(start)?
+                }
                 (Some('w'), Some('[')) => {
                     self.advance_by(2);
                     WordList(self.lex_word_list(start)?)
@@ -632,6 +636,44 @@ impl Lexer {
             self.advance();
         }
         Ok(TokenKind::Regex { pattern, flags })
+    }
+
+    /// `%b"..."`, bytes: characters are written as UTF-8, and `\xFF` is one
+    /// byte. The cursor is on the `"`.
+    fn lex_bytes(&mut self, start: Mark) -> Result<TokenKind, Diagnostic> {
+        self.advance();
+        let elems = self.scan_body(start, false, false, false)?;
+        let raw: String = elems.into_iter().map(|e| match e {
+            Elem::Ch(c) => c,
+            Elem::Code(_) => '\u{FFFD}',
+        }).collect();
+        let mut bytes = Vec::with_capacity(raw.len());
+        let mut chars = raw.chars();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
+                continue;
+            }
+            match chars.next() {
+                Some('x') => {
+                    let hex: String = chars.by_ref().take(2).collect();
+                    match u8::from_str_radix(&hex, 16) {
+                        Ok(b) if hex.len() == 2 => bytes.push(b),
+                        _ => return self.error("a byte is written `\\x` and two hex digits *(i.e. `\\x89`)*", start),
+                    }
+                }
+                Some('n') => bytes.push(b'\n'),
+                Some('t') => bytes.push(b'\t'),
+                Some('r') => bytes.push(b'\r'),
+                Some('0') => bytes.push(0),
+                Some('\\') => bytes.push(b'\\'),
+                Some('"') => bytes.push(b'"'),
+                Some('\'') => bytes.push(b'\''),
+                Some(other) => return self.error(format!("unknown escape `\\{other}` in bytes. The escapes are `\\xFF`, `\\n`, `\\t`, `\\r`, `\\0`, `\\\\` and `\\\"`"), start),
+                None => bytes.push(b'\\'),
+            }
+        }
+        Ok(TokenKind::Bytes(bytes))
     }
 
     /// `%x"..."`. The cursor is on the `"`. It can span several lines.

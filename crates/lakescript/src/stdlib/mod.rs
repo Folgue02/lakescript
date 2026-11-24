@@ -6,6 +6,7 @@ mod archive;
 mod csv_format;
 #[cfg(feature = "dates")]
 mod dates;
+mod bytes;
 mod env;
 mod fs;
 #[cfg(feature = "html")]
@@ -36,6 +37,7 @@ use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeR
 pub const MODULES: &[&str] = &[
     #[cfg(feature = "archive")]
     "std/archive",
+    "std/bytes",
     "std/env",
     #[cfg(feature = "csv")]
     "std/format/csv",
@@ -137,6 +139,11 @@ pub fn embedded_path(name: &str) -> Option<std::path::PathBuf> {
     SOURCES.iter().any(|(n, _)| *n == name).then(|| format!("{EMBEDDED}{}.lks", &name["std/".len()..]).into())
 }
 
+/// The source of a module of the standard library written in Lakescript *(i.e. `std/http`)*.
+pub fn source_of(name: &str) -> Option<&'static str> {
+    SOURCES.iter().find(|(n, _)| *n == name).map(|(_, source)| *source)
+}
+
 /// The source of the module written in Lakescript that seems to be in `path`.
 pub fn embedded(path: &str) -> Option<&'static str> {
     let name = path.strip_prefix(EMBEDDED)?.strip_suffix(".lks")?;
@@ -185,6 +192,7 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
     match name {
         #[cfg(feature = "archive")]
         "std/archive/native" => archive::register(&mut exports),
+        "std/bytes" => bytes::register(&mut exports),
         "std/env" => env::register(&mut exports),
         #[cfg(not(feature = "dates"))]
         "std/fs" => fs::register(&mut exports),

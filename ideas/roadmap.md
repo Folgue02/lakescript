@@ -44,7 +44,12 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
     - `ferry new` makes no sample code unless asked with `--example`, and `ferry run` shows wrong arguments to a command like `lks` does: the message and the usage, and exit code 2 *(see [tooling/ferry.md](tooling/ferry.md))*.
     - The `$name:` lines of doc comments are used: hover on parameters and named arguments, signature help in `lks-lsp`, and a warning for a `$name:` that isn't a parameter, in the editor, `ferry check` and `ferry doc` *(see Doc comments in [language/functions.md](language/functions.md))*. Editors complete `use` paths, with the first line of each folder's `module.md` and module's `//!`, and show them on hover *(see [tooling/lsp.md](tooling/lsp.md))*.
     - Methods of classes take named arguments *(see [language/functions.md](language/functions.md))*.
+    - The docs of the standard library match its code: a test of `ferry` checks that every `pub` item of the modules written in Lakescript has its row in `ideas/stdlib`, like `prelude.txt` already does for the ones written in Rust. The missing ones were written *(`terminal::Progress` and `zone::Zone`)*.
+    - `lks-lsp` imports types from completion: a class, interface or enum that isn't imported is offered with its module, and choosing it writes its `use` line, the standard library first *(see Importing types from completion in [tooling/lsp.md](tooling/lsp.md))*.
+    - The library shows a program that embeds Lakescript only what it needs: the syntax tree, the lexer, the parser, the tokens and the insides of values stay inside *(see [README.md](README.md))*.
     - `std/random` *(see [stdlib/random.md](stdlib/random.md))* and `std/archive`, for zip, tar and tar.gz *(see [stdlib/archive.md](stdlib/archive.md))*.
+    - A `bytes` type, for what isn't text: the literal `%b"..."`, `$text.toBytes()`, `std/bytes` for hex and base64, `fs::readBytes()` and `writeBytes()`, `$response.bytes()` and bytes as bodies, and `readBytes()` and `addBytes()` in archives *(see Bytes in [language/builtin_types.md](language/builtin_types.md))*.
+    - JSON into types: `json::parse($text, list<User>)` and `$response.json(User)` fill in objects of classes, like serde, with errors that say where *(see Into types in [stdlib/format/json.md](stdlib/format/json.md))*. For it, a type can be given as an argument, a value of the type `type<T>` *(see Types as values in [language/type_checking.md](language/type_checking.md))*, and fields keep their types while the script runs.
     - `fs::modified()` gives a `time::Date` instead of seconds *(see [stdlib/fs.md](stdlib/fs.md))*.
 - Phase 10 was released as `v0.10.0`: Ctrl+C throws an `Interrupted` *(see [language/errors.md](language/errors.md))*, `std/terminal` has prompts, styles, progress and ready-made pieces *(see [stdlib/terminal.md](stdlib/terminal.md))*, and `std/time` has dates, formats like Java's and time zones *(see [stdlib/time.md](stdlib/time.md))*. Errors thrown inside the standard library are shown where the script called it. After it: `never`, the return type of functions that never return, and `$x!`, which says a value isn't `null` *(see [language/functions.md](language/functions.md) and [language/operators.md](language/operators.md))*.
 - Phase 9 added `ferry doc`, released as `v0.9.0`: it makes the pages of a project and of a package, and writes the docs of one thing in the terminal *(see [tooling/docs.md](tooling/docs.md))*. What's missing of it *(i.e. search across the dependencies and the standard library)* can come as patch versions.
@@ -61,11 +66,8 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 
 Decided, and not built yet.
 
-- **Importing types from completion in `lks-lsp`**, like IntelliJ's: types that aren't imported are offered, and choosing one writes its `use` line, with the standard library first *(see [tooling/lsp.md](tooling/lsp.md#importing-types-from-completion))*.
 - **From the review after v0.10.0** *(see [tooling/vm.md](tooling/vm.md))*, not decided yet:
-    - Making less of the library public: `ast`, `lexer`, `parser`, `token` and the insides of `Value` are, so any change inside is a breaking one.
     - A checker that keeps the types it finds, instead of working them out again and keeping facts in tables by place in the source.
-    - The pages of the modules written in Lakescript made from their `///` comments, or a test that their tables in these notes match their code.
     - Not doing: a faster allocator for `lks` and `ferry`. It's a C library, which makes the builds of the releases more fragile, and after the fixes less time goes to allocating.
 
 ## Notes

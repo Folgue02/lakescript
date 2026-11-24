@@ -26,8 +26,9 @@ A program that embeds Lakescript can leave out the modules that need big crates.
 
 | Feature | Module | Crates it needs |
 |---------|--------|-----------------|
+| `archive` | `std/archive`. It needs `dates` too | `zip`, `tar`, `flate2` |
 | `csv` | `std/format/csv` | `csv` |
-| `dates` | The dates of `std/time`, and `std/time/zone`. `time::now()` is always there | `jiff` |
+| `dates` | The dates of `std/time`, `std/time/zone`, and `fs::modified()` as a date. `time::now()` is always there, and without dates `fs::modified()` gives seconds | `jiff` |
 | `html` | `std/html` | `scraper` |
 | `http` | `std/http` | `ureq`, with TLS |
 | `terminal` | `std/terminal` | `inquire`, `crossterm` |
@@ -46,6 +47,8 @@ A module is written in Rust, in Lakescript, or both:
 
 Errors in an embedded module name it as `<std>/http.lks`.
 
+- **The docs are these notes**, for both: `tools/docs/stdlib.py` makes the pages of `ferry doc std` from their tables. Every `pub` item needs its row, which tests check: `prelude.txt` for the modules in Rust, and a test of `ferry` that reads the `pub` items of each module in Lakescript.
+
 - **Rust data in a value**: a native part can give the Lakescript part data of its own, like a parsed page, as a value scripts never see *(a `Value::Handle`)*. It's kept in a field of a class that isn't `pub`, and freed when nothing uses it anymore *(i.e. `html::Element`, see [html.md](html.md))*. Printing an object leaves those fields out.
 - **Functions that run Lakescript code**: most native functions only get their arguments, but some get the VM, to run code they're given or make *(a `Function::Vm`, i.e. `template::render`, `test::throws`)*.
 
@@ -63,6 +66,7 @@ What's coming next is in [planned.md](planned.md).
 | [types/map.md](types/map.md) | `map<K, V>` |
 | [types/range.md](types/range.md) | `range` |
 | [types/regex.md](types/regex.md) | `regex` |
+| [types/bytes.md](types/bytes.md) | `bytes` |
 | [types/command.md](types/command.md) | `command`, created with `%x"..."` |
 
 `result` is described in [builtin_types.md](../language/builtin_types.md).
@@ -76,6 +80,7 @@ What's coming next is in [planned.md](planned.md).
 | [time.md](time.md) | `std/time`: the current time, dates, their formats and zones *(`std/time/zone`)* |
 | [io.md](io.md) | `std/io`: reading stdin |
 | [process.md](process.md) | `std/process`: arguments, the current folder, the platform, finding and running programs |
+| [bytes.md](bytes.md) | `std/bytes`: bytes from hex and base64 |
 | [archive.md](archive.md) | `std/archive`: zip, tar and tar.gz archives, read, extracted and written |
 | [random.md](random.md) | `std/random`: random numbers, `true` or `false`, UUIDs and the seed |
 | [html.md](html.md) | `std/html`: reading HTML and finding its parts with CSS selectors |

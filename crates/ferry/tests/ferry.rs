@@ -498,3 +498,61 @@ fn colors_only_when_asked() {
     assert!(!stderr(&w.ferry(&dir, &["check"])).contains('\x1b'));
     assert_eq!(w.ferry(&dir, &["--color", "nope", "check"]).status.code(), Some(2));
 }
+
+/// The modules of the standard library written in Lakescript, and the page
+/// of `ferry doc std` that documents each one.
+const EMBEDDED: &[(&str, &str)] = &[
+    ("archive.lks", "std/archive"),
+    ("fs.lks", "std/fs"),
+    ("html.lks", "std/html"),
+    ("http.lks", "std/http"),
+    ("process.lks", "std/process"),
+    ("process/Platform.lks", "std/process"),
+    ("terminal.lks", "std/terminal"),
+    ("terminal/Style.lks", "std/terminal"),
+    ("time.lks", "std/time"),
+    ("time/zone.lks", "std/time"),
+];
+
+#[test]
+fn every_pub_item_of_the_standard_library_is_documented() {
+    use lakescript::docs::{ItemKind, module_doc};
+    let site = ferry::doc::std_site();
+    let stdlib = Path::new(env!("CARGO_MANIFEST_DIR")).join("../lakescript/src/stdlib");
+    let mut missing = Vec::new();
+    for (file, page) in EMBEDDED {
+        let source = std::fs::read_to_string(stdlib.join(file)).unwrap();
+        let module = module_doc(&source).unwrap_or_else(|e| panic!("{file}: {}", e.message));
+        let page = site.modules.iter().find(|m| m.path == *page).unwrap_or_else(|| panic!("no page for {page}"));
+        let groups: String = page.groups.iter().map(|(_, text)| text.as_str()).collect();
+        let all_text = format!("{} {} {groups}", page.doc.text.clone().unwrap_or_default(), page.notes.clone().unwrap_or_default());
+        for item in &module.items {
+            match item.kind {
+                // An enum's values are listed in the text
+                ItemKind::Enum => {
+                    if !all_text.contains(&format!("`{}`", item.name)) && !page.doc.items.iter().any(|i| i.name == item.name) {
+                        missing.push(format!("{}: enum {}", page.path, item.name));
+                    }
+                }
+                ItemKind::Class | ItemKind::Interface => {
+                    let Some(class) = page.doc.items.iter().find(|i| i.name == item.name) else {
+                        missing.push(format!("{}: class {}", page.path, item.name));
+                        continue;
+                    };
+                    // The methods of interfaces are their operators *(i.e. `==` for `equals?`)*, told in the text
+                    for member in item.members.iter().filter(|m| m.from.is_none()) {
+                        if !class.members.iter().any(|m| m.name == member.name) {
+                            missing.push(format!("{}: {}.{}", page.path, item.name, member.name));
+                        }
+                    }
+                }
+                _ => {
+                    if !page.doc.items.iter().any(|i| i.name == item.name) {
+                        missing.push(format!("{}: {}", page.path, item.name));
+                    }
+                }
+            }
+        }
+    }
+    assert!(missing.is_empty(), "not in the notes of ideas/stdlib (then run tools/docs/stdlib.py):\n{}", missing.join("\n"));
+}

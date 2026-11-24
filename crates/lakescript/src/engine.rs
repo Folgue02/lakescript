@@ -262,6 +262,20 @@ impl Engine {
         result.map_err(|d| self.locate(d))
     }
 
+    /// The tokens of a script, one per line with its line and column, for
+    /// debugging Lakescript itself *(`lks --tokens`)*.
+    pub fn tokens(&self, source: &str) -> Result<String, Diagnostic> {
+        let tokens = crate::lexer::tokenize(source)?;
+        Ok(tokens.iter().map(|t| format!("{}:{}\t{:?}\n", t.span.line, t.span.column, t.kind)).collect())
+    }
+
+    /// The syntax tree of a script, one statement per line, for debugging
+    /// Lakescript itself *(`lks --ast`)*. It changes between versions.
+    pub fn syntax_tree(&self, source: &str) -> Result<String, Diagnostic> {
+        let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
+        Ok(program.iter().map(|stmt| format!("{stmt}\n")).collect())
+    }
+
     /// The bytecode a script compiles to, as text, without running it. It's
     /// for debugging Lakescript itself *(`lks --bytecode`)*: the bytecode
     /// changes between versions.

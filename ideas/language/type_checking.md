@@ -25,6 +25,20 @@ $ages['Daniel'] = 24;       // $ages is a map<string, number>
 - `.as()` can't take a function type *(i.e. `.as((string) -> any)`)*: a function keeps no types while the script runs, and an untyped lambda never had any, so the only way to check it would be to call it. That stays: a function is given its type where it comes from, or an `any` is assigned to a typed variable *(i.e. `const (string) -> any $f = $solver;`)*, which the checker doesn't check.
 - Types never change what the code does: a script behaves the same whether its types were checked or not. Because of this, there's no overloading (choosing a function by the types of its arguments). `.as()` and `.is()` don't break this rule, because they check the value while the script runs, not its declared type *(see [builtin_types.md](builtin_types.md))*.
 
+## Types as values
+
+A type can be given to a function as an argument, for functions that make values of it, like `json::parse($text, User)`:
+
+```
+const $users = json::parse($text, list<User>);   // list<User>
+const $me = $response.json(User);               // User
+```
+
+- A class is written by its name, and a built-in type as it's written in a declaration *(i.e. `list<User>`, `map<string, Tag>`, `string`)*. `?T` isn't a value: `null` fits where a value of a type can be `null` anyway.
+- Its type is `type<T>`, and a parameter of that type makes the function generic over it *(i.e. `T parse<T>(string $text, ?type<T> $type = null)`)*. When it isn't given, `T` is `any`.
+- While the script runs it's a value too, printed as `<type list<User>>`, and the fields of classes keep their types for it, so nested classes can be filled in.
+- Like `.as()`, it's the only place where a type is written where a value goes. Unlike `.as()`, it makes values: `.as(User)` only checks one.
+
 ## How the checker works
 
 - It reads the script once, from top to bottom, keeping the type of every variable and function. Modules imported with `use` are checked too, once each.
