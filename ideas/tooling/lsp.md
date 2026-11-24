@@ -53,7 +53,10 @@ Each one is usable on its own, with tests that send real protocol messages to th
     - after `name::`: the functions, constants and types of a module, or the static methods, static fields and values of a class *(`Self::` too)*;
     - after anything else: the variables, functions, classes and modules in scope, the reserved words and the built-in types.
     - Each one has its declaration as its detail *(i.e. `list<string> push(...string $values)`)*. It inserts the name only: the parentheses and arguments are written by hand.
-    - The editor asks for it by itself after `.`, `$`, `@` and `:`.
+    - The editor asks for it by itself after `.`, `$`, `@`, `:` and `/`. After a `/` that isn't in a `use` path *(i.e. a division)* there's nothing to complete.
+- Part of milestone 4 is done: the parameters while a call is typed *(signature help)*, which the editor asks for by itself after `(` and `,`. It shows the function's declaration with the parameter being written marked, and the `$name:` lines of its comment *(see Doc comments in [functions.md](../language/functions.md))*. The function is the name that ends right before the `(` of the call the cursor is in, found in the text up to the cursor, without strings and comments.
+- `use` paths are completed: `std` and the modules of the standard library, and the folders and modules of the module path *(the project's and its dependencies', or the folder of a script)*, with the first line of a folder's `module.md` and of a module's `//!` next to each. Hover on a folder of a path shows the first paragraph of its `module.md` *(for a folder of the standard library, like `std` or `std/format`, the modules in it)*, and on a module of the project its `//!` text.
+- Parameters show their `$name:` line on hover, also on a named argument of a call, and a `$name:` for a parameter that isn't there is a warning. These are the only warnings: everything else the checker finds is an error.
 
 ### Code that's half written
 
@@ -79,6 +82,20 @@ Each one is usable on its own, with tests that send real protocol messages to th
 - The library has it, for any program that embeds Lakescript: `Engine::set_names(true)` makes the checks note each name, and `Engine::names()` gives them after a check, each with its file, place, code, sentence, `///` comment and definition.
 - The syntax tree only has the place of whole expressions, so the checker notes the text of the name and where to look for it *(i.e. `area` after the end of `$square` in `$square.area()`)*, and the engine finds it in the text once the check is done. Types are written out then too, when the types found out later are known *(i.e. the elements of `[]`)*.
 - A `///` comment is the one before the first token of the declaration, or before its `pub`. A parameter doesn't take its function's comment.
+
+## Importing types from completion
+
+*Decided, not built yet.* Like Java's in IntelliJ: completion also gives the types that aren't imported, and choosing one writes its `use` line.
+
+- **Only types**: classes, interfaces and enums. Functions and constants aren't offered, since there would be too many of them.
+- They come from the project's `src/`, the dependencies already downloaded and the standard library *(i.e. `Date`, `Zone`, `Style`)*. A script outside a project sees the standard library and the files next to it. Each one says its module, so two `Point`s can be told apart, and they come after the names already in scope.
+- **The `use` line**:
+    - A type module is imported as itself *(i.e. `use people/Person;`)*.
+    - A type inside a module is imported by its name, without braces when it's the only one from that module *(i.e. `use folgue02/geo/shapes::Circle;`)*. Braces only when there are several: importing `Square` too turns it into `use folgue02/geo/shapes::{Circle, Square};`.
+    - **Their order**: the standard library first, an empty line, then the rest, each group in alphabetical order. Two groups, like Go's `goimports`, not three like Python's *(the standard library, dependencies, the project)*: a project's modules and its dependencies are written alike *(`folgue02/...`, `acme/...`)*, and only `ferry.toml` tells them apart. A new line goes in its place in that order. Lines that are already there aren't moved: that's for a formatter, which will follow the same rule.
+- The edit goes with the completion, as `additionalTextEdits`, which farsub already applies.
+- No quick fix that imports an unknown type from its error.
+- Building it needs an index of the `pub` types of every module that can be reached, made by parsing them only *(everything `pub` has its type written)*, kept by the time each file changed, and read again on save.
 
 ## Using it
 

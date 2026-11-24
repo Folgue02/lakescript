@@ -138,24 +138,6 @@ let $anything = null;           // OK, `any` can hold null
 
 - `?.` and `??` are used to work with nullable values *(see [operators.md](operators.md))*.
 
-### Symbols
-
-*To be removed: enums and strings replace them (see Backlog in [roadmap.md](../roadmap.md)).*
-
-Type: `symbol`
-
-- Written with `:` followed by a name *(i.e. `:oranges`, `:not_found`)*.
-- Two symbols with the same name are always the same value: `:active == :active` is `true`.
-- They can be used as map keys and as fixed values:
-
-```
-let $status = :active;
-let $prices = {:oranges => 2, :apples => 3};
-```
-
-- `%i[oranges apples]` creates a list of symbols *(see [List](#list))*.
-- `:oranges.toString()` returns `'oranges'`.
-
 ## Collections
 
 ### List
@@ -173,10 +155,9 @@ let $names = <string>[];          // a list<string>
 let $ages = <number>[18, 24];
 ```
 
-There should also be two special ways to create arrays:
+There's also a short way to write a list of words:
 ```
-const $words = %w[Oranges Apples Tomatoes];
-const $symbols = %i[oranges apples tomatoes]; // Same as `const $symbols = [:oranges, :apples, :tomatoes];`
+const $words = %w[Oranges Apples Tomatoes];   // ['Oranges', 'Apples', 'Tomatoes']
 ```
 
 Lists use the standard indexing syntax *(`$list[$index]`)*, starting at 0. Negative indexes count from the end, like in Python:
@@ -234,7 +215,7 @@ out($scores['Daniel']);
 - A missing key returns `null` *(i.e. `$scores['James']` is `null`)*.
 - `$scores['James'] = 30;` adds the key, or replaces its value if it already exists.
 - The keys keep the order in which they were added, so looping over a map or printing it gives the same order on every run. *(The Rust `indexmap` crate does this at about the same speed as a `HashMap`.)*
-- Keys can be strings, numbers or symbols. Keys are compared like `==`, so `1` and `1.0` are the same key.
+- Keys can be strings or numbers. Keys are compared like `==`, so `1` and `1.0` are the same key.
 - To loop over a map, see [flow_control.md](flow_control.md).
 
 ## Others

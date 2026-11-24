@@ -1,0 +1,44 @@
+//! The script's own process, and running programs *(see
+//! ideas/stdlib/process.md)*. Its Rust part, `std/process/native`, does the
+//! work.
+
+use std/process/native;
+use std/process/Platform;
+
+// ---- The script ----
+
+/// The command-line arguments, without the script's own path.
+pub list<string> args() = native::args();
+
+/// The absolute path of the script being run, or `null` when there is no file
+/// *(i.e. code given by a program that embeds Lakescript)*.
+pub ?string scriptPath() = native::scriptPath();
+
+/// The current folder.
+pub string cwd() = native::cwd();
+
+/// Changes the current folder of the script and of the commands it runs.
+/// Throws a `FileNotFound` if it doesn't exist.
+pub void chdir(string $path) = native::chdir($path);
+
+/// The ID of the process.
+pub number pid() = native::pid();
+
+/// The system the script runs on *(i.e. `if (process::platform() == Platform::WINDOWS)`)*.
+pub Platform platform() = Platform::from(native::platform());
+
+/// Waits *(i.e. `process::sleep(0.5)`)*.
+pub void sleep(number $seconds) = native::sleep($seconds);
+
+// ---- Running programs ----
+
+/// The path of a program in `PATH`, or `null`.
+pub ?string which(string $name) = native::which($name);
+
+/// A `command` that runs through a shell: `sh -c` on Linux and macOS, `cmd /C`
+/// on Windows.
+pub command shell(string $script) = native::shell($script);
+
+/// A `command` that runs the program directly, without a shell, with each
+/// argument passed as it is.
+pub command command(string $program, ...string $args) = native::command($program, ...$args);

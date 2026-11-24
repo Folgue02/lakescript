@@ -44,6 +44,11 @@ pub use paths::canonical;
 pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use value::{NativeContext, NativeError, NativeResult, Value};
 
+/// The modules of the standard library this build has *(i.e. `std/fs`)*.
+pub fn std_modules() -> &'static [&'static str] {
+    stdlib::MODULES
+}
+
 /// Reads a whole script into its syntax tree.
 pub fn parse(source: &str) -> Result<Vec<ast::Stmt>, Diagnostic> {
     parser::parse(lexer::tokenize(source)?)

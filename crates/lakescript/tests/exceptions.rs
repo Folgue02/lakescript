@@ -35,7 +35,7 @@ fn catch_by_type() {
         }
         check('21');
         check('abc');
-        check(:x);
+        check([1]);
     ";
     assert_eq!(run(script), "42\nbad number: 'abc' isn't a number\nnot a string\n");
 }

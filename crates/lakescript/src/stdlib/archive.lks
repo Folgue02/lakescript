@@ -1,0 +1,109 @@
+//! Archives: zip, tar and tar.gz, read and written the same way *(see
+//! ideas/stdlib/archive.md)*. The format comes from the name of the file. Its
+//! Rust part, `std/archive/native`, reads and writes them.
+
+use std/archive/native;
+use std/time;
+
+/// A file or a folder in an archive, from `entries()`.
+pub class Entry {
+    /// Its path inside the archive, with `/` *(i.e. `docs/notes.txt`)*.
+    pub const string @name;
+    /// Its size in bytes, uncompressed. 0 for a folder.
+    pub const number @size;
+    /// When it was last changed, or `null` when the archive doesn't say.
+    pub const ?time::Date @modified;
+    const bool @folder;
+
+    /// `true` for a folder.
+    pub bool dir?() = @folder;
+}
+
+/// An archive, from `archive::open()` to read it or `archive::create()` to
+/// write a new one, which is written when it's closed.
+pub class Archive {
+    /// The path of its file.
+    pub const string @path;
+    const bool @writing;
+    list<list<string>> @added = [];
+    bool @closed = false;
+
+    /// Its files and folders, in the order they're in it.
+    pub list<Entry> entries() {
+        @mustRead('entries');
+        return native::entries(@path).map(($e) {
+            const ?number $ms = $e[3];
+            const ?time::Date $modified = if ($ms == null) null else time::date($ms);
+            return Entry($e[0].as(string), $e[1].as(number), $modified, $e[2].as(bool));
+        });
+    }
+
+    /// The text of a file in it *(i.e. `$zip.read('docs/notes.txt')`)*. Throws
+    /// a `FileNotFound` if it isn't there, and a `ValueError` if it isn't text.
+    pub string read(string $name) {
+        @mustRead('read');
+        return native::read(@path, $name);
+    }
+
+    /// Writes everything in it into a folder, which is created if needed.
+    /// Throws a `ValueError` for an entry that would be written outside it
+    /// *(i.e. `../x`)*, before writing it.
+    pub void extract(string $dir = '.') {
+        @mustRead('extract');
+        native::extract(@path, $dir);
+    }
+
+    /// Adds a file, or a folder with everything in it, under the name `$as`,
+    /// or its own name *(i.e. `photos` for `/home/ana/photos`)*. Throws a
+    /// `FileNotFound` if it doesn't exist.
+    pub void add(string $path, ?string $as = null) {
+        @mustWrite('add');
+        native::check($path);
+        @added.push(['path', $path, $as ?? '']);
+    }
+
+    /// Adds a file with that text.
+    pub void addText(string $name, string $text) {
+        @mustWrite('addText');
+        @added.push(['text', $text, $name]);
+    }
+
+    /// Writes a new archive, with what was added. An archive that's read
+    /// needs no `close()`.
+    pub void close() {
+        if (@writing && !@closed) {
+            native::write(@path, @added);
+        }
+        @closed = true;
+    }
+
+    void mustRead(string $method) {
+        if (@writing) {
+            throw ValueError(f"`{$method}()` reads an archive, and '{@path}' is being written: `archive::open()` gives one to read");
+        }
+    }
+
+    void mustWrite(string $method) {
+        if (!@writing) {
+            throw ValueError(f"`{$method}()` writes an archive, and '{@path}' was opened to read: `archive::create()` gives one to write");
+        }
+        if (@closed) {
+            throw ValueError(f"'{@path}' is already closed, so `{$method}()` can't add to it");
+        }
+    }
+}
+
+/// An archive to read *(i.e. `archive::open('site.zip')`)*. Its format comes
+/// from the name: `.zip`, `.tar`, `.tar.gz` or `.tgz`. Throws a
+/// `FileNotFound` if it doesn't exist.
+pub Archive open(string $path) {
+    native::entries($path);
+    return Archive($path, false);
+}
+
+/// A new archive, written by `close()` with what's added to it. Its format
+/// comes from the name, like `open()`.
+pub Archive create(string $path) {
+    native::format($path);
+    return Archive($path, true);
+}

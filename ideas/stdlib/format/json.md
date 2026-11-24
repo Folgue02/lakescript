@@ -40,10 +40,9 @@ There's no schema: the values become the built-in types, and the result is `any`
 
 | Lakescript | JSON |
 |------------|------|
-| `map` | object. Number and symbol keys become strings, since JSON keys can only be strings |
+| `map` | object. Number keys become strings, since JSON keys can only be strings |
 | `list` | array |
 | `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |
-| `symbol` | string |
 | `string`, `number`, `bool`, `null` | the same |
 
 - Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.

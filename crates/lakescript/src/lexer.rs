@@ -3,7 +3,6 @@
 //! Rules from the notes that are decided here, not in the parser:
 //! - A name followed directly by `?(` keeps the `?` as part of the name (`even?()`).
 //! - A `-` directly followed by a letter is a test operator (`-f`, `-like`).
-//! - A `:` directly followed by a letter is a symbol (`:active`).
 //! - `?[` written without a space is the nullable index.
 //! - `.` is only a decimal point when a digit follows it, so `1..5` and `5.even?()` work.
 
@@ -269,11 +268,7 @@ impl Lexer {
                 }
                 (Some('w'), Some('[')) => {
                     self.advance_by(2);
-                    WordList(self.lex_word_list(start, false)?)
-                }
-                (Some('i'), Some('[')) => {
-                    self.advance_by(2);
-                    SymbolList(self.lex_word_list(start, true)?)
+                    WordList(self.lex_word_list(start)?)
                 }
                 (Some('='), _) => {
                     self.advance();
@@ -282,13 +277,7 @@ impl Lexer {
                 _ => Percent,
             },
             ':' => {
-                if self.eat(':') {
-                    ColonColon
-                } else if self.peek(0).is_some_and(is_name_start) {
-                    Symbol(self.read_name())
-                } else {
-                    Colon
-                }
+                if self.eat(':') { ColonColon } else { Colon }
             }
             '?' => {
                 if self.eat('.') {
@@ -652,8 +641,8 @@ impl Lexer {
         Ok(TokenKind::Command(self.build_parts(elems, Escapes::KeepBackslashes, start)?))
     }
 
-    /// `%w[...]` and `%i[...]`. The cursor is after the `[`.
-    fn lex_word_list(&mut self, start: Mark, symbols: bool) -> Result<Vec<String>, Diagnostic> {
+    /// `%w[...]`. The cursor is after the `[`.
+    fn lex_word_list(&mut self, start: Mark) -> Result<Vec<String>, Diagnostic> {
         let mut words = Vec::new();
         let mut word = String::new();
         loop {
@@ -670,11 +659,6 @@ impl Lexer {
         }
         if !word.is_empty() {
             words.push(word);
-        }
-        if symbols {
-            if let Some(bad) = words.iter().find(|w| !is_valid_name(w)) {
-                return self.error(format!("`{bad}` isn't a valid symbol name"), start);
-            }
         }
         Ok(words)
     }
@@ -1006,8 +990,9 @@ mod tests {
     }
 
     #[test]
-    fn symbols_and_colons() {
-        assert_eq!(kinds(":active"), vec![Symbol("active".into())]);
+    fn colons() {
+        // No symbols: a `:` before a name is a `:`
+        assert_eq!(kinds(":active"), vec![Colon, ident("active")]);
         assert_eq!(kinds("paths::load"), vec![ident("paths"), ColonColon, ident("load")]);
         assert_eq!(kinds("name: 'x'"), vec![ident("name"), Colon, Str("x".into())]);
     }
@@ -1129,13 +1114,9 @@ mod tests {
     #[test]
     fn word_lists() {
         assert_eq!(
-            kinds("%w[Oranges Apples\n Tomatoes] %i[a b]"),
-            vec![
-                WordList(vec!["Oranges".into(), "Apples".into(), "Tomatoes".into()]),
-                SymbolList(vec!["a".into(), "b".into()])
-            ]
+            kinds("%w[Oranges Apples\n Tomatoes]"),
+            vec![WordList(vec!["Oranges".into(), "Apples".into(), "Tomatoes".into()])]
         );
-        assert!(error("%i[ok not-ok]").contains("valid symbol"));
     }
 
     #[test]

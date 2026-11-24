@@ -26,6 +26,8 @@ outln(fs::glob('project/**/*.lks'));
 for ($file in fs::walk('project'))
     outln(f"{$file.padEnd(28)} {fs::size($file).formatBytes()}");
 outln(-d 'project/src' && fs::dir?('project/src'));
+// When a file changed is a date, so dates compare
+outln(fs::modified('project/README.md') >= fs::modified('project/src/main.lks'));
 
 // Paths are strings
 const $main = 'project/src/main.lks';

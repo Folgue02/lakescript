@@ -87,3 +87,25 @@ fn the_command_a_script_parses() {
     assert_eq!(command_doc("command A {}\noutln(1);", "a").unwrap(), None);
     assert_eq!(command_doc("outln(1);", "a").unwrap(), None);
 }
+
+#[test]
+fn a_comment_for_a_parameter_that_isnt_there_is_a_warning() {
+    use lakescript::docs::stale_params;
+    let source = "/// Greets.\n///\n/// $name: who\n/// $times: how often\npub string greet(string $who, number $times = 1) = $who;\n";
+    let warnings = stale_params(source).unwrap();
+    assert_eq!(warnings.len(), 1);
+    let w = &warnings[0];
+    assert_eq!(w.message, "the comment describes `$name`, but `greet` has no parameter `$name`: its parameters are `$who`, `$times`");
+    assert_eq!((w.line, w.column), (3, 5));
+    assert_eq!(&source.chars().skip(w.start).take(w.end - w.start).collect::<String>(), "$name");
+    // Methods and constructors too, and not the parameters that are there
+    let source = "class Box {\n    pub number @size;\n    /// $n: how much\n    pub void grow(number $by) {}\n    /// $by: fine\n    pub void shrink(number $by) {}\n}\n";
+    let warnings = stale_params(source).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].message.contains("`Box.grow` has no parameter `$n`: its only parameter is `$by`"), "{}", warnings[0].message);
+    assert_eq!(warnings[0].line, 3);
+    assert!(stale_params("/// $x: nothing\nvoid f() {}\n").unwrap()[0].message.ends_with("it has no parameters"));
+    // It never stops a script
+    let mut engine = lakescript::Engine::with_output(lakescript::CapturedOutput::new());
+    engine.run("/// $nope: gone\nvoid f() {}\nf();").unwrap();
+}

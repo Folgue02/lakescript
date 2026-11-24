@@ -1221,6 +1221,9 @@ impl<'a> Interpreter<'a> {
                             continue;
                         }
                     }
+                    if let Some((_, _, at)) = named.first() {
+                        return error(format!("the methods of a {} don't take named arguments", receiver.type_name()), *at);
+                    }
                     let v = methods::call(self, receiver, &proto.names[name as usize], args, span!())?;
                     self.stack.push(v);
                 }
@@ -2118,7 +2121,7 @@ fn set_index(container: &Value, index: Value, value: Value, span: Span) -> Exec<
 }
 
 fn key_error(value: &Value, span: Span) -> Flow {
-    flow_error(format!("map keys can be strings, numbers or symbols, not a {}", value.type_name()), span)
+    flow_error(format!("map keys can be strings or numbers, not a {}", value.type_name()), span)
 }
 
 fn logic_error(and: bool, span: Span) -> Flow {
@@ -2184,7 +2187,7 @@ pub(crate) fn native_error(e: NativeError, span: Span) -> Flow {
 fn command_arguments(value: &Value) -> Result<Vec<String>, String> {
     match value {
         Value::Str(s) => Ok(vec![s.to_string()]),
-        Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Symbol(_) => Ok(vec![value.to_string()]),
+        Value::Int(_) | Value::Float(_) | Value::Bool(_) => Ok(vec![value.to_string()]),
         Value::List(items) => {
             let mut out = Vec::new();
             for item in items.borrow().iter() {
@@ -2244,7 +2247,8 @@ fn unary(op: UnaryOp, value: Value, span: Span) -> Exec<Value> {
         (UnaryOp::Not, Value::Bool(b)) => Ok(Value::Bool(!b)),
         (UnaryOp::BitNot, _) if value.as_whole().is_some() => Ok(Value::Int(!value.as_whole().unwrap())),
         (UnaryOp::BitNot, Value::Float(_)) => error_as(exceptions::TYPE_ERROR, "bitwise operators need whole numbers", span),
-        (UnaryOp::Not, _) => error_as(exceptions::TYPE_ERROR, format!("`!` needs a bool, and this is a {}", value.type_name()), span),
+        // On anything else, `!$x` asks whether it's `null` *(see ideas/language/operators.md)*
+        (UnaryOp::Not, _) => Ok(Value::Bool(matches!(value, Value::Null))),
         _ => error_as(exceptions::TYPE_ERROR, format!("`{}` needs a number, and this is a {}", op.symbol(), value.type_name()), span),
     }
 }

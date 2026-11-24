@@ -1,5 +1,6 @@
-//! `std/process` *(see `ideas/stdlib/process.md`)*. `chdir` only changes the
-//! script's own current folder, never the real process's.
+//! `std/process/native`: the Rust part of `std/process` *(see `process.lks`
+//! and `ideas/stdlib/process.md`)*. `chdir` only changes the script's own
+//! current folder, never the real process's.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -41,13 +42,14 @@ pub fn register(m: &mut Exports) {
     m.function("platform", |_, values| {
         Args::new("process::platform", values, 0, 0)?;
         let name = if cfg!(target_os = "macos") {
-            "macos"
+            "MACOS"
         } else if cfg!(windows) {
-            "windows"
+            "WINDOWS"
         } else {
-            "linux"
+            "LINUX"
         };
-        Ok(Value::Symbol(Rc::from(name)))
+        // The name of a value of `Platform`
+        Ok(Value::string(name))
     });
     m.function("sleep", |_, values| {
         let a = Args::new("process::sleep", values, 1, 1)?;

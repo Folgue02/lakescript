@@ -18,13 +18,13 @@ out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'crates' / 'lakescript'
 
 # The type each file describes, with the names of its type parameters
 TYPES = {
-    'any': 'any', 'string': 'string', 'number': 'number', 'bool': 'bool', 'symbol': 'symbol',
+    'any': 'any', 'string': 'string', 'number': 'number', 'bool': 'bool',
     'regex': 'regex', 'range': 'range', 'command': 'command', 'list': 'list<T>', 'map': 'map<K, V>',
 }
 # The modules written in Rust, by their file. The ones written in Lakescript
 # (i.e. std/http) get their types from their own code
-MODULES = {'general': 'general', 'fs': 'std/fs', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
-           'process': 'std/process', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
+MODULES = {'general': 'general', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
+           'random': 'std/random', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
            'template': 'std/template', 'test': 'std/test'}
 
 # Types described outside ideas/stdlib, and the Rust parts of the modules
@@ -47,6 +47,26 @@ string unescape(string $text);
 
 module std/http/native
 map<string, any> send(string $method, string $url, any $body, map<string, string> $headers, ?number $timeout, ?string $path);
+
+module std/archive/native
+list<list<any>> entries(string $path);
+string read(string $path, string $name);
+void extract(string $path, string $dir);
+void format(string $path);
+void check(string $path);
+void write(string $path, list<list<string>> $added);
+
+module std/process/native
+list<string> args();
+?string scriptPath();
+string cwd();
+void chdir(string $path);
+number pid();
+string platform();
+void sleep(number $seconds);
+?string which(string $name);
+command shell(string $script);
+command command(string $program, ...string $args);
 
 module std/time/native
 number now();
@@ -136,6 +156,14 @@ def main():
     for name, header in MODULES.items():
         parts.append(f'\nmodule {header}')
         parts.extend(members(stdlib / f'{name}.md'))
+    # std/fs is written in Lakescript over std/fs/native when there are dates,
+    # for `modified()`, and is only Rust without them, where it gives seconds
+    fs = members(stdlib / 'fs.md')
+    plain = [s.replace('time::Date modified(', 'number modified(') for s in fs]
+    parts.append('\nmodule std/fs')
+    parts.extend(plain)
+    parts.append('\nmodule std/fs/native')
+    parts.extend(plain + ['number modifiedMillis(string $path);'])
     parts.append(EXTRA.rstrip())
     text = '\n'.join(parts) + '\n'
     out.parent.mkdir(parents=True, exist_ok=True)

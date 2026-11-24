@@ -1,0 +1,88 @@
+//! Files and folders *(see ideas/stdlib/fs.md)*. Relative paths start at the
+//! script's current folder. Its Rust part, `std/fs/native`, does the work;
+//! this part makes a date of `modified()`.
+
+use std/fs/native;
+use std/time;
+
+// ---- Reading ----
+
+/// The whole file as text. Throws a `ValueError` if it isn't valid UTF-8.
+pub string read(string $path) = native::read($path);
+
+/// The lines of the file, without their new lines.
+pub list<string> readLines(string $path) = native::readLines($path);
+
+// ---- Writing ----
+
+/// Replaces the file with `$text`, creating it if needed. The folder must exist.
+pub void write(string $path, string $text) = native::write($path, $text);
+
+/// Adds `$text` at the end of the file, creating it if needed.
+pub void append(string $path, string $text) = native::append($path, $text);
+
+/// Writes the lines with a new line after each one.
+pub void writeLines(string $path, list<string> $lines) = native::writeLines($path, $lines);
+
+// ---- About a path ----
+
+/// `true` if something is there: a file, a folder or a link. Never throws.
+pub bool exists?(string $path) = native::exists?($path);
+
+/// Same as `-f $path`.
+pub bool file?(string $path) = native::file?($path);
+
+/// Same as `-d $path`.
+pub bool dir?(string $path) = native::dir?($path);
+
+/// `true` if it's a symbolic link, without following it.
+pub bool link?(string $path) = native::link?($path);
+
+/// The size in bytes.
+pub number size(string $path) = native::size($path);
+
+/// When it was last changed, as a date in the local zone.
+pub time::Date modified(string $path) = time::date(native::modifiedMillis($path));
+
+/// The Unix permissions *(i.e. `0o644`)*. On Windows, `0o444` or `0o666`.
+pub number mode(string $path) = native::mode($path);
+
+// ---- Folders ----
+
+/// The names of what's inside the folder, sorted, without `.` and `..`.
+pub list<string> list(string $path = '.') = native::list($path);
+
+/// The paths of every file inside the folder and its subfolders, sorted.
+pub list<string> walk(string $path = '.') = native::walk($path);
+
+/// The paths that match a pattern, sorted *(i.e. `fs::glob('src/**/*.lks')`)*.
+pub list<string> glob(string $pattern) = native::glob($pattern);
+
+/// Creates the folder and the folders above it that are missing.
+pub void makeDir(string $path) = native::makeDir($path);
+
+/// Creates a new empty folder in the system's temporary folder and returns its path.
+pub string tempDir() = native::tempDir();
+
+/// Creates a new empty file in the system's temporary folder and returns its path.
+pub string tempFile(string $extension = '') = native::tempFile($extension);
+
+// ---- Changing things ----
+
+/// Copies a file, replacing `$to` if it exists. A folder is copied with everything inside it.
+pub void copy(string $from, string $to) = native::copy($from, $to);
+
+/// Moves or renames a file or a folder, replacing a file at `$to`.
+pub void move(string $from, string $to) = native::move($from, $to);
+
+/// Removes a file, a link or an empty folder. Does nothing if it doesn't exist.
+pub void remove(string $path) = native::remove($path);
+
+/// Removes a folder with everything inside it. Does nothing if it doesn't exist.
+pub void removeAll(string $path) = native::removeAll($path);
+
+/// Changes the Unix permissions *(i.e. `fs::setMode($script, 0o755)`)*.
+pub void setMode(string $path, number $mode) = native::setMode($path, $mode);
+
+/// Creates a symbolic link at `$path` pointing to `$target`.
+pub void link(string $target, string $path) = native::link($target, $path);

@@ -289,7 +289,7 @@ fn reading_stdin() {
 fn process() {
     let (mut engine, output) = engine();
     engine.set_args(vec!["a b".into(), "--x".into()]);
-    engine.run("use std/process;\noutln(process::args());\noutln(process::platform().is(symbol));\noutln(process::pid() > 0);").unwrap();
+    engine.run("use std/process;\noutln(process::args());\noutln(process::platform().name() -in %w[LINUX MACOS WINDOWS]);\noutln(process::pid() > 0);").unwrap();
     assert_eq!(output.text(), "['a b', '--x']\ntrue\ntrue\n");
     assert_eq!(run("use std/process;\noutln(process::which('sh') != null);\noutln(process::which('no-such-program-lks'));"), "true\nnull\n");
 }
@@ -493,7 +493,7 @@ fn files() {
          outln(fs::list());\n\
          fs::setMode('src/main.lks', 0o755);\n\
          outln(fs::mode('src/main.lks').toString(8));\n\
-         outln(fs::modified('src/main.lks') > 1_700_000_000);\n\
+         outln(fs::modified('src/main.lks').millis() > 1_700_000_000_000);\n\
          const $t = fs::tempFile('.json');\n\
          outln($t.endsWith('.json') && fs::file?($t));\n\
          fs::remove($t);\n",
@@ -534,7 +534,7 @@ fn json() {
          outln($data['none']);\n\
          outln($data['esc'].length());\n\
          outln(json::stringify($data));\n\
-         outln(json::stringify({:k => [1, 2..4], 5 => 'x'}, indent: 2));\n\
+         outln(json::stringify({'k' => [1, 2..4], 5 => 'x'}, indent: 2));\n\
          outln(json::stringify([]));\n",
     );
     assert_eq!(

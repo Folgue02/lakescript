@@ -157,11 +157,11 @@ fn maps() {
         outln($scores.keys());
         const $m = {1 => 'one'};
         outln($m[1.0]);
-        outln({:a => 1});
+        outln({'a' => 1});
     ";
     assert_eq!(
         run(script),
-        "{ 'Daniel' => 23, 'Folgue' => 24, 'James' => 30 }\nnull\n['Daniel', 'Folgue', 'James']\none\n{ :a => 1 }\n"
+        "{ 'Daniel' => 23, 'Folgue' => 24, 'James' => 30 }\nnull\n['Daniel', 'Folgue', 'James']\none\n{ 'a' => 1 }\n"
     );
 }
 

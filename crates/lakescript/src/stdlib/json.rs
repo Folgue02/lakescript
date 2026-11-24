@@ -286,7 +286,7 @@ fn write(value: &Value, indent: Option<usize>, level: usize, out: &mut String) -
             return Err(NativeError::new(TYPE_ERROR, format!("JSON can't hold {}", format_number(*f))));
         }
         Value::Float(f) => out.push_str(&format_number(*f)),
-        Value::Str(s) | Value::Symbol(s) => quote(s, out),
+        Value::Str(s) => quote(s, out),
         Value::List(_) | Value::Range(_) => {
             let items: Vec<Value> = match value {
                 Value::List(l) => l.borrow().clone(),

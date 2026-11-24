@@ -1,5 +1,7 @@
 //! The modules of the standard library, under `std/` *(see `ideas/stdlib/`)*.
 
+#[cfg(feature = "archive")]
+mod archive;
 #[cfg(feature = "csv")]
 mod csv_format;
 #[cfg(feature = "dates")]
@@ -14,6 +16,7 @@ mod io;
 mod json;
 mod path;
 mod process;
+mod random;
 mod template;
 #[cfg(feature = "terminal")]
 mod terminal;
@@ -31,6 +34,8 @@ use crate::value::{Function, NativeContext, NativeError, NativeFunction, NativeR
 /// this crate, all on by default, so a program that embeds Lakescript can
 /// leave them out *(i.e. `default-features = false, features = ["dates"]`)*.
 pub const MODULES: &[&str] = &[
+    #[cfg(feature = "archive")]
+    "std/archive",
     "std/env",
     #[cfg(feature = "csv")]
     "std/format/csv",
@@ -43,6 +48,8 @@ pub const MODULES: &[&str] = &[
     "std/io",
     "std/path",
     "std/process",
+    "std/process/Platform",
+    "std/random",
     "std/template",
     #[cfg(feature = "terminal")]
     "std/terminal",
@@ -57,6 +64,7 @@ pub const MODULES: &[&str] = &[
 /// The modules that are features of the crate, with their feature, to say
 /// why one is missing.
 const FEATURES: &[(&str, &str)] = &[
+    ("std/archive", "archive"),
     ("std/format/csv", "csv"),
     ("std/html", "html"),
     ("std/http", "http"),
@@ -72,17 +80,29 @@ pub fn left_out(name: &str) -> Option<&'static str> {
 
 /// The Rust parts of modules written in Lakescript, which only those modules use.
 const NATIVE: &[&str] = &[
+    #[cfg(feature = "dates")]
+    "std/fs/native",
+    #[cfg(feature = "archive")]
+    "std/archive/native",
     #[cfg(feature = "html")]
     "std/html/native",
     #[cfg(feature = "http")]
     "std/http/native",
     #[cfg(feature = "terminal")]
     "std/terminal/native",
+    "std/process/native",
     "std/time/native",
 ];
 
 /// Modules written in Lakescript, which come with the interpreter.
 const SOURCES: &[(&str, &str)] = &[
+    // With dates, `fs::modified()` gives one, so `std/fs` is Lakescript over its Rust part
+    #[cfg(feature = "dates")]
+    ("std/fs", include_str!("fs.lks")),
+    #[cfg(feature = "archive")]
+    ("std/archive", include_str!("archive.lks")),
+    ("std/process", include_str!("process.lks")),
+    ("std/process/Platform", include_str!("process/Platform.lks")),
     #[cfg(feature = "html")]
     ("std/html", include_str!("html.lks")),
     #[cfg(feature = "http")]
@@ -163,8 +183,13 @@ impl Exports {
 pub fn build(name: &str) -> Option<Rc<Module>> {
     let mut exports = Exports::new(name);
     match name {
+        #[cfg(feature = "archive")]
+        "std/archive/native" => archive::register(&mut exports),
         "std/env" => env::register(&mut exports),
+        #[cfg(not(feature = "dates"))]
         "std/fs" => fs::register(&mut exports),
+        #[cfg(feature = "dates")]
+        "std/fs/native" => fs::register(&mut exports),
         "std/io" => io::register(&mut exports),
         #[cfg(feature = "csv")]
         "std/format/csv" => csv_format::register(&mut exports),
@@ -176,7 +201,8 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         #[cfg(feature = "terminal")]
         "std/terminal/native" => terminal::register(&mut exports),
         "std/path" => path::register(&mut exports),
-        "std/process" => process::register(&mut exports),
+        "std/process/native" => process::register(&mut exports),
+        "std/random" => random::register(&mut exports),
         "std/template" => template::register(&mut exports),
         "std/test" => test::register(&mut exports),
         "std/time/native" => time::register(&mut exports),

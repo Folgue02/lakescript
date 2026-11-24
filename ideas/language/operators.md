@@ -76,7 +76,7 @@ Like in Java, `==` checks if both sides are the same object, except for the type
 
 | Compared by contents                                      | Compared by reference (same object) |
 |-----------------------------------------------------------|-------------------------------------|
-| `number`, `bool`, `symbol`, `null`, `string`, `range`     | lists, maps, functions, `regex`, `result`, `Exception` |
+| `number`, `bool`, `null`, `string`, `range`               | lists, maps, functions, `regex`, `result`, `Exception` |
 
 ```
 'a' + 'b' == 'ab'           // true, strings compare their contents
@@ -112,7 +112,7 @@ Operands: `number`, which must be a whole number *(i.e. `1.5 & 1` is an error)*.
 
 ### Boolean (logical) operators
 
-Operands: `bool`. Result: `bool`.
+Operands: `bool`, except `!`, which takes any value. Result: `bool`.
 
 | Operator | Name                       | Example          | Result  |
 |----------|----------------------------|------------------|---------|
@@ -123,7 +123,11 @@ Operands: `bool`. Result: `bool`.
 | `\|`     | OR (always evaluates both) | `true \| false`  | `true`  |
 | `^`      | XOR                        | `true ^ true`    | `false` |
 
-- `!` before a value is going to take any value: on anything that isn't a `bool`, `!$x` is `$x == null`, so `!null` is `true` and `!''` is `false` *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
+- `!` takes any value. On a `bool` it's NOT. On anything else *(i.e. a string or an object)*, `!$x` is `$x == null`, so `!null` is `true` and `!$user` asks whether there's no user.
+    - Empty values aren't false, unlike in JavaScript or Python: `!''`, `!0` and `![]` are `false`, since they aren't `null`.
+    - `!!$x` gives `$x` as a `bool`: whether it isn't `null` *(i.e. `bool $found = !!$match;`)*.
+    - It narrows like `== null` *(i.e. after `if (!$name) return;`, `$name` is a `string`)*. Not on a `?bool`: there `!$done` is also `true` when it's `false`.
+    - Only `!` does it. `if`, `while`, `&&` and `||` still need a `bool`, so `if ($user)` is an error, written `if ($user != null)` or `if (!!$user)`: conditions stay explicit, and the checker still catches `if ($count)` meant as `if ($count > 0)`.
 - `&&` and `||` stop as soon as the result is known: in `false && check()`, `check()` is never called.
 - `&` and `|` on booleans evaluate both sides, same as in Java. The operand type decides whether `&`, `|` and `^` are bitwise (`number`) or logical (`bool`).
 

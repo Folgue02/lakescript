@@ -302,3 +302,104 @@ fn projects_that_cannot_be_used_say_why() {
     assert!(errors[0]["message"].as_str().unwrap().contains("isn't a package"), "{errors:?}");
     server.stop();
 }
+
+#[test]
+fn signature_help_while_a_call_is_typed() {
+    let dir = temp("signature");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    let decl = "/// Says hello.\n///\n/// $name: who to greet\n/// $times: how many times\nstring greet(string $name, number $times = 1) = $name.repeat($times);\n";
+    let text = format!("{decl}outln(greet('a, b', times: 2));\n");
+    server.open(&script, &text);
+    assert!(server.diagnostics_for(&script).is_empty());
+    // In the first argument: the comma in the string doesn't count
+    let help = server.at("textDocument/signatureHelp", &script, 5, 15);
+    let signature = &help["signatures"][0];
+    assert_eq!(signature["label"], "string greet(string $name, number $times = …)", "{help}");
+    assert_eq!(signature["documentation"]["value"], "Says hello.");
+    assert_eq!(signature["parameters"][0]["label"], json!([13, 25]));
+    assert_eq!(signature["parameters"][0]["documentation"]["value"], "who to greet");
+    assert_eq!(help["activeParameter"], 0);
+    // A named argument is the parameter it names
+    let help = server.at("textDocument/signatureHelp", &script, 5, 26);
+    assert_eq!(help["activeParameter"], 1, "{help}");
+    assert_eq!(help["signatures"][0]["parameters"][1]["documentation"]["value"], "how many times");
+    // Outside the call there's none
+    assert!(server.at("textDocument/signatureHelp", &script, 5, 3).is_null());
+    server.stop();
+}
+
+#[test]
+fn a_comment_for_a_parameter_that_isnt_there_is_a_warning() {
+    let dir = temp("stale");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    server.open(&script, "/// $nme: who\nvoid hi(string $name) {}\n");
+    let found = server.diagnostics_for(&script);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0]["severity"], 2);
+    assert_eq!(found[0]["range"]["start"], json!({ "line": 0, "character": 4 }));
+    assert!(found[0]["message"].as_str().unwrap().contains("`hi` has no parameter `$nme`"), "{found:?}");
+    server.stop();
+}
+
+#[test]
+fn use_paths_are_completed_and_their_folders_documented() {
+    let dir = temp("use");
+    std::fs::create_dir_all(dir.join("web")).unwrap();
+    std::fs::write(dir.join("web/module.md"), "# The web part\n\nServers and their endpoints.\nOne module each.\n\nMore.\n").unwrap();
+    std::fs::write(dir.join("web/api.lks"), "//! The endpoints.\n//! All of them.\n\npub number count() = 1;\n").unwrap();
+    std::fs::write(dir.join("tools.lks"), "pub number one() = 1;\n").unwrap();
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    server.open(&script, "use web/api;\noutln(api::count());\n");
+    assert!(server.diagnostics_for(&script).is_empty());
+    // A folder in the path: its module.md
+    let hover = server.at("textDocument/hover", &script, 0, 5);
+    assert_eq!(hover["contents"]["value"], "```lakescript\nfolder web\n```\n\nServers and their endpoints.\nOne module each.", "{hover}");
+    assert_eq!(hover["range"], json!({ "start": { "line": 0, "character": 4 }, "end": { "line": 0, "character": 7 } }));
+    // A folder of the standard library: what's in it
+    server.change(&script, "use std/format/json;\n", 5);
+    server.diagnostics_for(&script);
+    let hover = server.at("textDocument/hover", &script, 0, 5);
+    let value = hover["contents"]["value"].as_str().unwrap();
+    assert!(value.starts_with("```lakescript\nfolder std\n```\n\nThe standard library: ") && value.contains("`std/fs`"), "{hover}");
+    let hover = server.at("textDocument/hover", &script, 0, 10);
+    assert_eq!(hover["contents"]["value"], "```lakescript\nfolder std/format\n```\n\nA folder of the standard library: `std/format/csv`, `std/format/json`.", "{hover}");
+    server.change(&script, "use web/api;\noutln(api::count());\n", 6);
+    server.diagnostics_for(&script);
+    // The module: its `//!`
+    let hover = server.at("textDocument/hover", &script, 0, 9);
+    assert!(hover["contents"]["value"].as_str().unwrap().ends_with("The endpoints.\nAll of them."), "{hover}");
+    // Completion of the path
+    server.change(&script, "use \n", 2);
+    server.diagnostics_for(&script);
+
+    let found = server.at("textDocument/completion", &script, 0, 4);
+    let items = found.as_array().unwrap();
+    let detail = |label: &str| items.iter().find(|i| i["label"] == label).map(|i| i["detail"].clone()).unwrap_or_else(|| panic!("no {label} in {found}"));
+    assert_eq!(detail("web"), "The web part");
+    assert_eq!(detail("tools"), Value::Null);
+    assert_eq!(detail("std"), "The standard library");
+    server.change(&script, "use web/a\n", 3);
+    server.diagnostics_for(&script);
+    let found = server.at("textDocument/completion", &script, 0, 9);
+    assert_eq!(labels(&found), ["api"]);
+    assert_eq!(found[0]["detail"], "The endpoints.");
+    assert_eq!(found[0]["textEdit"]["range"]["start"], json!({ "line": 0, "character": 8 }));
+    server.change(&script, "use std/te\n", 4);
+    server.diagnostics_for(&script);
+    let found = server.at("textDocument/completion", &script, 0, 10);
+    let names = labels(&found);
+    assert!(names.contains(&"terminal".to_string()) && names.contains(&"test".to_string()) && names.contains(&"time".to_string()), "{names:?}");
+    // Right after the `/`, which asks for completion by itself
+    server.change(&script, "use std/\n", 5);
+    server.diagnostics_for(&script);
+    let names = labels(&server.at("textDocument/completion", &script, 0, 8));
+    assert!(names.contains(&"fs".to_string()) && names.contains(&"format".to_string()), "{names:?}");
+    // After a division, `/` finds nothing
+    server.change(&script, "const $x = 4 /\n", 6);
+    server.diagnostics_for(&script);
+    assert_eq!(server.at("textDocument/completion", &script, 0, 14), json!([]));
+    server.stop();
+}

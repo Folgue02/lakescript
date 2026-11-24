@@ -36,7 +36,7 @@ fn a_failed_comparison_shows_both_sides() {
     );
     assert_eq!(error("const $n = 3;\nassert $n\n    <= 2;"), "test.lks:2:1: error: AssertionError: assert failed: $n <= 2\n  left:  3\n  right: 2");
     assert!(error("assert [1, 'a'] == [1, 'b'];").ends_with("left:  [1, 'a']\n  right: [1, 'b']"));
-    assert!(error("assert null == {'a' => :b};").ends_with("left:  null\n  right: { 'a' => :b }"));
+    assert!(error("assert null == {'a' => 'b'};").ends_with("left:  null\n  right: { 'a' => 'b' }"));
     // `.equals()` shows both sides too, and `==` on lists with the same values says why it failed
     assert!(error("assert [1, 2].equals([1, 3]);").ends_with("assert failed: [1, 2].equals([1, 3])\n  left:  [1, 2]\n  right: [1, 3]"));
     assert!(error("assert [1, 2] == [1, 2];").ends_with("They're two lists with the same values: `==` checks if they're the same list, and `.equals()` compares their values"));

@@ -79,7 +79,7 @@ fn parse_maps(text: &str, sep: u8, file: Option<&str>) -> Result<Value, NativeEr
 fn cell(value: &Value) -> Result<String, NativeError> {
     match value {
         Value::Null => Ok(String::new()),
-        Value::Str(_) | Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Symbol(_) => Ok(value.to_string()),
+        Value::Str(_) | Value::Int(_) | Value::Float(_) | Value::Bool(_) => Ok(value.to_string()),
         other => Err(NativeError::new(TYPE_ERROR, format!("a value of CSV can be a string, a number, a bool or null, not a {}", other.type_name()))),
     }
 }

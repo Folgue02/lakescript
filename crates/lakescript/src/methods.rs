@@ -162,13 +162,6 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
             }
             _ => None,
         },
-        Value::Symbol(name) => match method {
-            "name" => {
-                args.count(0, 0)?;
-                Some(Value::Str(name.clone()))
-            }
-            _ => None,
-        },
         Value::List(list) => list_method(interp, &receiver, list, &args)?,
         Value::Map(map) => map_method(interp, &receiver, map, &args)?,
         Value::Range(range) => range_method(interp, *range, &args)?,
@@ -768,14 +761,6 @@ fn string_method_plain(strings: &mut crate::strings::StringIndex, s: &Rc<str>, a
             "false" => Value::Bool(false),
             _ => return a.fail_as(VALUE_ERROR, format!("'{s}' isn't `true` or `false`")),
         },
-        "toSymbol" => {
-            let valid = s.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-            if !valid {
-                return a.fail_as(VALUE_ERROR, format!("'{s}' isn't a valid symbol name"));
-            }
-            Value::Symbol(s.clone())
-        }
         "escapeRegex" => string(regex::escape(s)),
         "codePoint" => {
             a.count(0, 1)?;
@@ -1226,7 +1211,7 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
             for item in items() {
                 let key_value = call_fn(interp, &f, vec![item.clone()], span)?;
                 let Some(key) = Key::from_value(&key_value) else {
-                    return error(format!("map keys can be strings, numbers or symbols, not a {}", key_value.type_name()), span);
+                    return error(format!("map keys can be strings or numbers, not a {}", key_value.type_name()), span);
                 };
                 match method {
                     "groupBy" => {
@@ -1400,7 +1385,7 @@ fn map_method(interp: &mut Interpreter, receiver: &Value, map: &Rc<RefCell<Index
         let v = a.value(i);
         match Key::from_value(&v) {
             Some(k) => Ok(k),
-            None => error(format!("map keys can be strings, numbers or symbols, not a {}", v.type_name()), span),
+            None => error(format!("map keys can be strings or numbers, not a {}", v.type_name()), span),
         }
     };
     let new_map = |m: IndexMap<Key, Value>| Value::Map(Rc::new(RefCell::new(m)));
@@ -1536,7 +1521,7 @@ fn map_method(interp: &mut Interpreter, receiver: &Value, map: &Rc<RefCell<Index
             for (k, v) in entries() {
                 let new_key = call_fn(interp, &f, vec![k.to_value()], span)?;
                 let Some(new_key) = Key::from_value(&new_key) else {
-                    return error(format!("map keys can be strings, numbers or symbols, not a {}", new_key.type_name()), span);
+                    return error(format!("map keys can be strings or numbers, not a {}", new_key.type_name()), span);
                 };
                 out.insert(new_key, v);
             }

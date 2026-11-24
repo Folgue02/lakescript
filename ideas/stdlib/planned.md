@@ -10,25 +10,14 @@ What the standard library is getting next *(see [README.md](README.md))*. Termin
 - **Formats grouped under `std/format/`**: `std/format/json`, `std/format/csv`, later `std/format/toml` and maybe `std/format/xml`. `std/json` moves there without a period of both, since only its author uses the language while it's in development *(see [roadmap.md](../roadmap.md))*. After `use std/format/json;` the module is still called `json`.
   - The formats share their names where they fit: `parse($text)` and `stringify($value)` for text, `read($path)` and `write($path, $value)` for files.
 - **CSV** in `std/format/csv`, read and written as lists of rows, or as maps by the names of the columns.
-- **`std/random`**: numbers, choosing, shuffling and UUIDs.
+- **`std/random`**, built *(see [random.md](random.md))*: `number()`, `between($min, $max)`, `bool()`, `uuid()` and `seed($n)`. Choosing and shuffling stay on lists *(`$list.random()`, `$list.shuffle()`)*, and `seed()` makes them repeatable too.
 - **Standard library modules can be written in Lakescript**, embedded in the interpreter, with a part in Rust *(see How modules are made in [README.md](README.md))*. So they can declare classes like `http::Response`, checked and shown in editors like any other code.
 - **Templates like Ruby's ERB**, built in `std/template`: a template and a `map<string, any>` of the values it uses give a string.
   - The tags use double curly braces, and what's inside is Lakescript *(i.e. `{{ $name.upper() }}`)*. The keys of the map become variables.
   - `for`, `if` and the like get a shorter form in templates, so nested blocks don't end in a row of `{{ } }}` like PHP's `<?php } ?>`.
   - Blocks open without `{` and close with their own end: `{{ endfor }}`, `{{ endif }}`, `{{ endwhile }}`.
   - `renderFile` escapes HTML for `.html` and `.htm` files, `render` only with `html: true`, and `{{ raw($x) }}` writes a value without escaping. `null` writes nothing. The rest is in [template.md](template.md).
-- **One `std/archive` for every archive format, with objects.** `archive::open($path)` gives an `archive::Archive` to read, and `archive::create($path)` one to write, which is finished with `close()`. An archive has `entries()`, `read($name)`, `extract($dir)`, `add($path, as:)` and `addText($name, $text)`, and its entries are `archive::Entry` values with `name`, `size`, `dir?()` and `modified`. The format comes from the name: `.zip`, `.tar`, `.tar.gz` or `.tgz`. Plain functions *(i.e. `archive::extract($file, $dir)`)* were the other option, but an open archive can do several things without being opened again, and adding files in a loop is natural. The names of the methods can still change when it's built.
-  ```
-  const $zip = archive::open('site.zip');
-  for ($entry in $zip.entries()) {
-      outln(f"{$entry.name}  {$entry.size} bytes");
-  }
-  $zip.extract('out');
-
-  const $backup = archive::create('backup.tar.gz');
-  $backup.add('photos/', as: 'pictures/');
-  $backup.close();
-  ```
+- **One `std/archive` for every archive format, with objects**, built *(see [archive.md](archive.md))*: `archive::open($path)` and `archive::create($path)` give an `Archive`, with `entries()`, `read()`, `extract()`, `add($path, as:)`, `addText()` and `close()`, for `.zip`, `.tar`, `.tar.gz` and `.tgz`.
 - **`std/html`**, built *(see [html.md](html.md))*: `html::parse($text)` gives a `Document`, whose `select($css)` and `first($css)` give `Element`s, with `text()`, `attr()` and the like. On `scraper`, not a selector engine of our own.
 - **`std/terminal`** *(see [terminal.md](terminal.md))*: prompts *(`ask`, `password`, `confirm`, `choose`)*, styles, the size of the terminal, single keys and progress, and ready-made interactive pieces like `filter` *(like `fzf`)*, a pager and `edit` *(`$EDITOR`)*. Styles are one function with the values of an enum, `terminal::style($text, Style::RED, Style::BOLD)`. Prompts write to stderr.
 - **Testing**, built: tests are functions named `test...`, checked with `assert`, a statement of the language that shows both sides of a comparison that failed. `std/test` has only what `assert` can't do *(i.e. `test::throws($fn)`)*. Tests see the `pub` items of the project's modules. `ferry test` runs the files in `tests/`, and `lks --test` the tests of a script *(see [testing.md](../tooling/testing.md))*.

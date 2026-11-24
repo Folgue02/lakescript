@@ -123,6 +123,8 @@ pub struct Checker<'a> {
     pub stack_budget: usize,
     /// The names found, when they're wanted.
     names: Option<Vec<names::Raw>>,
+    /// Where the function last noted is declared, for the named arguments of its call.
+    callee: Option<names::Place>,
     /// The scope at the place completion is wanted at, and the members before its `.`.
     snapshot: Option<complete::Snapshot>,
     members: Option<Vec<complete::Item>>,
@@ -180,6 +182,7 @@ impl<'a> Checker<'a> {
             stack_base: crate::stack::position(),
             stack_budget: crate::stack::DEFAULT_BUDGET,
             names,
+            callee: None,
             snapshot: None,
             members: None,
             unnarrowed: HashMap::new(),
@@ -482,7 +485,6 @@ impl<'a> Checker<'a> {
                     "bool" => Ty::Bool,
                     "number" => Ty::Number,
                     "string" => Ty::Str,
-                    "symbol" => Ty::Symbol,
                     "regex" => Ty::Regex,
                     "range" => Ty::Range,
                     "command" => Ty::Command,
@@ -965,7 +967,7 @@ impl<'a> Checker<'a> {
             if self.declared_var(&p.name).is_some() {
                 return self.fail(format!("the parameter `${}` of `{}` has the name of a variable that already exists", p.name, decl.name), span);
             }
-            let place = self.recording().then(|| self.here(span, format!("${}", p.name), false));
+            let place = self.recording().then(|| names::Place { param: Some(p.name.clone()), ..self.here(span, format!("${}", p.name), false) });
             let about = if decl.name.is_empty() || decl.name == "anonymous" { "A parameter.".to_string() } else { format!("A parameter of `{}`.", decl.name) };
             if let Some(place) = &place {
                 let show = names::Show::Var { constant: false, name: p.name.clone(), ty: ty.clone() };
@@ -1349,8 +1351,20 @@ impl<'a> Checker<'a> {
     fn facts(&mut self, cond: &Expr) -> Check<(Facts, Facts)> {
         match &cond.kind {
             ExprKind::Unary { op: UnaryOp::Not, operand } => {
-                let (yes, no) = self.facts(operand)?;
-                Ok((no, yes))
+                let t = self.expr(operand, None)?;
+                let t = self.shallow(&t);
+                if matches!(t, Ty::Bool | Ty::Any | Ty::Var(_)) {
+                    let (yes, no) = self.facts(operand)?;
+                    return Ok((no, yes));
+                }
+                // On anything else, `!$x` is `$x == null`, and narrows like it.
+                // Not a `?bool`: `!$done` is also `true` when it's `false`
+                if matches!(&t, Ty::Nullable(inner) if matches!(self.shallow(inner), Ty::Bool)) {
+                    return Ok((Vec::new(), Vec::new()));
+                }
+                let Some((var, declared)) = self.narrowable(operand)? else { return Ok((Vec::new(), Vec::new())) };
+                let not_null = vec![(var.clone(), self.non_null(&declared))];
+                Ok((vec![(var, Ty::Null)], not_null))
             }
             ExprKind::Binary { op: BinaryOp::And, left, right } => {
                 let (ly, _) = self.facts(left)?;
@@ -1538,7 +1552,6 @@ impl<'a> Checker<'a> {
             ExprKind::Str(_) => Ty::Str,
             ExprKind::Bool(_) => Ty::Bool,
             ExprKind::Null => Ty::Null,
-            ExprKind::Symbol(_) => Ty::Symbol,
             ExprKind::Regex { .. } => Ty::Regex,
             ExprKind::Interpolated(parts) => {
                 for p in parts {
@@ -1554,8 +1567,8 @@ impl<'a> Checker<'a> {
                         let t = self.expr(x, None)?;
                         let t = self.resolve(&t);
                         let ok = match &t {
-                            Ty::List(inner) => matches!(**inner, Ty::Str | Ty::Number | Ty::Bool | Ty::Symbol | Ty::Any | Ty::Var(_)),
-                            other => matches!(other, Ty::Str | Ty::Number | Ty::Bool | Ty::Symbol | Ty::Any | Ty::Var(_)),
+                            Ty::List(inner) => matches!(**inner, Ty::Str | Ty::Number | Ty::Bool | Ty::Any | Ty::Var(_)),
+                            other => matches!(other, Ty::Str | Ty::Number | Ty::Bool | Ty::Any | Ty::Var(_)),
                         };
                         if !ok {
                             return self.fail(format!("{} can't be used in a command", a(&t)), x.span);
@@ -1700,8 +1713,9 @@ impl<'a> Checker<'a> {
                 if let (Ty::Object(..), UnaryOp::Neg) = (&t, op) {
                     return self.object_operator(&t, "INeg", "neg", "-", None, span);
                 }
+                // `!` takes any value: on anything but a `bool`, it asks whether it's `null`
                 let (want, ok) = match op {
-                    UnaryOp::Not => ("a bool", matches!(t, Ty::Bool | Ty::Any | Ty::Var(_))),
+                    UnaryOp::Not => ("a bool", true),
                     _ => ("a number", matches!(t, Ty::Number | Ty::Any | Ty::Var(_))),
                 };
                 if !ok {
@@ -2007,6 +2021,18 @@ impl<'a> Checker<'a> {
 
     /// Checks the arguments of a call against a signature, and returns its result type.
     fn call(&mut self, sig: &FnTy, receiver: &HashMap<Rc<str>, Ty>, args: &[Arg], name: &str, span: Span) -> Check<Ty> {
+        // Named arguments are noted as the parameters they give, with their `$name:` line
+        let callee = self.callee.take();
+        if let Some(place) = callee.filter(|_| self.recording()) {
+            for arg in args {
+                let Some(n) = &arg.name else { continue };
+                let Some(i) = sig.names.iter().position(|p| p == n) else { continue };
+                let from = arg.value.span.start.saturating_sub(n.chars().count() + 4);
+                let definition = names::Place { needle: format!("${n}"), doc: false, param: Some(n.clone()), ..place.clone() };
+                let show = names::Show::Var { constant: false, name: n.clone(), ty: sig.params[i].clone() };
+                self.note(span, from, "", n, show, Some(format!("A parameter of `{name}`.")), Some(definition));
+            }
+        }
         let mut map = receiver.clone();
         for g in &sig.generics {
             if !map.contains_key(g) {
@@ -2129,7 +2155,6 @@ impl<'a> Checker<'a> {
             Ty::Str => ("string", vec![]),
             Ty::Number => ("number", vec![]),
             Ty::Bool => ("bool", vec![]),
-            Ty::Symbol => ("symbol", vec![]),
             Ty::Regex => ("regex", vec![]),
             Ty::Range => ("range", vec![]),
             Ty::Command => ("command", vec![]),
@@ -2151,6 +2176,10 @@ impl<'a> Checker<'a> {
         let Some((sig, names)) = found else {
             return self.fail(format!("{} has no method `.{method}()`", a(&self.resolve(&r))), span);
         };
+        // Only the methods of classes take named arguments
+        if let Some(arg) = args.iter().find(|a| a.name.is_some()) {
+            return self.fail(format!("the methods of {key} don't take named arguments: give them in order"), arg.value.span);
+        }
         // The string methods have a version for strings and one for regexes
         if key == "string" {
             if let Some(first) = args.first() {

@@ -29,3 +29,10 @@ try {
 } catch (NullError $e) {
     outln(f"No pie: {$e.message()}");
 }
+
+// `!` on a value that isn't a bool asks whether it's `null`, and narrows
+const ?number $muffins = $stock['muffin'];
+if (!$muffins) {
+    outln('No muffins');
+}
+outln(f"Any tea? {!!$stock['tea']}");

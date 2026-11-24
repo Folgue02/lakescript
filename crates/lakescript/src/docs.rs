@@ -199,6 +199,66 @@ pub fn module_doc(source: &str) -> Result<ModuleDoc, Diagnostic> {
     Ok(ModuleDoc { text: module_text(source), items })
 }
 
+/// Something in a comment that doesn't match the code, but doesn't stop
+/// anything from running: the language has no warnings of its own, so only
+/// editors, `ferry check` and `ferry doc` show these.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Warning {
+    pub message: String,
+    /// Where it is: the line of the comment, from 1, and its columns, from 1,
+    /// with `start` and `end` in characters like spans.
+    pub line: u32,
+    pub column: u32,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// The `$name:` lines of `///` comments for a parameter the function or
+/// method doesn't have *(i.e. after a rename)*, so comments don't go stale
+/// *(see Doc comments in ideas/language/functions.md)*.
+pub fn stale_params(source: &str) -> Result<Vec<Warning>, Diagnostic> {
+    let tokens = crate::lexer::tokenize(source)?;
+    let program = crate::parser::parse(tokens.clone())?;
+    let reader = Reader { source: source.chars().collect(), tokens };
+    let mut warnings = Vec::new();
+    let mut check = |decl: &FunctionDecl, start: usize, what: &str| {
+        let doc = reader.doc_at(start);
+        for (name, _) in &doc.params {
+            if decl.params.iter().any(|p| p.name == *name) {
+                continue;
+            }
+            let have: Vec<String> = decl.params.iter().map(|p| format!("`${}`", p.name)).collect();
+            let has = match have.as_slice() {
+                [] => "it has no parameters".to_string(),
+                [one] => format!("its only parameter is {one}"),
+                _ => format!("its parameters are {}", have.join(", ")),
+            };
+            let message = format!("the comment describes `${name}`, but {what} has no parameter `${name}`: {has}");
+            warnings.push(reader.param_line(start, name, message));
+        }
+    };
+    for stmt in &program {
+        let inner = match &stmt.kind {
+            StmtKind::Pub(inner) => inner,
+            _ => stmt,
+        };
+        match &inner.kind {
+            StmtKind::Function(decl) => check(decl, stmt.span.start, &format!("`{}`", decl.name)),
+            StmtKind::Class(class) => {
+                for member in &class.members {
+                    match &member.kind {
+                        MemberKind::Method { decl, .. } => check(decl, member.span.start, &format!("`{}.{}`", class.name, decl.name)),
+                        MemberKind::Constructor(decl) => check(decl, member.span.start, &format!("the constructor of `{}`", class.name)),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(warnings)
+}
+
 struct Reader {
     source: Vec<char>,
     tokens: Vec<Token>,
@@ -224,6 +284,22 @@ impl Reader {
             matches!(before.kind, TokenKind::Keyword(Keyword::Pub)).then(|| before.doc.clone()).flatten()
         });
         comment.map(|c| parse_doc(&c)).unwrap_or_default()
+    }
+
+    /// A warning on the `/// $name:` line of the comment before the
+    /// declaration at `start`, or on the declaration when it can't be found.
+    fn param_line(&self, start: usize, name: &str, message: String) -> Warning {
+        let needle: Vec<char> = format!("${name}:").chars().collect();
+        // The comment's lines are right before the declaration
+        let from = start.saturating_sub(4000);
+        let found = (from..start.saturating_sub(needle.len()))
+            .rev()
+            .find(|&i| self.source[i..i + needle.len()] == needle[..] && self.source[..i].iter().rev().take_while(|c| **c != '\n').collect::<String>().contains("///"));
+        let at = found.unwrap_or(start);
+        let len = if found.is_some() { needle.len() - 1 } else { 1 };
+        let line = self.source[..at].iter().filter(|c| **c == '\n').count() as u32 + 1;
+        let column = self.source[..at].iter().rev().take_while(|c| **c != '\n').count() as u32 + 1;
+        Warning { message, line, column, start: at, end: at + len }
     }
 
     fn item(&self, stmt: &Stmt, outer: &Stmt) -> Option<Item> {

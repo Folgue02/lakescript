@@ -144,8 +144,6 @@ pub enum TokenKind {
     Regex { pattern: String, flags: String },
     Command(Vec<StringPart>),
     WordList(Vec<String>),
-    SymbolList(Vec<String>),
-    Symbol(String),
 
     // Names
     Variable(String),
@@ -243,8 +241,6 @@ impl TokenKind {
             Regex { .. } => "a regex",
             Command(_) => "a command",
             WordList(_) => "a %w list",
-            SymbolList(_) => "a %i list",
-            Symbol(name) => return format!(":{name}"),
             Variable(name) => return format!("${name}"),
             Field(name) => return format!("`@{name}`"),
             At => "`@`",

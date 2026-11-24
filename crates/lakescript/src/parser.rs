@@ -1393,18 +1393,9 @@ impl Parser {
                 self.advance();
                 ExprKind::Regex { pattern, flags }
             }
-            TokenKind::Symbol(name) => {
-                self.advance();
-                ExprKind::Symbol(name)
-            }
             TokenKind::WordList(words) => {
                 self.advance();
                 let items = words.into_iter().map(|w| Expr { kind: ExprKind::Str(w), span: start }).collect();
-                ExprKind::List { elem_type: None, items }
-            }
-            TokenKind::SymbolList(words) => {
-                self.advance();
-                let items = words.into_iter().map(|w| Expr { kind: ExprKind::Symbol(w), span: start }).collect();
                 ExprKind::List { elem_type: None, items }
             }
             TokenKind::Keyword(Keyword::True) => {
@@ -1858,7 +1849,7 @@ fn path_test_op(name: &str) -> Option<PathTestOp> {
 fn can_start_expression(kind: &TokenKind) -> bool {
     use TokenKind::*;
     match kind {
-        Int(_) | Float(_) | Str(_) | FStr(_) | Regex { .. } | Command(_) | WordList(_) | SymbolList(_) | Symbol(_)
+        Int(_) | Float(_) | Str(_) | FStr(_) | Regex { .. } | Command(_) | WordList(_)
         | Variable(_) | Ident(_) | LParen | LBracket | LBrace | Lt | Minus | Plus | Bang | Tilde | PlusPlus
         | MinusMinus => true,
         Keyword(k) => matches!(k, self::Keyword::True | self::Keyword::False | self::Keyword::Null | self::Keyword::If | self::Keyword::Switch | self::Keyword::Try),
@@ -1970,12 +1961,11 @@ mod tests {
         assert_eq!(expr("[1, 2, 3,]"), "(list 1 2 3)");
         assert_eq!(expr("<string>[]"), "(list<string>)");
         // At the start of a statement `{` is a block, so maps are tested after `=`
-        assert_eq!(stmts("let $m = {'a' => 1, :b => [2],};"), "(let $m (map (\"a\" 1) (:b (list 2))))");
+        assert_eq!(stmts("let $m = {'a' => 1, 'b' => [2],};"), "(let $m (map (\"a\" 1) (\"b\" (list 2))))");
         assert_eq!(stmts("{ outln(1); }"), "{ (call outln 1) }");
         assert_eq!(expr("<string, number>{}"), "(map<string, number>)");
         assert_eq!(expr("<list<string>>[]"), "(list<list<string>>)");
         assert_eq!(expr("%w[a b]"), "(list \"a\" \"b\")");
-        assert_eq!(expr("%i[a b]"), "(list :a :b)");
     }
 
     #[test]

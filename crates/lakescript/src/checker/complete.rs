@@ -219,7 +219,6 @@ impl Checker<'_> {
             Ty::Str => builtin(&mut items, &mut seen, "string", Vec::new()),
             Ty::Number => builtin(&mut items, &mut seen, "number", Vec::new()),
             Ty::Bool => builtin(&mut items, &mut seen, "bool", Vec::new()),
-            Ty::Symbol => builtin(&mut items, &mut seen, "symbol", Vec::new()),
             Ty::Regex => builtin(&mut items, &mut seen, "regex", Vec::new()),
             Ty::Range => builtin(&mut items, &mut seen, "range", Vec::new()),
             Ty::Command => builtin(&mut items, &mut seen, "command", Vec::new()),

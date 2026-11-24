@@ -79,9 +79,9 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 
 | Command | Meaning |
 |---------|---------|
-| `ferry new <author/name>` | Creates a project in a new folder. `--lib` makes a library |
+| `ferry new <author/name>` | Creates a project in a new folder, with only what every project needs: `ferry.toml`, `.gitignore`, the empty `src/<author>/<name>/` and, for an application, an empty command in `bin/<name>.lks`. `--lib` makes a library, without `bin/`. `--example` adds a module, `greeting.lks`, and a command that uses it, to try ferry out |
 | `ferry run [command] [arguments...]` | Runs one of the project's commands from `bin/`, with its dependencies on the module path. The name can be left out when there's only one |
-| `ferry check` | Type checks the whole project without running it, its tests too |
+| `ferry check` | Type checks the whole project without running it, its tests too. It also warns about comments that don't match the code *(i.e. a `$name:` for a parameter that was renamed)*, which never make it fail |
 | `ferry doc [package\|std\|name] [--open]` | Makes the docs of the project, of a package or of the standard library, and opens them with `--open`. With a name *(i.e. `units::bytes`)*, writes its docs in the terminal *(see [docs.md](docs.md))* |
 | `ferry test [filter]` | Runs the tests in `tests/`, or only the ones whose name has `filter` *(see [testing.md](testing.md))* |
 | `ferry add <repository:author/name@version>` | Adds a dependency to `ferry.toml` and downloads it *(i.e. `ferry add github:acme/http@1.4.2`)* |
@@ -145,6 +145,5 @@ The author and name of a project are its real ones, as the repository has them *
 
 ## Later
 
-- `ferry new` without sample code by default, and a flag to make it *(see the Backlog of [roadmap.md](../roadmap.md#backlog))*.
 - Version ranges *(i.e. `^1.4`)*.
 - `ferry uninstall`, `ferry remove` and `ferry update`.

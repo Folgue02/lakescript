@@ -27,7 +27,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, function types |
 | [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
 | [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
-| [nulls.lks](nulls.lks) | Values that can be `null`: checks that narrow, a `never` function that stops the script, `?? fail(...)`, and `$x!` with its `NullError` | |
+| [nulls.lks](nulls.lks) | Values that can be `null`: checks that narrow, a `never` function that stops the script, `?? fail(...)`, `$x!` with its `NullError`, and `!` on any value | |
 | [enums.lks](enums.lks) | Enums: values with fields, methods, a `switch` over every value, `values()`, `from()` and `fromIgnoreCase()` |
 | [generics.lks](generics.lks) | Generic classes, `Stack<string>()`, and an interface implemented with several types |
 | [operators.lks](operators.lks) | Operators on objects through `IAdd`, `IMul`, `IEquals`, `IOrdered`, `IIndex` and `IContains`, and sorting objects |
@@ -40,6 +40,9 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [todo.lks](todo.lks) | A `command` with subcommands, flags, an enum, `--help` and usage errors | `lks examples/todo.lks add 'docs' -p high` |
 | [wordcount.lks](wordcount.lks) | Reading piped input | `cat ideas/README.md \| lks examples/wordcount.lks 5` |
 | [commands.lks](commands.lks) | `%x"..."` commands, safe quoting, `process::command()` | |
+| [archive.lks](archive.lks) | `std/archive`: a backup as a `.tar.gz` with a folder and a text file, its entries, reading one, and extracting it, in a temporary folder | |
+| [random.lks](random.lks) | `std/random`: dice, a coin, choosing and shuffling lists, a seed that makes it repeatable, and a UUID | |
+| [platform.lks](platform.lks) | `process::platform()` and the `Platform` enum in a `switch` | |
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
 | [json.lks](json.lks) | `std/format/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()` | |
 | [csv.lks](csv.lks) | `std/format/csv`: rows as lists or as maps by the names of the columns, quotes, other separators | |

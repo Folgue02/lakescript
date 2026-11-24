@@ -164,11 +164,8 @@ fn run() -> ExitCode {
         Ok(outcome) => ExitCode::from(outcome.code().clamp(0, 255) as u8),
         // Arguments that don't match the script's command: the message and
         // the usage, without the code, and code 2 like most command-line tools
-        Err(diagnostic) if diagnostic.message.starts_with("UsageError: ") => {
-            let paint = paint();
-            let text = &diagnostic.message["UsageError: ".len()..];
-            let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
-            eprintln!("{}{first}{rest}", paint.error("error: "));
+        Err(ref diagnostic) if let Some(text) = diagnostic.usage() => {
+            eprintln!("{}{text}", paint().error("error: "));
             ExitCode::from(2)
         }
         Err(diagnostic) => {

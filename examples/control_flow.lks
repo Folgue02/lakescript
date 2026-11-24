@@ -23,14 +23,14 @@ outln($size);
 // Cases can be several values, ranges or types
 void show(any $value) {
     switch ($value) {
-        case :admin, :editor -> outln('a role');
+        case 'admin', 'editor' -> outln('a role');
         case 1..10 -> outln('a small number');
         case string -> outln(f"the string {$value.upper()}");
         case list<number> -> outln(f"{$value.length()} numbers");
         default -> outln('something else');
     }
 }
-for ($v in [:admin, 7, 'hi', [1, 2, 3], true])
+for ($v in ['admin', 7, 'hi', [1, 2, 3], true])
     show($v);
 
 // Loops: ranges, lists with their index, maps, and strings

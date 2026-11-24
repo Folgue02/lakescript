@@ -38,6 +38,14 @@ impl Call {
 }
 
 impl Diagnostic {
+    /// For an uncaught `UsageError`, its text: arguments that don't match the
+    /// script's command *(see ideas/language/cli.md)*. That's the mistake of
+    /// the person running the script, not of the script, so every way to run
+    /// one shows only this, with the usage, and exits with code 2.
+    pub fn usage(&self) -> Option<&str> {
+        self.message.strip_prefix("UsageError: ")
+    }
+
     pub fn new(message: impl Into<String>, span: Span) -> Self {
         Diagnostic { message: message.into(), span, file: None, trace: Vec::new() }
     }

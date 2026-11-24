@@ -114,7 +114,6 @@ fn string_converting() {
     assert_eq!(eval("'0xFF'.toNumber()"), "255");
     assert_eq!(eval("'1_000'.toNumber()"), "1000");
     assert_eq!(eval("'TRUE'.toBool()"), "true");
-    assert_eq!(eval("'active'.toSymbol() == :active"), "true");
     assert_eq!(eval("'A'.codePoint()"), "65");
     assert!(error("'abc'.toNumber();").contains("isn't a number"));
     assert!(error("'maybe'.toBool();").contains("isn't `true` or `false`"));
@@ -327,7 +326,6 @@ fn randomness() {
 
 #[test]
 fn other_types() {
-    assert_eq!(eval(":active.name()"), "active");
     assert_eq!(eval("true.toNumber()"), "1");
     assert_eq!(eval("[1, 2].toString()"), "[1, 2]");
     assert_eq!(eval("5.typeName()"), "number");

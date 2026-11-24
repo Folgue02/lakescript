@@ -119,12 +119,12 @@ fn switch_statements() {
                 case 4..10 -> {
                     outln('four to nine');
                 }
-                case :admin -> outln('admin');
+                case 'admin' -> outln('admin');
                 case 'x' -> outln('x');
                 default -> outln('something else');
             }
         }
-        for ($v in [1, 3, 7, 10, :admin, 'x', true]) describe($v);
+        for ($v in [1, 3, 7, 10, 'admin', 'x', true]) describe($v);
     ";
     assert_eq!(run(script), "one\ntwo or three\nfour to nine\nsomething else\nadmin\nx\nsomething else\n");
 }
@@ -146,8 +146,8 @@ fn switch_expressions() {
         outln(stage(15));
         outln(stage(40));
 
-        const $price = switch (:pear) {
-            case :apple -> 1;
+        const $price = switch ('pear') {
+            case 'apple' -> 1;
             default -> {
                 const $base = 2;
                 yield $base * 1.5;

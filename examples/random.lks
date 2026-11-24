@@ -1,0 +1,20 @@
+#!/usr/bin/env lks
+// `std/random`: dice, a coin, an ID, and a seed that makes it all repeatable,
+// choosing and shuffling lists too.
+//
+//   lks examples/random.lks
+
+use std/random;
+
+// With a seed, the same numbers on every run
+random::seed(2026);
+const $dice = [random::between(1, 6), random::between(1, 6)];
+outln(f"Dice: {$dice[0]} and {$dice[1]}");
+outln(f"Coin: {if (random::bool()) 'heads' else 'tails'}");
+outln(f"Winner: {%w[Ana Bo Cai Dee].random()}");
+outln(f"Order: {[1, 2, 3, 4, 5].shuffled()}");
+outln(f"Chance: {(random::number() * 100).round()}%");
+
+// UUIDs come from the system: different on every run, with or without a seed
+const $id = random::uuid();
+outln(f"ID: {$id.length()} characters, version {$id[14]}");

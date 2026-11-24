@@ -170,7 +170,6 @@ fn convert(ty: &TypeExpr, receiver: &[Rc<str>], generics: &mut Vec<Rc<str>>) -> 
                 "bool" => Ty::Bool,
                 "number" => Ty::Number,
                 "string" => Ty::Str,
-                "symbol" => Ty::Symbol,
                 "regex" => Ty::Regex,
                 "range" => Ty::Range,
                 "command" => Ty::Command,

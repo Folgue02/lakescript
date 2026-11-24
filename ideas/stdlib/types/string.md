@@ -108,7 +108,6 @@ All the `indexOf` methods return `null` when the text isn't found.
 |--------|---------|-------------|
 | `toNumber()` | `number` | Reads a number in any of the literal forms *(i.e. `'42'`, `'-2.5'`, `'0xFF'`, `'1_000'`)*. Whitespace around it is ignored. Throws a `ValueError` otherwise |
 | `toBool()` | `bool` | `'true'` and `'false'`, ignoring case. Throws a `ValueError` otherwise |
-| `toSymbol()` | `symbol` | *(i.e. `'active'.toSymbol()` is `:active`)*. Throws a `ValueError` if it isn't a valid name |
 | `codePoint(number $index = 0)` | `number` | The Unicode code of the character at `$index` *(i.e. `'A'.codePoint()` is `65`)* |
 | `escapeRegex()` | `string` | Escapes the characters that mean something in a regex, so it can be matched literally *(i.e. `'1+1'.escapeRegex()` is `'1\+1'`)* |
 | `toString()` | `string` | The same string |

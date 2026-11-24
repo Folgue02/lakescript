@@ -25,8 +25,8 @@ outln($data['settings']['theme'] ?? 'default theme');
 outln(json::stringify({'ok' => true, 'items' => [1, 2, 3]}));
 outln(json::stringify({'ok' => true, 'items' => [1, 2, 3]}, indent: 2));
 
-// Symbols become strings, and so do number keys
-outln(json::stringify({:status => :active, 404 => 'not found'}));
+// Number keys become strings
+outln(json::stringify({'status' => 'active', 404 => 'not found'}));
 
 // Files: json::write indents by default
 const $path = fs::tempFile('.json');

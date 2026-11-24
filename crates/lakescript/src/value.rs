@@ -16,7 +16,6 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Str(Rc<str>),
-    Symbol(Rc<str>),
     List(Rc<RefCell<Vec<Value>>>),
     Map(Rc<RefCell<IndexMap<Key, Value>>>),
     Range(Range),
@@ -220,7 +219,6 @@ pub enum Key {
     /// The bits of a float that isn't whole.
     Float(u64),
     Str(Rc<str>),
-    Symbol(Rc<str>),
 }
 
 impl Key {
@@ -232,7 +230,6 @@ impl Key {
                 None => Key::Float(f.to_bits()),
             },
             Value::Str(s) => Key::Str(s.clone()),
-            Value::Symbol(s) => Key::Symbol(s.clone()),
             _ => return None,
         })
     }
@@ -242,7 +239,6 @@ impl Key {
             Key::Int(n) => Value::Int(*n),
             Key::Float(bits) => Value::Float(f64::from_bits(*bits)),
             Key::Str(s) => Value::Str(s.clone()),
-            Key::Symbol(s) => Value::Symbol(s.clone()),
         }
     }
 }
@@ -383,7 +379,6 @@ impl Value {
             Value::Bool(_) => "bool",
             Value::Int(_) | Value::Float(_) => "number",
             Value::Str(_) => "string",
-            Value::Symbol(_) => "symbol",
             Value::List(_) => "list",
             Value::Map(_) => "map",
             Value::Range(_) => "range",
@@ -423,7 +418,7 @@ impl Value {
         }
     }
 
-    /// `==`: by contents for numbers, booleans, symbols, null, strings and
+    /// `==`: by contents for numbers, booleans, null, strings and
     /// ranges, by reference for the rest. Values of different types are never equal.
     pub fn same(&self, other: &Value) -> bool {
         match (self, other) {
@@ -432,7 +427,6 @@ impl Value {
             (Value::Int(a), Value::Int(b)) => a == b,
             (a @ (Value::Int(_) | Value::Float(_)), b @ (Value::Int(_) | Value::Float(_))) => a.as_f64() == b.as_f64(),
             (Value::Str(a), Value::Str(b)) => a == b,
-            (Value::Symbol(a), Value::Symbol(b)) => a == b,
             (Value::Range(a), Value::Range(b)) => a == b,
             (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
             (Value::Map(a), Value::Map(b)) => Rc::ptr_eq(a, b),
@@ -488,7 +482,6 @@ impl Value {
     fn write_nested(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Str(s) => write!(f, "'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
-            Value::Symbol(s) => write!(f, ":{s}"),
             other => write!(f, "{other}"),
         }
     }
@@ -556,7 +549,6 @@ impl fmt::Display for Value {
             Value::Int(n) => write!(f, "{n}"),
             Value::Float(n) => write!(f, "{}", format_number(*n)),
             Value::Str(s) => write!(f, "{s}"),
-            Value::Symbol(s) => write!(f, "{s}"),
             Value::List(items) => {
                 // A list inside itself is written `[...]`, like in Python
                 let Some(_printing) = Visiting::enter(&PRINTING, (Rc::as_ptr(items) as usize, 0)) else { return write!(f, "[...]") };

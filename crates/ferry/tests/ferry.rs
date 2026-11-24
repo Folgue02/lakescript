@@ -117,7 +117,7 @@ fn app(deps: &str) -> String {
 fn a_new_project_runs() {
     let w = World::new();
     let work = w.dir.join("work");
-    w.ok(&work, &["new", "some-user/my.tool"]);
+    w.ok(&work, &["new", "some-user/my.tool", "--example"]);
     let project = w.work("my.tool");
     assert!(project.join("src/some_user/my_tool/greeting.lks").is_file());
     assert_eq!(w.ok(&project, &["run"]), "Hello, world!\n");
@@ -128,6 +128,49 @@ fn a_new_project_runs() {
     w.ok(&work, &["new", "me/lib", "--lib"]);
     assert!(w.fails(&w.work("lib"), &["run"]).contains("has no commands"));
     assert!(w.fails(&work, &["new", "me/lib"]).contains("already exists"));
+    assert_eq!(w.ferry(&work, &["new", "me/x", "--nope"]).status.code(), Some(2));
+}
+
+#[test]
+fn a_new_project_has_no_sample_code() {
+    let w = World::new();
+    let work = w.dir.join("work");
+    w.ok(&work, &["new", "me/tool"]);
+    let project = w.work("tool");
+    assert!(project.join("src/me/tool").is_dir());
+    assert!(!project.join("src/me/tool/greeting.lks").exists());
+    assert_eq!(std::fs::read_to_string(project.join("bin/tool.lks")).unwrap(), "");
+    assert_eq!(w.ok(&project, &["run"]), "");
+    w.ok(&project, &["check"]);
+    w.ok(&work, &["new", "me/lib", "--lib"]);
+    assert!(w.work("lib").join("src/me/lib").is_dir());
+    assert!(!w.work("lib").join("bin").exists());
+}
+
+#[test]
+fn check_warns_about_comments_of_parameters_that_arent_there() {
+    let w = World::new();
+    let module = "/// $text: what to read\npub number size(string $input) = $input.length();\n";
+    let dir = w.project("app", &app(""), &[("bin/app.lks", "outln(1);\n"), ("src/me/app/sizes.lks", module)]);
+    let out = w.ferry(&dir, &["check"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(err.contains("warning: the comment describes `$text`, but `size` has no parameter `$text`"), "{err}");
+    assert!(err.contains("src/me/app/sizes.lks:1:5"), "{err}");
+}
+
+#[test]
+fn wrong_arguments_to_a_command_are_a_usage_error() {
+    let w = World::new();
+    let script = "command Greet {\n    string @who;\n}\nconst $cli = Greet::parse();\noutln($cli.who);\n";
+    let dir = w.project("app", &app(""), &[("bin/app.lks", script)]);
+    assert_eq!(w.ok(&dir, &["run", "Ana"]), "Ana\n");
+    let out = w.ferry(&dir, &["run"]);
+    assert_eq!(out.status.code(), Some(2));
+    let err = stderr(&out);
+    assert!(err.starts_with("error: "), "{err}");
+    assert!(err.contains("Usage:"), "{err}");
+    assert!(!err.contains("UsageError") && !err.contains("-->") && !err.contains("parse()"), "{err}");
 }
 
 #[test]

@@ -1,0 +1,34 @@
+#!/usr/bin/env lks
+// `std/archive`: a backup as a .tar.gz, read back, and extracted, in a
+// temporary folder. Zip and tar work the same way: the name says the format.
+//
+//   lks examples/archive.lks
+
+use std/archive;
+use std/fs;
+use std/path;
+
+const $dir = fs::tempDir();
+fs::makeDir(path::join($dir, 'notes'));
+fs::write(path::join($dir, 'notes/todo.txt'), "buy milk\n");
+fs::write(path::join($dir, 'notes/ideas.txt'), "a boat\n");
+
+// Writing: a folder with what's in it, and a file made from text
+const $file = path::join($dir, 'backup.tar.gz');
+const $backup = archive::create($file);
+$backup.add(path::join($dir, 'notes'), as: 'my-notes');
+$backup.addText('README.txt', 'Notes, backed up');
+$backup.close();
+
+// Reading: its entries, and one file's text
+const $read = archive::open($file);
+for ($entry in $read.entries()) {
+    const $what = if ($entry.dir?()) 'folder' else f"{$entry.size} bytes";
+    outln(f"{$entry.name}: {$what}");
+}
+outln($read.read('README.txt'));
+
+// Extracting it all
+$read.extract(path::join($dir, 'restored'));
+outln(fs::read(path::join($dir, 'restored/my-notes/todo.txt')).trim());
+fs::removeAll($dir);

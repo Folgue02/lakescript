@@ -42,7 +42,6 @@ pub enum ExprKind {
     Regex { pattern: String, flags: String },
     /// `%x"rm {$file}"`
     Command(Vec<StringPart>),
-    Symbol(String),
     Bool(bool),
     Null,
     /// `[1, 2]` or `<string>[]`
@@ -519,7 +518,6 @@ impl fmt::Display for Expr {
             Interpolated(parts) => write!(f, "(f {})", join(parts, " ")),
             Regex { pattern, flags } => write!(f, "(regex {pattern:?} {flags:?})"),
             Command(parts) => write!(f, "(x {})", join(parts, " ")),
-            Symbol(name) => write!(f, ":{name}"),
             Bool(b) => write!(f, "{b}"),
             Null => write!(f, "null"),
             List { elem_type, items } => {

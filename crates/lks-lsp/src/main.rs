@@ -11,11 +11,11 @@ use std::str::FromStr;
 use lakescript::{CapturedOutput, Diagnostic, Engine, Name};
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::notification::{DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, DidSaveTextDocument, Notification as _, PublishDiagnostics};
-use lsp_types::request::{Completion, GotoDefinition, HoverRequest, Request as _};
+use lsp_types::request::{Completion, GotoDefinition, HoverRequest, Request as _, SignatureHelpRequest};
 use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse, CompletionTextEdit, DiagnosticSeverity, TextEdit, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverContents, HoverParams, HoverProviderCapability, Location, MarkupContent, MarkupKind, OneOf, Position, PublishDiagnosticsParams, Range,
-    ServerCapabilities, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    ParameterInformation, ParameterLabel, ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation, TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 
 /// Checks run on a thread with a big stack, like `lks`'s scripts.
@@ -40,7 +40,8 @@ fn run() -> Result<(), String> {
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
-        completion_provider: Some(CompletionOptions { trigger_characters: Some(vec![".".into(), "$".into(), "@".into(), ":".into()]), ..Default::default() }),
+        completion_provider: Some(CompletionOptions { trigger_characters: Some(vec![".".into(), "$".into(), "@".into(), ":".into(), "/".into()]), ..Default::default() }),
+        signature_help_provider: Some(SignatureHelpOptions { trigger_characters: Some(vec!["(".into(), ",".into()]), ..Default::default() }),
         ..Default::default()
     };
     let capabilities = serde_json::to_value(capabilities).map_err(|e| e.to_string())?;
@@ -123,6 +124,21 @@ impl Server {
         let paths: Vec<PathBuf> = self.documents.keys().filter(|p| p.extension().is_some_and(|e| e == "lks")).cloned().collect();
         for path in &paths {
             found.entry(path.clone()).or_default();
+            // Comments that don't match the code: warnings, which never stop a script
+            if let Some(text) = self.documents.get(path)
+                && let Ok(warnings) = lakescript::docs::stale_params(text)
+            {
+                let list = found.entry(path.clone()).or_default();
+                for w in warnings {
+                    list.push(lsp_types::Diagnostic {
+                        range: Range { start: position(text, w.start), end: position(text, w.end) },
+                        severity: Some(DiagnosticSeverity::WARNING),
+                        source: Some("lakescript".into()),
+                        message: w.message,
+                        ..Default::default()
+                    });
+                }
+            }
             let (result, names) = self.check(path);
             // A file that doesn't parse has no names: the last ones stay, for hover while it's being written
             if !names.is_empty() || result.is_ok() {
@@ -254,6 +270,10 @@ impl Server {
                 Ok((_, params)) => serde_json::to_value(self.complete(&params.text_document_position)),
                 Err(e) => return Response::new_err(id, lsp_server::ErrorCode::InvalidParams as i32, format!("{e:?}")),
             },
+            SignatureHelpRequest::METHOD => match request.extract::<SignatureHelpParams>(SignatureHelpRequest::METHOD) {
+                Ok((_, params)) => serde_json::to_value(self.signature_help(&params.text_document_position_params)),
+                Err(e) => return Response::new_err(id, lsp_server::ErrorCode::InvalidParams as i32, format!("{e:?}")),
+            },
             other => return Response::new_err(id, lsp_server::ErrorCode::MethodNotFound as i32, format!("`{other}` isn't supported yet")),
         };
         match result {
@@ -274,9 +294,14 @@ impl Server {
     }
 
     fn hover(&self, at: &TextDocumentPositionParams) -> Option<Hover> {
-        let (name, text) = self.name_at(at)?;
+        let Some((name, text)) = self.name_at(at) else { return self.hover_folder(at) };
         let mut value = format!("```lakescript\n{}\n```", name.code);
-        for part in [&name.about, &name.doc].into_iter().flatten() {
+        // A module of the project: its `//!` text
+        let module_doc = (name.code.starts_with("module ") && name.doc.is_none())
+            .then(|| name.definition.as_ref()?.file.as_ref().and_then(|f| self.text_of(Path::new(f))))
+            .flatten()
+            .and_then(|source| lakescript::docs::module_text(&source));
+        for part in [&name.about, &name.doc, &module_doc].into_iter().flatten() {
             value.push_str("\n\n");
             value.push_str(part);
         }
@@ -286,12 +311,177 @@ impl Server {
         })
     }
 
+    /// The parameters of the call the cursor is in, with the one being
+    /// written and the `$name:` lines of the function's comment.
+    fn signature_help(&self, at: &TextDocumentPositionParams) -> Option<SignatureHelp> {
+        let path = uri_to_path(&at.text_document.uri)?;
+        let text = self.text_of(&path)?;
+        let cursor = offset(&text, at.position);
+        let chars: Vec<char> = text.chars().collect();
+        let call = open_call(&chars, cursor)?;
+        // The function: the name that ends right before the `(`
+        let names = self.names.get(&path)?;
+        let function = names.iter().filter(|n| n.end == call.paren && n.code.ends_with(')')).min_by_key(|n| n.end - n.start)?;
+        let (params, label) = signature_params(&function.code)?;
+        let doc = function.doc.as_deref().map(lakescript::docs::parse_doc).unwrap_or_default();
+        let parameters: Vec<ParameterInformation> = params
+            .iter()
+            .map(|p| ParameterInformation {
+                label: ParameterLabel::LabelOffsets([p.start, p.end]),
+                documentation: doc
+                    .params
+                    .iter()
+                    .find(|(n, _)| *n == p.name)
+                    .map(|(_, what)| lsp_types::Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: what.clone() })),
+            })
+            .collect();
+        let active = match &call.named {
+            Some(name) => params.iter().position(|p| p.name == *name)?,
+            None if params.is_empty() => 0,
+            // Arguments after the last parameter go to it when it takes many
+            None => call.index.min(params.len() - 1),
+        };
+        let documentation = (!doc.text.is_empty()).then(|| lsp_types::Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: doc.text.clone() }));
+        let signature = SignatureInformation { label, documentation, parameters: Some(parameters), active_parameter: Some(active as u32) };
+        Some(SignatureHelp { signatures: vec![signature], active_signature: Some(0), active_parameter: Some(active as u32) })
+    }
+
+    /// A folder in a `use` path *(i.e. `api` in `use folgue02/web/api/users;`)*:
+    /// the first paragraph of its `module.md` *(see Documenting folders in
+    /// ideas/language/modules.md)*.
+    fn hover_folder(&self, at: &TextDocumentPositionParams) -> Option<Hover> {
+        let path = uri_to_path(&at.text_document.uri)?;
+        let text = self.text_of(&path)?;
+        let chars: Vec<char> = text.chars().collect();
+        let cursor = offset(&text, at.position);
+        let line_start = chars[..cursor.min(chars.len())].iter().rposition(|c| *c == '\n').map(|i| i + 1).unwrap_or(0);
+        let line_end = chars[cursor.min(chars.len())..].iter().position(|c| *c == '\n' || *c == ';').map(|i| cursor + i).unwrap_or(chars.len());
+        let line: String = chars[line_start..line_end].iter().collect();
+        let rest = line.trim_start().strip_prefix("use ")?;
+        let path_start = line_start + (line.len() - line.trim_start().len()) + "use ".len() + (rest.len() - rest.trim_start().len());
+        let written: String = chars[path_start..line_end].iter().take_while(|c| is_path_char(**c)).collect();
+        // The parts up to the one under the cursor, which must be a folder: the last part is the module
+        let at_part = chars[path_start..cursor.min(chars.len())].iter().filter(|c| **c == '/').count();
+        let parts: Vec<&str> = written.split('/').collect();
+        if at_part + 1 >= parts.len() {
+            return None;
+        }
+        let folder = parts[..=at_part].join("/");
+        let (from, to) = {
+            let before: usize = parts[..at_part].iter().map(|p| p.chars().count() + 1).sum();
+            (path_start + before, path_start + before + parts[at_part].chars().count())
+        };
+        let mut value = format!("```lakescript\nfolder {folder}\n```");
+        let about = if parts[0] == "std" {
+            // A folder of the standard library: what's in it
+            let prefix = format!("{folder}/");
+            let inside: Vec<String> = lakescript::std_modules().iter().filter(|m| m.starts_with(&prefix)).map(|m| format!("`{m}`")).collect();
+            if inside.is_empty() {
+                return None;
+            }
+            let what = if folder == "std" { "The standard library" } else { "A folder of the standard library" };
+            Some(format!("{what}: {}.", inside.join(", ")))
+        } else {
+            let dir = self.module_roots(&path).into_iter().map(|root| root.join(&folder)).find(|d| d.is_dir())?;
+            std::fs::read_to_string(dir.join("module.md")).ok().and_then(|t| first_paragraph(&t))
+        };
+        if let Some(about) = about {
+            value.push_str("\n\n");
+            value.push_str(&about);
+        }
+        Some(Hover { contents: HoverContents::Markup(MarkupContent { kind: MarkupKind::Markdown, value }), range: Some(Range { start: position(&text, from), end: position(&text, to) }) })
+    }
+
+    /// The folders modules are looked for in, like `run_check` uses them: a
+    /// project's own and its dependencies', or the folder of a script.
+    fn module_roots(&self, path: &Path) -> Vec<PathBuf> {
+        let folder = path.parent().unwrap_or(Path::new("."));
+        match ferry::project::Project::find(folder) {
+            Ok(project) => match ferry::home::Home::open() {
+                Ok(home) => ferry::resolve::installed_module_path(&home, &project),
+                Err(_) => vec![project.src()],
+            },
+            Err(_) => vec![folder.to_path_buf()],
+        }
+    }
+
+    /// The folders and modules that can go next in a `use` path, with the
+    /// first line of a folder's `module.md` and of a module's `//!`.
+    fn complete_use(&self, path: &Path, written: &str, text: &str, cursor: usize) -> Vec<CompletionItem> {
+        let (dirs, partial) = match written.rsplit_once('/') {
+            Some((dirs, partial)) => (dirs, partial),
+            None => ("", written),
+        };
+        let from = cursor - partial.chars().count();
+        let range = Range { start: position(text, from), end: position(text, cursor) };
+        let mut found: Vec<(String, CompletionItemKind, Option<String>)> = Vec::new();
+        let mut add = |label: String, kind: CompletionItemKind, detail: Option<String>| {
+            if !found.iter().any(|(l, _, _)| *l == label) {
+                found.push((label, kind, detail));
+            }
+        };
+        if dirs.is_empty() {
+            add("std".into(), CompletionItemKind::FOLDER, Some("The standard library".into()));
+        }
+        if dirs == "std" || dirs.starts_with("std/") {
+            let prefix = format!("{dirs}/");
+            for module in lakescript::std_modules() {
+                let Some(rest) = module.strip_prefix(&prefix) else { continue };
+                match rest.split_once('/') {
+                    Some((folder, _)) => add(folder.to_string(), CompletionItemKind::FOLDER, None),
+                    None => add(rest.to_string(), CompletionItemKind::MODULE, Some(format!("module {module}"))),
+                }
+            }
+        } else {
+            for root in self.module_roots(path) {
+                let Ok(entries) = std::fs::read_dir(root.join(dirs)) else { continue };
+                let mut entries: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+                entries.sort();
+                for entry in entries {
+                    let Some(name) = entry.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    if entry.is_dir() {
+                        let about = std::fs::read_to_string(entry.join("module.md")).ok().and_then(|t| first_line(&t));
+                        add(name, CompletionItemKind::FOLDER, about);
+                    } else if let Some(module) = name.strip_suffix(".lks") {
+                        let about = std::fs::read_to_string(&entry).ok().and_then(|t| lakescript::docs::module_text(&t)).and_then(|t| first_line(&t));
+                        add(module.to_string(), CompletionItemKind::MODULE, about);
+                    }
+                }
+            }
+        }
+        found
+            .into_iter()
+            .map(|(label, kind, detail)| CompletionItem {
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit { range, new_text: label.clone() })),
+                label,
+                kind: Some(kind),
+                detail,
+                ..Default::default()
+            })
+            .collect()
+    }
+
     /// What can be written at the cursor, from what's before it: `.`, `$`, `@`, `name::` or a word.
     fn complete(&self, at: &TextDocumentPositionParams) -> Option<CompletionResponse> {
         let path = uri_to_path(&at.text_document.uri)?;
         let mut text = self.text_of(&path)?;
         let cursor = offset(&text, at.position);
         let chars: Vec<char> = text.chars().collect();
+        // In the path of a `use` line: folders and modules
+        let line_start = chars[..cursor].iter().rposition(|c| *c == '\n').map(|i| i + 1).unwrap_or(0);
+        let line: String = chars[line_start..cursor].iter().collect();
+        if let Some(written) = line.trim_start().strip_prefix("use ").map(str::trim_start)
+            && written.chars().all(is_path_char)
+        {
+            return Some(CompletionResponse::Array(self.complete_use(&path, written, &text, cursor)));
+        }
+        // `/` asks for completion only for `use` paths: after a division there's nothing to offer
+        if cursor > 0 && chars[cursor - 1] == '/' {
+            return Some(CompletionResponse::Array(Vec::new()));
+        }
         // The part of the name already written
         let word = |c: char| c.is_alphanumeric() || c == '_' || c == '?';
         let mut start = cursor;
@@ -394,7 +584,7 @@ enum Context {
 const KEYWORDS: &[&str] = &[
     "let", "const", "if", "else", "for", "in", "while", "switch", "case", "default", "break", "continue", "return", "yield", "try", "catch", "finally", "throw", "assert",
     "true", "false", "null", "use", "pub", "class", "interface", "enum", "command", "static", "new", "override", "implement", "extends", "any", "void", "never", "bool",
-    "number", "string", "symbol", "regex", "range", "list", "map", "result",
+    "number", "string", "regex", "range", "list", "map", "result",
 ];
 
 fn item_kind(kind: lakescript::CompletionKind) -> CompletionItemKind {
@@ -590,4 +780,146 @@ mod tests {
             assert_eq!(uri_path(&uri_of(path, true), true).as_deref(), Some(path));
         }
     }
+}
+
+/// A call the cursor is inside of: where its `(` is, which argument the
+/// cursor is in, from 0, and the name of a named argument *(i.e. `times` in
+/// `greet('Ana', times: 2)`)*.
+struct OpenCall {
+    paren: usize,
+    index: usize,
+    named: Option<String>,
+}
+
+/// Finds the call the cursor is in, reading the text up to it: strings and
+/// comments are skipped, and so are the brackets closed before the cursor.
+fn open_call(chars: &[char], cursor: usize) -> Option<OpenCall> {
+    // Each open bracket, with its commas and where its current argument starts
+    let mut open: Vec<(char, usize, usize, usize)> = Vec::new();
+    let mut i = 0;
+    let end = cursor.min(chars.len());
+    while i < end {
+        let c = chars[i];
+        match c {
+            '/' if chars.get(i + 1) == Some(&'/') => {
+                while i < end && chars[i] != '\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            '\'' | '"' => {
+                i += 1;
+                while i < end && chars[i] != c {
+                    if chars[i] == '\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            '(' | '[' | '{' => open.push((c, i, 0, i + 1)),
+            ')' | ']' | '}' => {
+                open.pop();
+            }
+            ',' => {
+                if let Some(top) = open.last_mut() {
+                    top.2 += 1;
+                    top.3 = i + 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let &(bracket, paren, index, from) = open.last()?;
+    if bracket != '(' {
+        return None;
+    }
+    // `name:` at the start of the argument, but not `name::`
+    let arg: String = chars[from..end].iter().collect();
+    let arg = arg.trim_start();
+    let word: String = arg.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    let after = &arg[word.len()..];
+    let named = (!word.is_empty() && after.trim_start().starts_with(':') && !after.trim_start().starts_with("::")).then_some(word);
+    Some(OpenCall { paren, index, named })
+}
+
+/// A parameter in the label of a signature: its name, and where it is in
+/// the label, in the UTF-16 units the protocol counts.
+struct SignatureParam {
+    name: String,
+    start: u32,
+    end: u32,
+}
+
+/// The parameters of a function's declaration *(i.e. `string greet(string
+/// $name, number $times = …)`)*, and the label to show.
+fn signature_params(code: &str) -> Option<(Vec<SignatureParam>, String)> {
+    let chars: Vec<char> = code.chars().collect();
+    // The `(` that matches the last `)`: parameters can have function types
+    let mut depth = 0;
+    let mut open = None;
+    for (i, c) in chars.iter().enumerate().rev() {
+        match c {
+            ')' => depth += 1,
+            '(' => {
+                depth -= 1;
+                if depth == 0 {
+                    open = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let open = open?;
+    let close = chars.len() - 1;
+    let utf16 = |i: usize| chars[..i].iter().map(|c| c.len_utf16() as u32).sum::<u32>();
+    let mut params = Vec::new();
+    let mut start = open + 1;
+    let mut depth = 0;
+    for i in open + 1..=close {
+        let c = chars[i];
+        match c {
+            '(' | '<' | '[' => depth += 1,
+            // Not the `>` of `->` in a function type
+            '>' if chars[i - 1] == '-' => {}
+            ')' | '>' | ']' if i < close => depth -= 1,
+            _ => {}
+        }
+        if (c == ',' && depth == 0) || i == close {
+            let text: String = chars[start..i].iter().collect();
+            let lead = text.len() - text.trim_start().len();
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                let name = trimmed
+                    .split(['$', '@'])
+                    .nth(1)
+                    .map(|rest| rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect())
+                    .unwrap_or_default();
+                let from = start + lead;
+                params.push(SignatureParam { name, start: utf16(from), end: utf16(from + trimmed.chars().count()) });
+            }
+            start = i + 1;
+        }
+    }
+    Some((params, code.to_string()))
+}
+
+fn is_path_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '/' || c == '.' || c == '-'
+}
+
+/// The first line of a text, without Markdown's `#` of a title.
+fn first_line(text: &str) -> Option<String> {
+    let line = text.lines().map(|l| l.trim().trim_start_matches('#').trim()).find(|l| !l.is_empty())?;
+    Some(line.to_string())
+}
+
+/// The first paragraph of a Markdown text, after its title.
+fn first_paragraph(text: &str) -> Option<String> {
+    let paragraph = text
+        .split("\n\n")
+        .map(str::trim)
+        .find(|p| !p.is_empty() && !(p.starts_with('#') && !p.contains('\n')))?;
+    Some(paragraph.to_string())
 }

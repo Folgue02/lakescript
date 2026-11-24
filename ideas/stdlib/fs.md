@@ -28,7 +28,7 @@ Every function throws when the disk says no: `FileNotFound` if the path doesn't 
 | `dir?(string $path)` | `bool` | Same as `-d $path` |
 | `link?(string $path)` | `bool` | `true` if it's a symbolic link, without following it |
 | `size(string $path)` | `number` | The size in bytes *(i.e. `fs::size($path).formatBytes()`)* |
-| `modified(string $path)` | `number` | When it was last changed, in seconds since 1970. Comparable with `time::now() / 1000`. It becomes a date once `std/time` has dates |
+| `modified(string $path)` | `time::Date` | When it was last changed, as a date in the local zone *(see [time.md](time.md))*. Dates compare, so `fs::modified($a) > fs::modified($b)` says which changed last, and `.millis()` gives it in milliseconds, like `time::now()` |
 | `mode(string $path)` | `number` | The Unix permissions *(i.e. `0o644`)*. On Windows, `0o444` or `0o666` |
 
 ## Folders
@@ -52,3 +52,7 @@ Every function throws when the disk says no: `FileNotFound` if the path doesn't 
 | `removeAll(string $path)` | `void` | Removes a folder with everything inside it. Does nothing if it doesn't exist |
 | `setMode(string $path, number $mode)` | `void` | Changes the Unix permissions *(i.e. `fs::setMode($script, 0o755)`)*. On Windows it only changes whether the file is read-only |
 | `link(string $target, string $path)` | `void` | Creates a symbolic link at `$path` pointing to `$target` |
+
+## How it's made
+
+- In Rust, in `crates/lakescript/src/stdlib/fs.rs`. With the feature `dates` of the crate, which is on by default, it's written in Lakescript, in `fs.lks`, over that Rust part as `std/fs/native`, so that `modified()` can give a `time::Date`. Without it there are no dates, and `modified()` gives the seconds since 1970 *(see How modules are made in [README.md](README.md))*.

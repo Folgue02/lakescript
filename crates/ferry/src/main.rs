@@ -23,7 +23,9 @@ The tool for Lakescript projects.
 Usage: ferry <command> [arguments...]
 
 Commands:
-  new <author/name> [--lib]   Create a project in a new folder. --lib makes a library
+  new <author/name> [--lib] [--example]
+                              Create a project in a new folder. --lib makes a library,
+                              and --example adds a module and a command to try it out
   run [command] [args...]     Run one of the project's commands from bin/. The name
                               can be left out when there's only one
   check                       Type check the whole project, its tests too, without
@@ -93,11 +95,16 @@ fn start() -> ExitCode {
             println!("ferry {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
-        "new" => match rest {
-            [id] => new(id, false),
-            [id, lib] | [lib, id] if lib == "--lib" => new(id, true),
-            _ => return usage_error("`ferry new` takes the project, i.e. `ferry new folgue02/backup`, and maybe `--lib`"),
-        },
+        "new" => {
+            let (flags, ids): (Vec<&String>, Vec<&String>) = rest.iter().partition(|a| a.starts_with('-'));
+            let library = flags.iter().any(|f| *f == "--lib");
+            let example = flags.iter().any(|f| *f == "--example");
+            match (ids.as_slice(), flags.iter().find(|f| **f != "--lib" && **f != "--example")) {
+                ([id], None) => new(id, library, example),
+                (_, Some(flag)) => return usage_error(&format!("`ferry new` has no option `{flag}`: it takes `--lib` and `--example`")),
+                _ => return usage_error("`ferry new` takes the project, i.e. `ferry new folgue02/backup`, and maybe `--lib` or `--example`"),
+            }
+        }
         "run" => run(rest),
         "check" => match rest {
             [] => check(),
@@ -140,7 +147,9 @@ fn current_dir() -> Result<PathBuf, Fail> {
     std::env::current_dir().map_err(|e| format!("can't read the current folder: {e}").into())
 }
 
-fn new(spec: &str, library: bool) -> Result<ExitCode, Fail> {
+/// A new project in a new folder. Only what every project needs, unless
+/// `example`: then a module and a command that uses it, to try ferry out.
+fn new(spec: &str, library: bool, example: bool) -> Result<ExitCode, Fail> {
     let Some((author, name)) = spec.split_once('/') else {
         return Err(format!("`{spec}` isn't a project. It's written `author/name`, i.e. `folgue02/backup`").into());
     };
@@ -159,16 +168,19 @@ fn new(spec: &str, library: bool) -> Result<ExitCode, Fail> {
         dir.join(MANIFEST),
         format!("[project]\nauthor = \"{author}\"\nname = \"{name}\"\nversion = \"0.1.0\"\nkind = \"{kind}\"\n\n[dependencies]\n"),
     )?;
-    write(src.join("greeting.lks"), "pub string greet(string $who) = f\"Hello, {$who}!\";\n".to_string())?;
     // What ferry makes inside the project, like the docs
     write(dir.join(".gitignore"), ".ferry/\n".to_string())?;
+    std::fs::create_dir_all(&src).map_err(|e| format!("can't create {}: {e}", src.display()))?;
+    if example {
+        write(src.join("greeting.lks"), "pub string greet(string $who) = f\"Hello, {$who}!\";\n".to_string())?;
+    }
     if !library {
-        write(
-            dir.join("bin").join(format!("{name}.lks")),
-            format!(
-                "use std/process;\nuse {id}/greeting;\n\noutln(greeting::greet(process::args()[0] ?? 'world'));\n"
-            ),
-        )?;
+        let command = if example {
+            format!("use std/process;\nuse {id}/greeting;\n\noutln(greeting::greet(process::args()[0] ?? 'world'));\n")
+        } else {
+            String::new()
+        };
+        write(dir.join("bin").join(format!("{name}.lks")), command)?;
     }
     status("Created", &format!("the {kind} {id} in {}", dir.display()));
     Ok(ExitCode::SUCCESS)
@@ -203,6 +215,11 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
     engine.set_args(args.to_vec());
     match engine.run_file(&script) {
         Ok(outcome) => Ok(ExitCode::from(outcome.code().clamp(0, 255) as u8)),
+        // The person's mistake in the arguments, like `lks` shows it
+        Err(ref diagnostic) if let Some(text) = diagnostic.usage() => {
+            eprintln!("{} {text}", paint().error("error:"));
+            Ok(ExitCode::from(2))
+        }
         Err(diagnostic) => {
             eprintln!("{}", show(&diagnostic, &script));
             Ok(ExitCode::FAILURE)
@@ -268,6 +285,10 @@ fn check_project(project: &Project, dependencies: &[Dependency]) -> Result<usize
     }
     // Modules no command uses are checked too
     let modules = project.modules()?;
+    let files = project.commands().into_iter().map(|c| project.command_file(&c)).chain(project.test_files()).chain(modules.iter().map(|m| project.src().join(format!("{m}.lks"))));
+    for file in files {
+        stale_comments(project, &file);
+    }
     if !modules.is_empty() {
         let source: String = modules.iter().enumerate().map(|(i, m)| format!("use {m} as module{i};\n")).collect();
         if let Err(diagnostic) = engine(&module_path).check_source(&source) {
@@ -275,6 +296,19 @@ fn check_project(project: &Project, dependencies: &[Dependency]) -> Result<usize
         }
     }
     Ok(shown.len())
+}
+
+/// Warns about the comments of a file that don't match its code *(i.e. a
+/// `$name:` for a parameter that was renamed)*. They never stop anything.
+fn stale_comments(project: &Project, file: &Path) {
+    let Ok(text) = std::fs::read_to_string(file) else { return };
+    let Ok(warnings) = lakescript::docs::stale_params(&text) else { return };
+    let paint = paint();
+    for w in warnings {
+        eprintln!("{} {}
+ {} {}:{}:{}
+", paint.warning("warning:"), w.message, paint.note("-->"), relative(project, file), w.line, w.column);
+    }
 }
 
 /// `ferry doc`: the docs of the project, of a package, of the standard

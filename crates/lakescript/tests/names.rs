@@ -98,3 +98,22 @@ fn modules_exceptions_and_types() {
     let count = at(&names, source, "$count = 2", 0);
     assert_eq!((count.code.as_str(), line_of(source, count)), ("number $count", 6));
 }
+
+#[test]
+fn parameters_have_their_line_of_the_comment() {
+    let source = "/// Says hello.\n///\n/// $name: who to greet\n/// $times: how many times,\n/// at least 1\nstring greet(string $name, number $times = 1) = $name.repeat($times);\noutln(greet('ana', times: 2));\n";
+    let names = names(source);
+    // Where it's declared, where it's used, and as a named argument
+    for (text, nth) in [("$times", 1), ("$times", 2), ("times", 4)] {
+        let param = at(&names, source, text, nth);
+        assert_eq!(param.code, "number $times", "{text} {nth}");
+        assert_eq!(param.about.as_deref(), Some("A parameter of `greet`."));
+        assert_eq!(param.doc.as_deref(), Some("how many times, at least 1"), "{text} {nth}");
+        assert_eq!(definition(source, param), "$times");
+    }
+    assert_eq!(at(&names, source, "$name", 1).doc.as_deref(), Some("who to greet"));
+    // Methods too
+    let source = "class Box {\n    /// $by: how much bigger\n    pub void grow(number $by) {}\n}\nBox().grow(by: 2);\n";
+    let found = self::names(source);
+    assert_eq!(at(&found, source, "by:", 1).doc.as_deref(), Some("how much bigger"));
+}

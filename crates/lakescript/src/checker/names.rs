@@ -50,6 +50,9 @@ pub struct Place {
     /// Whether the `///` comment before the statement is about this name. A
     /// parameter is declared in its function's statement, but the comment is the function's.
     pub doc: bool,
+    /// For a parameter: its name, so its doc is the `$name:` line of the
+    /// function's comment.
+    pub param: Option<String>,
 }
 
 /// How a name is shown. Types are written out once the check is done, when
@@ -93,7 +96,7 @@ impl Checker<'_> {
 
     /// The place of a declaration in the file being checked.
     pub(super) fn here(&self, span: Span, needle: impl Into<String>, doc: bool) -> Place {
-        Place { file: self.file.clone(), span, needle: needle.into(), doc }
+        Place { file: self.file.clone(), span, needle: needle.into(), doc, param: None }
     }
 
     /// Notes a name: `lead` and then `needle`, looked for in `span` from
@@ -101,6 +104,9 @@ impl Checker<'_> {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn note(&mut self, span: Span, from: usize, lead: &str, needle: &str, show: Show, about: Option<String>, definition: Option<Place>) {
         let file = self.file.clone();
+        if self.names.is_some() {
+            self.callee = if matches!(show, Show::Func { .. }) { definition.clone() } else { None };
+        }
         if let Some(names) = &mut self.names {
             names.push(Raw { file, span, from, lead: lead.into(), needle: needle.into(), show, about, definition });
         }
@@ -219,12 +225,12 @@ impl Checker<'_> {
 
 /// How a module is shown, and where it is: the start of its file.
 fn module_info(module: &ModuleSig) -> (Show, Option<String>, Option<Place>) {
-    let std = module.path.starts_with("std/") || !module.path.contains(['/', '\\']);
+    let std = module.path.starts_with("std/") || module.path.starts_with(crate::stdlib::EMBEDDED) || !module.path.contains(['/', '\\']);
     let code = format!("module {}", module_name(&module.path));
     if std {
         return (Show::Text(code), Some("A module of the standard library.".into()), None);
     }
-    let place = Place { file: Some(module.path.clone()), span: Span::default(), needle: String::new(), doc: false };
+    let place = Place { file: Some(module.path.clone()), span: Span::default(), needle: String::new(), doc: false, param: None };
     (Show::Text(code), None, Some(place))
 }
 
@@ -235,13 +241,17 @@ pub(super) fn class_place(class: &ClassRef, member: Option<&str>, needle: &str) 
         Some(m) => *places.members.get(m)?,
         None => places.class?,
     };
-    Some(Place { file: places.file.clone(), span, needle: needle.into(), doc: true })
+    Some(Place { file: places.file.clone(), span, needle: needle.into(), doc: true, param: None })
 }
 
 /// How a module is named in messages: `std/fs`, or the name of its file.
 pub(super) fn module_name(path: &str) -> String {
     if path.starts_with("std/") {
         return path.to_string();
+    }
+    // A module of the standard library written in Lakescript *(i.e. `<std>/fs.lks`)*
+    if let Some(name) = path.strip_prefix(crate::stdlib::EMBEDDED).and_then(|p| p.strip_suffix(".lks")) {
+        return format!("std/{name}");
     }
     std::path::Path::new(path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
 }
@@ -306,7 +316,14 @@ pub fn locate(found: Vec<Found>, read: impl Fn(Option<&str>) -> Option<String>) 
             Some(place) => match source(&place.file) {
                 Some(def_text) => {
                     let at = def_text.find(place.span.start, place.span.end, &place.needle).unwrap_or(place.span.start);
-                    let doc = if place.doc { def_text.doc_at(place.span.start) } else { None };
+                    let doc = match &place.param {
+                        // A parameter: its line in the function's comment
+                        Some(param) => def_text.doc_at(place.span.start).and_then(|c| {
+                            crate::docs::parse_doc(&c).params.into_iter().find(|(n, _)| n == param).map(|(_, what)| what)
+                        }),
+                        None if place.doc => def_text.doc_at(place.span.start),
+                        None => None,
+                    };
                     (Some(Definition { file: place.file.clone(), start: at, end: at + place.needle.chars().count() }), doc)
                 }
                 None => (None, None),

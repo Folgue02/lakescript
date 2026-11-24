@@ -1,0 +1,16 @@
+#!/usr/bin/env lks
+// The system the script runs on, as an enum: a `switch` has to cover every
+// value, and a misspelled one is an error before the script runs.
+//
+//   lks examples/platform.lks
+
+use std/process;
+use std/process/Platform;
+
+const $platform = process::platform();
+const $opener = switch ($platform) {
+    case Platform::MACOS -> 'open';
+    case Platform::WINDOWS -> 'start';
+    case Platform::LINUX -> 'xdg-open';
+};
+outln(f"Running on {$platform.name().lower()}: files open with `{$opener}`");

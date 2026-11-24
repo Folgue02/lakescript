@@ -192,6 +192,14 @@ pub fn register(m: &mut Exports) {
             .unwrap_or(0);
         Ok(Value::Int(secs))
     });
+    // For `fs::modified()` of Lakescript, which makes a date of it
+    m.function("modifiedMillis", |ctx, values| {
+        let a = Args::new("fs::modified", values, 1, 1)?;
+        let p = a.str(0)?;
+        let meta = fs::metadata(ctx.state.resolve(&p)).map_err(|e| io_error("read", &p, e))?;
+        let millis = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64).unwrap_or(0);
+        Ok(Value::Int(millis))
+    });
     m.function("mode", |ctx, values| {
         let a = Args::new("fs::mode", values, 1, 1)?;
         let p = a.str(0)?;

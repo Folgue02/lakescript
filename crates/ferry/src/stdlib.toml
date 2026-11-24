@@ -628,13 +628,6 @@ group = "Converting"
 
 [[modules.items.members]]
 kind = "method"
-name = "toSymbol"
-code = "symbol toSymbol()"
-text = "*(i.e. `'active'.toSymbol()` is `:active`)*. Throws a `ValueError` if it isn't a valid name"
-group = "Converting"
-
-[[modules.items.members]]
-kind = "method"
 name = "codePoint"
 code = "number codePoint(number $index = 0)"
 text = "The Unicode code of the character at `$index` *(i.e. `'A'.codePoint()` is `65`)*"
@@ -1807,29 +1800,6 @@ group = "Using the numbers"
 
 [[modules.items]]
 kind = "type"
-name = "symbol"
-code = "symbol"
-text = "*To be removed: enums and strings replace them (see Backlog in [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)).*\n\nA fixed name, like `:active` *(see Symbols in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*."
-
-[[modules.items.groups]]
-name = "Converting"
-
-[[modules.items.members]]
-kind = "method"
-name = "name"
-code = "string name()"
-text = "The name without the `:` *(i.e. `:active.name()` is `'active'`)*"
-group = "Converting"
-
-[[modules.items.members]]
-kind = "method"
-name = "toString"
-code = "string toString()"
-text = "Same as `name()`"
-group = "Converting"
-
-[[modules.items]]
-kind = "type"
 name = "regex"
 code = "regex"
 text = "A regular expression, written `%r\"...\"` *(see Regex in [builtin_types](https://github.com/Folgue02/lakescript/blob/master/ideas/language/builtin_types.md))*. Matching is done with `-match` and with the string methods `match()`, `matchAll()`, `replaceMatches()`, `replaceFirstMatch()`, `replaceLastMatch()`, `removeMatches()` and `splitMatches()` *(see [`string`](types.string.html))*."
@@ -1987,6 +1957,108 @@ text = "The command as the shell will receive it, with the values already quoted
 group = "Information"
 
 [[modules]]
+short = "archive"
+path = "std/archive"
+title = "std/archive"
+text = "Archives: zip, tar and tar.gz, read and written the same way. `use std/archive;`, then `archive::open('site.zip')` or `archive::create('backup.tar.gz')`. The format comes from the name of the file.\n\n```\nuse std/archive;\n\nconst $zip = archive::open('site.zip');\nfor ($entry in $zip.entries()) {\n    outln(f\"{$entry.name}  {$entry.size} bytes\");\n}\noutln($zip.read('docs/notes.txt'));\n$zip.extract('out');\n\nconst $backup = archive::create('backup.tar.gz');\n$backup.add('photos/', as: 'pictures');\n$backup.addText('README.txt', 'My photos');\n$backup.close();\n```"
+
+[[modules.groups]]
+name = "Functions"
+text = "- The formats, by the end of the name, in any case: `.zip`, `.tar`, and `.tar.gz` or `.tgz` for a tar compressed with gzip."
+
+[[modules.items]]
+kind = "function"
+name = "open"
+code = "Archive open(string $path)"
+text = "An archive to read. Throws a `FileNotFound` if it doesn't exist, an `IOError` if it can't be read as its format, and a `ValueError` if its name doesn't say a format"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "create"
+code = "Archive create(string $path)"
+text = "A new archive, written by `close()` with what was added to it, over a file that may be there. Throws a `ValueError` if its name doesn't say a format"
+group = "Functions"
+
+[[modules.items]]
+kind = "class"
+name = "Archive"
+code = "class Archive"
+text = "From `open()` to read it, or from `create()` to write a new one.\n\n\n\n- Reading methods on an archive from `create()`, adding to one from `open()`, or adding after `close()`, throw a `ValueError` that says which to use.\n- Names use `/` and have no `/` at the end, also for folders *(i.e. `pictures/2026`)*. A name with `..` can't be written, so archives made here can always be extracted.\n- Folders are added with what's in them sorted, so the same files give the same archive.\n- Files keep when they were changed and, on Linux and macOS, their permissions, so scripts in an archive stay runnable."
+
+[[modules.items.members]]
+kind = "field"
+name = "path"
+code = "string @path"
+text = "The path of its file, as it was given"
+
+[[modules.items.members]]
+kind = "method"
+name = "entries"
+code = "list<Entry> entries()"
+text = "Its files and folders, in the order they're in it"
+
+[[modules.items.members]]
+kind = "method"
+name = "read"
+code = "string read(string $name)"
+text = "The text of a file in it *(i.e. `$zip.read('docs/notes.txt')`)*. Throws a `FileNotFound` if it isn't there, and a `ValueError` if it isn't text: `extract()` writes any file"
+
+[[modules.items.members]]
+kind = "method"
+name = "extract"
+code = "void extract(string $dir = '.')"
+text = "Writes everything in it into a folder, which is created if needed. Throws a `ValueError` for an entry that would be written outside it *(i.e. `../x` or `/etc/x`)*, before writing that entry"
+
+[[modules.items.members]]
+kind = "method"
+name = "add"
+code = "void add(string $path, ?string $as = null)"
+text = "Adds a file, or a folder with everything in it, under the name `$as`, or its own name *(i.e. `photos` for `/home/ana/photos/`)*. `.` adds what's inside the current folder. Throws a `FileNotFound` if it doesn't exist"
+
+[[modules.items.members]]
+kind = "method"
+name = "addText"
+code = "void addText(string $name, string $text)"
+text = "Adds a file with that text"
+
+[[modules.items.members]]
+kind = "method"
+name = "close"
+code = "void close()"
+text = "Writes a new archive with what was added, in that order. An archive that's read needs no `close()`"
+
+[[modules.items]]
+kind = "class"
+name = "Entry"
+code = "class Entry"
+text = "A file or a folder in an archive, from `entries()`."
+
+[[modules.items.members]]
+kind = "field"
+name = "name"
+code = "string @name"
+text = "Its path inside the archive *(i.e. `docs/notes.txt`)*"
+
+[[modules.items.members]]
+kind = "field"
+name = "size"
+code = "number @size"
+text = "Its size in bytes, uncompressed. 0 for a folder"
+
+[[modules.items.members]]
+kind = "field"
+name = "modified"
+code = "?Date @modified"
+text = "When it was last changed, as a date in the local zone *(see [`std/time`](time.html))*, or `null` when the archive doesn't say. Zip archives keep it without a zone, in the local one, like `zip` and `unzip` do"
+
+[[modules.items.members]]
+kind = "method"
+name = "dir?"
+code = "bool dir?()"
+text = "`true` for a folder"
+
+[[modules]]
 short = "fs"
 path = "std/fs"
 title = "std/fs"
@@ -2080,8 +2152,8 @@ group = "Information"
 [[modules.items]]
 kind = "function"
 name = "modified"
-code = "number modified(string $path)"
-text = "When it was last changed, in seconds since 1970. Comparable with `time::now() / 1000`. It becomes a date once `std/time` has dates"
+code = "time::Date modified(string $path)"
+text = "When it was last changed, as a date in the local zone *(see [`std/time`](time.html))*. Dates compare, so `fs::modified($a) > fs::modified($b)` says which changed last, and `.millis()` gives it in milliseconds, like `time::now()`"
 group = "Information"
 
 [[modules.items]]
@@ -2381,6 +2453,7 @@ short = "process"
 path = "std/process"
 title = "std/process"
 text = "The script's own process, and running programs. `use std/process;`, then `process::args()`."
+notes = "## Platform\n\nThe systems a script can run on, as an enum, so the checker catches a typo and a `switch` has to cover every one. It's a type module of its own, `std/process/Platform`, so `use` gives `Platform` itself *(see type modules in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*, like `Style` in [`std/terminal`](terminal.html):\n\n```\nuse std/process;\nuse std/process/Platform;\n\nconst $opener = switch (process::platform()) {\n    case Platform::MACOS -> 'open';\n    case Platform::WINDOWS -> 'start';\n    case Platform::LINUX -> 'xdg-open';\n};\n```\n\nIts values are `LINUX`, `MACOS` and `WINDOWS`. Other systems like the BSDs are `LINUX`, the closest."
 
 [[modules.groups]]
 name = "The script"
@@ -2427,8 +2500,8 @@ group = "The script"
 [[modules.items]]
 kind = "function"
 name = "platform"
-code = "symbol platform()"
-text = "`:linux`, `:macos` or `:windows`"
+code = "Platform platform()"
+text = "The system the script runs on: `Platform::LINUX`, `Platform::MACOS` or `Platform::WINDOWS` *(see [Platform](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/#platform))*"
 group = "The script"
 
 [[modules.items]]
@@ -2458,6 +2531,51 @@ name = "command"
 code = "command command(string $program, ...string $args)"
 text = "A `command` that runs the program directly, without a shell, with each argument passed as it is. No quoting is needed, and it works the same on every system *(i.e. `process::command('git', 'commit', '-m', $message).run()`)*"
 group = "Running programs"
+
+[[modules]]
+short = "random"
+path = "std/random"
+title = "std/random"
+text = "Random numbers, `true` or `false`, UUIDs, and a seed to get the same ones on every run. `use std/random;`, then `random::between(1, 6)`.\n\n```\nuse std/random;\n\noutln(random::between(1, 6));              // a die: 1 to 6\nif (random::number() < 0.1) outln('lucky');   // 1 time in 10\nconst $id = random::uuid();                // 'f47ac10b-58cc-4372-a567-0e02b2c3d479'\n\nrandom::seed(42);                          // the same numbers on every run from here,\noutln(['a', 'b', 'c'].random());           // also for choosing and shuffling lists\n```"
+
+[[modules.groups]]
+name = "Functions"
+text = "- Choosing and shuffling are methods of lists, not functions here: `$list.random()` gives an element, and `$list.shuffle()` and `$list.shuffled()` put them in random order *(see [`list`](types.list.html))*.\n- Without `seed()`, the numbers are different on every run.\n- It's good enough for scripts, games and tests, not for secrets: passwords and keys need a generator made for them."
+
+[[modules.items]]
+kind = "function"
+name = "number"
+code = "number number()"
+text = "From 0 to 1, without 1, like Python's `random.random()` and Java's `Math.random()`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "between"
+code = "number between(number $min, number $max)"
+text = "A whole number from `$min` to `$max`, both included, like Python's `randint` *(i.e. `random::between(1, 6)` for a die)*. Throws a `ValueError` if `$min` is bigger than `$max`, and a `TypeError` if one isn't a whole number"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "bool"
+code = "bool bool()"
+text = "`true` or `false`, half the times each"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "uuid"
+code = "string uuid()"
+text = "A random UUID, version 4, in lowercase *(i.e. `'f47ac10b-58cc-4372-a567-0e02b2c3d479'`)*. Its bits come from the system, so `seed()` doesn't change them, and two runs never give the same ones"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "seed"
+code = "void seed(number $seed)"
+text = "Starts the generator again from a whole number, so the numbers that follow are the same on every run, for tests and for things that must be repeatable *(i.e. a level of a game)*. It's also the generator of `$list.random()`, `$list.shuffle()` and `$list.shuffled()`"
+group = "Functions"
 
 [[modules]]
 short = "http"
@@ -2705,7 +2823,7 @@ short = "format/json"
 path = "std/format/json"
 title = "std/format/json"
 text = "Reading and writing JSON. `use std/format/json;`, then `json::parse($text)`.\n\n```\nuse std/format/json;\n\nconst $data = json::parse('{\"name\": \"Daniel\", \"tags\": [\"a\", \"b\"]}');\nconst $name = $data['name'].as(string);\noutln(json::stringify($data, indent: 2));\n```"
-notes = "## Reading\n\nThere's no schema: the values become the built-in types, and the result is `any`. Scripts use `.as()` to get typed values out of it.\n\n| JSON | Lakescript |\n|------|------------|\n| object | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |\n| `true`, `false` | `bool` |\n| `null` | `null` |\n\n- Only strict JSON is accepted: no comments and no trailing commas, so a file Lakescript reads is also valid for other tools.\n- Invalid JSON throws a `ValueError` with the line and column.\n\n## Writing\n\n| Lakescript | JSON |\n|------------|------|\n| `map` | object. Number and symbol keys become strings, since JSON keys can only be strings |\n| `list` | array |\n| `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |\n| `symbol` | string |\n| `string`, `number`, `bool`, `null` | the same |\n\n- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.\n- `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented."
+notes = "## Reading\n\nThere's no schema: the values become the built-in types, and the result is `any`. Scripts use `.as()` to get typed values out of it.\n\n| JSON | Lakescript |\n|------|------------|\n| object | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |\n| `true`, `false` | `bool` |\n| `null` | `null` |\n\n- Only strict JSON is accepted: no comments and no trailing commas, so a file Lakescript reads is also valid for other tools.\n- Invalid JSON throws a `ValueError` with the line and column.\n\n## Writing\n\n| Lakescript | JSON |\n|------------|------|\n| `map` | object. Number keys become strings, since JSON keys can only be strings |\n| `list` | array |\n| `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |\n| `string`, `number`, `bool`, `null` | the same |\n\n- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.\n- `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented."
 
 [[modules.groups]]
 name = "Functions"
@@ -2750,7 +2868,7 @@ short = "format/csv"
 path = "std/format/csv"
 title = "std/format/csv"
 text = "Reading and writing CSV, the format of spreadsheets. `use std/format/csv;`, then `csv::parse($text)`.\n\n```\nuse std/format/csv;\n\n// Every row as a list of strings\nfor ($row in csv::read('scores.csv')) {\n    outln($row.join(' | '));\n}\n\n// The first line names the columns, and the rows are maps by those names\nconst $people = csv::readMaps('people.csv');\noutln($people.map(($p) -> $p['name']).join(', '));\n\ncsv::write('adults.csv', $people.filter(($p) -> ($p['age']?.toNumber() ?? 0) >= 18));\n```"
-notes = "## Reading\n\n- Every value is a string, even the ones that look like numbers, so nothing is guessed. `.toNumber()` turns them into numbers *(i.e. `$row['age'].toNumber()`)*.\n- Values in double quotes can have the separator, new lines and quotes written twice *(i.e. `\"Smith, John\"` and `\"say \"\"hi\"\"\"`)*, as in RFC 4180.\n- Rows can have different numbers of values. With `parseMaps`, a row with fewer values than the first line gets `''` for the rest, and one with more throws a `ValueError`. So does a name that's twice in the first line.\n- `$separator` is one character: `'\\t'` reads TSV, `';'` the CSV of spreadsheets in languages that write decimals with a comma.\n- Invalid CSV throws a `ValueError` with the line.\n\n## Writing\n\n- Values can be strings, numbers, bools and symbols, written as `outln` writes them. `null` is an empty value. Anything else throws a `TypeError`.\n- Values that have the separator, new lines or quotes are put in double quotes.\n- Rows that are maps write their keys in a first line, in the order of the first map. A later map without a key gets an empty value for it, and one with a key the first doesn't have throws a `ValueError`.\n- Every line ends with a new line, also the last one."
+notes = "## Reading\n\n- Every value is a string, even the ones that look like numbers, so nothing is guessed. `.toNumber()` turns them into numbers *(i.e. `$row['age'].toNumber()`)*.\n- Values in double quotes can have the separator, new lines and quotes written twice *(i.e. `\"Smith, John\"` and `\"say \"\"hi\"\"\"`)*, as in RFC 4180.\n- Rows can have different numbers of values. With `parseMaps`, a row with fewer values than the first line gets `''` for the rest, and one with more throws a `ValueError`. So does a name that's twice in the first line.\n- `$separator` is one character: `'\\t'` reads TSV, `';'` the CSV of spreadsheets in languages that write decimals with a comma.\n- Invalid CSV throws a `ValueError` with the line.\n\n## Writing\n\n- Values can be strings, numbers and bools, written as `outln` writes them. `null` is an empty value. Anything else throws a `TypeError`.\n- Values that have the separator, new lines or quotes are put in double quotes.\n- Rows that are maps write their keys in a first line, in the order of the first map. A later map without a key gets an empty value for it, and one with a key the first doesn't have throws a `ValueError`.\n- Every line ends with a new line, also the last one."
 
 [[modules.groups]]
 name = "Functions"
@@ -2833,7 +2951,7 @@ text = "```\nuse std/terminal;\n\nconst $name = terminal::ask('Your name?', defa
 
 [[modules.groups]]
 name = "Styles"
-text = "One function, with the styles as the values of an enum, `Style`. Colors, backgrounds and effects are all values of it, given in the same place. It's a type module of its own, `std/terminal/Style`, so `use` gives `Style` itself *(see type modules in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*:\n\n```\nuse std/terminal;\nuse std/terminal/Style;\n\nerrln(terminal::style('error:', Style::RED, Style::BOLD) + ' the file is missing');\noutln(terminal::style(' OK ', Style::BLACK, Style::ON_GREEN));\n```\n\nThe values of `Style` *(as many as terminals can show, with plain names)*:\n\n- **Colors**: `BLACK`, `RED`, `GREEN`, `YELLOW`, `BLUE`, `MAGENTA`, `CYAN`, `WHITE`, and their bright versions `BRIGHT_RED` and so on. Also `GRAY`, `ORANGE`, `PINK`, `PURPLE` and `BROWN`, from the 256 colors most terminals have.\n- **Backgrounds**: the same colors after `ON_` *(i.e. `ON_RED`, `ON_BRIGHT_BLUE`, `ON_GRAY`)*.\n- **Effects**: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `DOUBLE_UNDERLINE`, `CURLY_UNDERLINE`, `OVERLINE`, `STRIKE`, `BLINK`, `INVERSE` and `HIDDEN`. A terminal that doesn't have one ignores it.\n\n\n- An enum instead of symbols or a function for each color: there are few names to learn, and the checker catches a misspelled style and completes them.\n- Styles turn themselves off when `NO_COLOR` is set or the output isn't a terminal, so the codes never end up in a file or a pipe."
+text = "One function, with the styles as the values of an enum, `Style`. Colors, backgrounds and effects are all values of it, given in the same place. It's a type module of its own, `std/terminal/Style`, so `use` gives `Style` itself *(see type modules in [modules](https://github.com/Folgue02/lakescript/blob/master/ideas/language/modules.md))*:\n\n```\nuse std/terminal;\nuse std/terminal/Style;\n\nerrln(terminal::style('error:', Style::RED, Style::BOLD) + ' the file is missing');\noutln(terminal::style(' OK ', Style::BLACK, Style::ON_GREEN));\n```\n\nThe values of `Style` *(as many as terminals can show, with plain names)*:\n\n- **Colors**: `BLACK`, `RED`, `GREEN`, `YELLOW`, `BLUE`, `MAGENTA`, `CYAN`, `WHITE`, and their bright versions `BRIGHT_RED` and so on. Also `GRAY`, `ORANGE`, `PINK`, `PURPLE` and `BROWN`, from the 256 colors most terminals have.\n- **Backgrounds**: the same colors after `ON_` *(i.e. `ON_RED`, `ON_BRIGHT_BLUE`, `ON_GRAY`)*.\n- **Effects**: `BOLD`, `DIM`, `ITALIC`, `UNDERLINE`, `DOUBLE_UNDERLINE`, `CURLY_UNDERLINE`, `OVERLINE`, `STRIKE`, `BLINK`, `INVERSE` and `HIDDEN`. A terminal that doesn't have one ignores it.\n\n\n- An enum instead of strings or a function for each color: there are few names to learn, and the checker catches a misspelled style and completes them.\n- Styles turn themselves off when `NO_COLOR` is set or the output isn't a terminal, so the codes never end up in a file or a pipe."
 
 [[modules.groups]]
 name = "The terminal"

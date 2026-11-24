@@ -1,0 +1,10 @@
+// `std/process/Platform`: the systems a script can run on, from
+// `process::platform()` *(see ideas/stdlib/process.md)*. Its own module, so
+// `use std/process/Platform;` gives `Platform` itself.
+
+/// The system a script runs on, from `process::platform()`.
+pub enum Platform {
+    LINUX,
+    MACOS,
+    WINDOWS,
+}

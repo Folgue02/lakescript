@@ -1372,10 +1372,6 @@ impl<'a> Compiler<'a> {
                 let c = self.constant(Value::string(s));
                 self.emit(Op::Const(c));
             }
-            ExprKind::Symbol(name) => {
-                let c = self.constant(Value::Symbol(Rc::from(name.as_str())));
-                self.emit(Op::Const(c));
-            }
             ExprKind::Bool(true) => {
                 self.emit(Op::True);
             }
@@ -1486,17 +1482,10 @@ impl<'a> Compiler<'a> {
                 self.expr(receiver)?;
                 let to_end = nullable.then(|| self.emit(Op::JumpIfNull(0)));
                 let name = self.name(method);
-                if args.iter().any(|a| a.name.is_some()) {
-                    for arg in args {
-                        self.expr(&arg.value)?;
-                    }
-                    self.fail("methods don't take named arguments yet");
-                } else {
-                    match self.args(args)? {
-                        None => self.emit(Op::CallMethod { name, argc: args.len() as u32 }),
-                        Some(call) => self.emit(Op::CallMethodComplex { name, call }),
-                    };
-                }
+                match self.args(args)? {
+                    None => self.emit(Op::CallMethod { name, argc: args.len() as u32 }),
+                    Some(call) => self.emit(Op::CallMethodComplex { name, call }),
+                };
                 if let Some(j) = to_end {
                     self.patch(j);
                 }
@@ -2159,7 +2148,6 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         | ExprKind::Float(_)
         | ExprKind::Str(_)
         | ExprKind::Regex { .. }
-        | ExprKind::Symbol(_)
         | ExprKind::Bool(_)
         | ExprKind::Null
         | ExprKind::ModuleFunction { .. }

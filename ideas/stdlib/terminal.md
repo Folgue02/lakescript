@@ -66,7 +66,7 @@ The values of `Style` *(as many as terminals can show, with plain names)*:
 | `strip(string $text)` | `string` | The text without the codes of styles |
 | `visibleWidth(string $text)` | `number` | How many columns the text takes, without the codes and with characters that take two columns *(i.e. emoji)* counted twice |
 
-- An enum instead of symbols or a function for each color: there are few names to learn, and the checker catches a misspelled style and completes them.
+- An enum instead of strings or a function for each color: there are few names to learn, and the checker catches a misspelled style and completes them.
 - Styles turn themselves off when `NO_COLOR` is set or the output isn't a terminal, so the codes never end up in a file or a pipe.
 
 ## The terminal

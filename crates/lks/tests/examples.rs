@@ -159,7 +159,7 @@ fn html() {
 #[test]
 fn nulls() {
     let out = run_ok(&["examples/nulls.lks"]);
-    assert_eq!(out, "Tea: 11 left after this cup\nCake: 3 left\nFirst: CAKE\nNo pie: `$stock['pie']` is null\n");
+    assert_eq!(out, "Tea: 11 left after this cup\nCake: 3 left\nFirst: CAKE\nNo pie: `$stock['pie']` is null\nNo muffins\nAny tea? true\n");
 }
 
 #[test]
@@ -249,6 +249,24 @@ fn todo() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("`--priority` must be one of low, normal, high, not `soon`"), "{stderr}");
     assert!(stderr.contains("Usage: todo.lks add [options] <task>"), "{stderr}");
+}
+
+#[test]
+fn archive() {
+    let out = run_ok(&["examples/archive.lks"]);
+    assert_eq!(out, "my-notes: folder\nmy-notes/ideas.txt: 7 bytes\nmy-notes/todo.txt: 9 bytes\nREADME.txt: 16 bytes\nNotes, backed up\nbuy milk\n");
+}
+
+#[test]
+fn random() {
+    let out = run_ok(&["examples/random.lks"]);
+    assert_eq!(out, "Dice: 1 and 4\nCoin: tails\nWinner: Bo\nOrder: [1, 4, 2, 3, 5]\nChance: 91%\nID: 36 characters, version 4\n");
+}
+
+#[test]
+fn platform() {
+    let out = run_ok(&["examples/platform.lks"]);
+    assert!(out.starts_with("Running on ") && out.contains("files open with"), "{out}");
 }
 
 #[test]

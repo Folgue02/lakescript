@@ -5,6 +5,7 @@
 - Should allow varargs. Inside the function, `...string $names` is a `list<string>`.
 - A list can be spread into the arguments with `...` *(i.e. `greet(...$names)`)*.
 - Should allow calling them while naming parameters. Named and positional arguments can be mixed, but positional ones go first *(i.e. `createFile('daniel', extension: 'jpg')`)*.
+    - Methods of classes take them too *(i.e. `$zip.add('photos/', as: 'pictures')`)*. The methods of built-in types *(i.e. `'ab'.repeat(2)`)* only take their arguments in order, and naming one is an error.
 - Must always have a return type. Functions that don't return anything use `void` *(i.e. `void log(string $message) { ... }`)*. This way a definition never looks like a call followed by a block.
     - A function that never returns, because it always throws or exits, has `never`, like Rust's `!`, TypeScript's `never` and Swift's `Never` *(i.e. `never fail(string $message) { errln($message); exit(1); }`)*. `exit()` is one.
         - A call to it ends a block, like `return` and `throw`: it narrows *(i.e. after `if ($user == null) fail('nobody is logged in');`, `$user` isn't nullable)*, a function that must return can end with it, and the code after it doesn't run.
@@ -180,10 +181,10 @@ pub string greet(string $name, number $times = 1) = ...;
 
 - `$name:` describes a parameter, `returns:` what it gives back, and `throws ValueError:` when it throws that exception, one line for each exception. A description goes on in the next lines, until an empty line or the next of these lines *(the lexer trims the lines of a `///` comment, so their indentation can't tell)*.
 - It's like Javadoc's `@param`, `@return` and `@throws`, but written as the language writes things: `@` is a field in Lakescript *(i.e. `@x`)*, so `@name` in a comment would look like one.
-- *Decided, not built yet.* With these lines:
-    - Hover on a parameter shows its line, also on a named argument of a call *(i.e. `times:` in `greet('Ana', times: 2)`)*.
-    - Editors show what the argument being written is for while a call is typed *(signature help, in `lks-lsp`)*.
-    - The checker warns about a `$name` that the function doesn't have, so comments don't go stale after a rename.
+- With these lines:
+    - Hover on a parameter shows its line: where it's declared, where it's used, and on a named argument of a call *(i.e. `times:` in `greet('Ana', times: 2)`)*.
+    - Editors show what the argument being written is for while a call is typed *(signature help, in `lks-lsp`)*: the function's declaration with the parameter being written marked, its line, and the text of the comment. A named argument is the parameter it names.
+    - A `$name:` for a parameter the function doesn't have is a warning, so comments don't go stale after a rename *(i.e. `` the comment describes `$name`, but `greet` has no parameter `$name`: its parameters are `$who`, `$times` ``)*. The language has no warnings of its own, so `lks` ignores it and a comment never stops a script: `lks-lsp` shows it in the editor, and `ferry check` and `ferry doc` print it. It's checked for functions, methods and constructors.
     - `ferry doc` shows the parameters, what it returns and what it throws as tables *(see phase 9 in [roadmap.md](../roadmap.md))*.
 - A folder of modules is documented by a `module.md` in it *(see Documenting folders in [modules.md](modules.md))*.
 - **The text is Markdown** *(i.e. `` `code` ``, `*emphasis*`, lists and links)*, which editors and `ferry doc` show formatted. The lines `$name:`, `returns:` and `throws ...:` are the only syntax of their own, and their descriptions are Markdown too.

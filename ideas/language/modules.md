@@ -128,8 +128,6 @@ string _read(string $path) = readFile($path);   // only usable in this file
 
 ## Documenting folders
 
-*Decided, not built yet.*
-
 A module documents itself with the `///` comments of its declarations *(see Doc comments in [functions.md](functions.md))*. A folder of modules is documented by a `module.md` in it, in Markdown: what the folder holds, or is meant to hold.
 
 ```
@@ -144,12 +142,11 @@ src/folgue02/web/
 
 - `module.md` rather than `README.md`: the name says what it's for, and it doesn't mix with the `README.md` files a repository has for the people who read it. GitHub and GitLab don't show it on their own, which is the cost.
 - `ferry doc` gives each folder a page with its `module.md` first and then its modules. The one in `src/<author>/<name>/` is the front page of the library *(see phase 9 in [roadmap.md](../roadmap.md))*.
-- Editors show its first paragraph on hover over a part of a `use` path *(i.e. `api` in `use folgue02/web/api/users;`)*, and its first line next to each folder while a `use` path is completed.
+- Editors show its first paragraph on hover over a part of a `use` path *(i.e. `api` in `use folgue02/web/api/users;`)*, and its first line next to each folder while a `use` path is completed. A module shows its `//!` text on hover, and the first line of it next to its name while the path is completed.
 - `ferry` already leaves the files of `src/` that aren't `.lks` alone, so a `module.md` there changes nothing for it.
 
 ## Rules
 
-- `::` is a single token, so it's never confused with a symbol *(`:name`)*.
 - The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*.
 - Modules can import each other, directly or through other modules *(i.e. `Order` and `Customer`, each in its own file)*. This works because a module's top level only has declarations, and everything `pub` has its type written. How it works is in [classes.md](classes.md#circular-imports).
     - The checker reads the signatures of a module that's in the middle of being checked from its declarations, without checking its code, since everything `pub` has its type written.

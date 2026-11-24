@@ -77,7 +77,6 @@ list<string> words();
 list<string> chars();
 number toNumber();
 bool toBool();
-symbol toSymbol();
 number codePoint(number $index = 0);
 string escapeRegex();
 string toString();
@@ -115,10 +114,6 @@ void times((number) -> void $fn);
 
 type bool
 number toNumber();
-string toString();
-
-type symbol
-string name();
 string toString();
 
 type regex
@@ -275,32 +270,6 @@ void err(any $value = '');
 void errln(any $value = '');
 never exit(number $code = 0);
 
-module std/fs
-string read(string $path);
-list<string> readLines(string $path);
-void write(string $path, string $text);
-void append(string $path, string $text);
-void writeLines(string $path, list<string> $lines);
-bool exists?(string $path);
-bool file?(string $path);
-bool dir?(string $path);
-bool link?(string $path);
-number size(string $path);
-number modified(string $path);
-number mode(string $path);
-list<string> list(string $path = '.');
-list<string> walk(string $path = '.');
-list<string> glob(string $pattern);
-void makeDir(string $path);
-string tempDir();
-string tempFile(string $extension = '');
-void copy(string $from, string $to);
-void move(string $from, string $to);
-void remove(string $path);
-void removeAll(string $path);
-void setMode(string $path, number $mode);
-void link(string $target, string $path);
-
 module std/path
 string join(...string $parts);
 string withExtension(string $path, string $extension);
@@ -333,17 +302,12 @@ list<string> lines();
 bool piped?();
 void flush();
 
-module std/process
-list<string> args();
-?string scriptPath();
-string cwd();
-void chdir(string $path);
-number pid();
-symbol platform();
-void sleep(number $seconds);
-?string which(string $name);
-command shell(string $script);
-command command(string $program, ...string $args);
+module std/random
+number number();
+number between(number $min, number $max);
+bool bool();
+string uuid();
+void seed(number $seed);
 
 module std/format/json
 any parse(string $text);
@@ -367,6 +331,59 @@ string renderFile(string $path, map<string, any> $values = {}, ?bool $html = nul
 module std/test
 exception throws(() -> any $code);
 
+module std/fs
+string read(string $path);
+list<string> readLines(string $path);
+void write(string $path, string $text);
+void append(string $path, string $text);
+void writeLines(string $path, list<string> $lines);
+bool exists?(string $path);
+bool file?(string $path);
+bool dir?(string $path);
+bool link?(string $path);
+number size(string $path);
+number modified(string $path);
+number mode(string $path);
+list<string> list(string $path = '.');
+list<string> walk(string $path = '.');
+list<string> glob(string $pattern);
+void makeDir(string $path);
+string tempDir();
+string tempFile(string $extension = '');
+void copy(string $from, string $to);
+void move(string $from, string $to);
+void remove(string $path);
+void removeAll(string $path);
+void setMode(string $path, number $mode);
+void link(string $target, string $path);
+
+module std/fs/native
+string read(string $path);
+list<string> readLines(string $path);
+void write(string $path, string $text);
+void append(string $path, string $text);
+void writeLines(string $path, list<string> $lines);
+bool exists?(string $path);
+bool file?(string $path);
+bool dir?(string $path);
+bool link?(string $path);
+number size(string $path);
+number modified(string $path);
+number mode(string $path);
+list<string> list(string $path = '.');
+list<string> walk(string $path = '.');
+list<string> glob(string $pattern);
+void makeDir(string $path);
+string tempDir();
+string tempFile(string $extension = '');
+void copy(string $from, string $to);
+void move(string $from, string $to);
+void remove(string $path);
+void removeAll(string $path);
+void setMode(string $path, number $mode);
+void link(string $target, string $path);
+number modifiedMillis(string $path);
+
 module std/html/native
 any parse(string $text);
 list<any> select(any $node, string $css);
@@ -384,6 +401,26 @@ string unescape(string $text);
 
 module std/http/native
 map<string, any> send(string $method, string $url, any $body, map<string, string> $headers, ?number $timeout, ?string $path);
+
+module std/archive/native
+list<list<any>> entries(string $path);
+string read(string $path, string $name);
+void extract(string $path, string $dir);
+void format(string $path);
+void check(string $path);
+void write(string $path, list<list<string>> $added);
+
+module std/process/native
+list<string> args();
+?string scriptPath();
+string cwd();
+void chdir(string $path);
+number pid();
+string platform();
+void sleep(number $seconds);
+?string which(string $name);
+command shell(string $script);
+command command(string $program, ...string $args);
 
 module std/time/native
 number now();

@@ -11,7 +11,7 @@ The script's own process, and running programs. `use std/process;`, then `proces
 | `cwd()` | `string` | The current folder |
 | `chdir(string $path)` | `void` | Changes the current folder of the script and of the commands it runs. Throws a `FileNotFound` if it doesn't exist. The folder of a program that embeds Lakescript never changes |
 | `pid()` | `number` | The ID of the process |
-| `platform()` | `symbol` | `:linux`, `:macos` or `:windows` |
+| `platform()` | `Platform` | The system the script runs on: `Platform::LINUX`, `Platform::MACOS` or `Platform::WINDOWS` *(see [Platform](#platform))* |
 | `sleep(number $seconds)` | `void` | Waits *(i.e. `process::sleep(0.5)`)* |
 
 ## Running programs
@@ -25,3 +25,24 @@ Commands written with `%x"..."` run through the shell *(see Command in [builtin_
 | `command(string $program, ...string $args)` | `command` | A `command` that runs the program directly, without a shell, with each argument passed as it is. No quoting is needed, and it works the same on every system *(i.e. `process::command('git', 'commit', '-m', $message).run()`)* |
 
 - `exit` needs no `use` *(see [general.md](general.md))*.
+
+## Platform
+
+The systems a script can run on, as an enum, so the checker catches a typo and a `switch` has to cover every one. It's a type module of its own, `std/process/Platform`, so `use` gives `Platform` itself *(see type modules in [modules.md](../language/modules.md))*, like `Style` in [terminal.md](terminal.md):
+
+```
+use std/process;
+use std/process/Platform;
+
+const $opener = switch (process::platform()) {
+    case Platform::MACOS -> 'open';
+    case Platform::WINDOWS -> 'start';
+    case Platform::LINUX -> 'xdg-open';
+};
+```
+
+Its values are `LINUX`, `MACOS` and `WINDOWS`. Other systems like the BSDs are `LINUX`, the closest.
+
+## How it's made
+
+- It's written in Lakescript, in `crates/lakescript/src/stdlib/process.lks`, with `Platform` in `process/Platform.lks` and its Rust part, `std/process/native`, in `process.rs` *(see How modules are made in [README.md](README.md))*.

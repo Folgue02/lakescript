@@ -38,7 +38,7 @@ csv::write('adults.csv', $people.filter(($p) -> ($p['age']?.toNumber() ?? 0) >= 
 
 ## Writing
 
-- Values can be strings, numbers, bools and symbols, written as `outln` writes them. `null` is an empty value. Anything else throws a `TypeError`.
+- Values can be strings, numbers and bools, written as `outln` writes them. `null` is an empty value. Anything else throws a `TypeError`.
 - Values that have the separator, new lines or quotes are put in double quotes.
 - Rows that are maps write their keys in a first line, in the order of the first map. A later map without a key gets an empty value for it, and one with a key the first doesn't have throws a `ValueError`.
 - Every line ends with a new line, also the last one.

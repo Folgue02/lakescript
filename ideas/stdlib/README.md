@@ -62,7 +62,6 @@ What's coming next is in [planned.md](planned.md).
 | [types/list.md](types/list.md) | `list<T>` |
 | [types/map.md](types/map.md) | `map<K, V>` |
 | [types/range.md](types/range.md) | `range` |
-| [types/symbol.md](types/symbol.md) | `symbol` |
 | [types/regex.md](types/regex.md) | `regex` |
 | [types/command.md](types/command.md) | `command`, created with `%x"..."` |
 
@@ -76,7 +75,9 @@ What's coming next is in [planned.md](planned.md).
 | [env.md](env.md) | `std/env`: environment variables |
 | [time.md](time.md) | `std/time`: the current time, dates, their formats and zones *(`std/time/zone`)* |
 | [io.md](io.md) | `std/io`: reading stdin |
-| [process.md](process.md) | `std/process`: arguments, the current folder, finding and running programs |
+| [process.md](process.md) | `std/process`: arguments, the current folder, the platform, finding and running programs |
+| [archive.md](archive.md) | `std/archive`: zip, tar and tar.gz archives, read, extracted and written |
+| [random.md](random.md) | `std/random`: random numbers, `true` or `false`, UUIDs and the seed |
 | [html.md](html.md) | `std/html`: reading HTML and finding its parts with CSS selectors |
 | [http.md](http.md) | `std/http`: requests to web servers |
 | [format/json.md](format/json.md) | `std/format/json`: reading and writing JSON |
