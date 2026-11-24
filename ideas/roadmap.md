@@ -16,6 +16,8 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **8. Editors** | A language server | `lks-lsp`: errors while typing, hover, go to definition and completion, first for farsub *(see [tooling/lsp.md](tooling/lsp.md))* |
 | **9. Documentation** | Docs for scripts and projects | The documentation of the standard library, and `ferry doc` for the `pub` items of a project, from their `///` comments |
 | **10. Interactive scripts** | Talking with the person who runs the script | `std/terminal` *(prompts, styles, progress, a fuzzy finder, a pager, tables)*, Ctrl+C as an `Interrupted`, and dates, their formats and time zones in `std/time` |
+| **11. Data** | Data that isn't text, and typed data | `bytes`, JSON read into classes with types given as values, `std/random`, `std/archive`, `never` and `$x!`, symbols removed, and in `lks-lsp` signature help, the docs of parameters and importing types from completion |
+| **12. Shipping** | A program in one file | Bundles: `ferry bundle` makes a `.lkb` with every module and the `resources/` it needs, run by `lks` *(see [tooling/bundles.md](tooling/bundles.md))* |
 | **Later** | | The rest of the standard library, the per-user bytecode cache, formatter, concurrency |
 
 ## Versions
@@ -37,8 +39,8 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 
 ## Status
 
-- Phases 1 to 10 are done.
-- After `v0.10.0`, not released yet:
+- Phases 1 to 11 are done. Phase 12, bundles, is being designed.
+- Phase 11 was released as `v0.11.0`:
     - Symbols are gone *(`:active`, `%i[...]`, the type `symbol`)*: enums do what they were for, and better, since the checker catches a typo in an enum's value, checks that a `switch` covers every one, and completes them. Strings do the rest. `process::platform()` gives a `Platform`, an enum in `std/process/Platform` *(see [stdlib/process.md](stdlib/process.md))*.
     - `!` takes any value: on anything but a `bool`, `!$x` is `$x == null` *(see Boolean operators in [language/operators.md](language/operators.md))*.
     - `ferry new` makes no sample code unless asked with `--example`, and `ferry run` shows wrong arguments to a command like `lks` does: the message and the usage, and exit code 2 *(see [tooling/ferry.md](tooling/ferry.md))*.

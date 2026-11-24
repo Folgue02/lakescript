@@ -40,6 +40,7 @@ Lakescript is a scripting language, meant to replace bash for scripts that outgr
     - [lks.md](tooling/lks.md): the command line of the interpreter.
     - [vm.md](tooling/vm.md): the bytecode compiler and the VM.
     - [ferry.md](tooling/ferry.md): projects, dependencies, repositories and installed commands.
+    - [bundles.md](tooling/bundles.md): shipping a program in one file *(being designed)*.
     - [diagnostics.md](tooling/diagnostics.md): how error messages look.
     - [lsp.md](tooling/lsp.md): `lks-lsp`, the language server for editors *(phase 8)*.
     - [testing.md](tooling/testing.md): tests, `assert`, `ferry test` and `lks --test`.
