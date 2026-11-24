@@ -353,7 +353,7 @@ pub fn register(m: &mut Exports) {
         #[cfg(unix)]
         std::os::unix::fs::symlink(&*target, &path).map_err(|e| io_error("create the link", &p, e))?;
         #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&target, &path).map_err(|e| io_error("create the link", &p, e))?;
+        std::os::windows::fs::symlink_file(&*target, &path).map_err(|e| io_error("create the link", &p, e))?;
         Ok(Value::Null)
     });
 }

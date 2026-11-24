@@ -310,12 +310,13 @@ fn write(shown: &str, file: &Path, adds: Vec<Add>) -> Result<(), NativeError> {
             };
             for item in &items {
                 let meta = std::fs::metadata(&item.path).map_err(|e| io_error("add", &item.path.display().to_string(), e))?;
-                let mut options = options(meta.modified().unwrap_or(now));
+                let options = options(meta.modified().unwrap_or(now));
+                // Scripts in an archive stay runnable
                 #[cfg(unix)]
-                {
+                let options = {
                     use std::os::unix::fs::PermissionsExt;
-                    options = options.unix_permissions(meta.permissions().mode() & 0o777);
-                }
+                    options.unix_permissions(meta.permissions().mode() & 0o777)
+                };
                 if item.dir {
                     zip.add_directory(format!("{}/", item.name), options).map_err(|e| failed(&e))?;
                 } else {

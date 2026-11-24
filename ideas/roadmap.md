@@ -27,7 +27,7 @@ Lakescript's own versions follow [semver](https://semver.org), like its packages
 - Each finished phase is a new minor version with a git tag: phase 1 is `v0.1.0`, phase 5 is `v0.5.0`. Fixes between phases are patch versions *(i.e. `v0.5.1`)*.
 - The version in `Cargo.toml` is the one of the last tag, so `lks --version` says which phase it is.
 - Pushing a version tag runs `.github/workflows/release.yml`: it builds `lks`, `ferry` and `lks-lsp` for Linux (x86_64 and arm64, static with musl), macOS (arm64 and x86_64) and Windows (x86_64), and posts them on the tag's GitHub release, each as an archive with its SHA-256. Every archive has the pages of the standard library in `doc/std/`, made by the ferry just built *(`ferry doc std`)*, and the release has them on their own too, as `lakescript-<version>-stdlib.tar.gz`. `tools/release/package.sh <target>` builds one of those archives by hand, in `dist/`.
-    - Windows is a supported platform, like Linux and macOS. Commands run without a shell on every system *(see [builtin_types.md](language/builtin_types.md))*, and on Windows `ferry install` writes `.cmd` launchers. The tests don't run on Windows yet, since many of them run Unix programs like `printf` and `sort`.
+    - Windows is a supported platform, like Linux and macOS. Code only for Windows *(`#[cfg(windows)]`)* isn't built on the Mac where Lakescript is made, so before a release it's checked with `cargo check -p lakescript --all-targets --no-default-features --features archive,csv,dates,html,terminal --target x86_64-pc-windows-msvc`, with the rustup toolchain. `http` is left out since `ring` needs a C compiler for Windows. Commands run without a shell on every system *(see [builtin_types.md](language/builtin_types.md))*, and on Windows `ferry install` writes `.cmd` launchers. The tests don't run on Windows yet, since many of them run Unix programs like `printf` and `sort`.
 - While it's `0.x`, any version can change the language. `1.0.0` comes once the language is stable, and from then on only a new major version can break scripts.
 
 ### While in development
@@ -40,7 +40,7 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 ## Status
 
 - Phases 1 to 11 are done. Phase 12, bundles, is being designed.
-- Phase 11 was released as `v0.11.0`:
+- Phase 11 was released as `v0.11.0`, and `v0.11.1` fixes its build for Windows, which didn't compile, so `v0.11.0` has no binaries:
     - Symbols are gone *(`:active`, `%i[...]`, the type `symbol`)*: enums do what they were for, and better, since the checker catches a typo in an enum's value, checks that a `switch` covers every one, and completes them. Strings do the rest. `process::platform()` gives a `Platform`, an enum in `std/process/Platform` *(see [stdlib/process.md](stdlib/process.md))*.
     - `!` takes any value: on anything but a `bool`, `!$x` is `$x == null` *(see Boolean operators in [language/operators.md](language/operators.md))*.
     - `ferry new` makes no sample code unless asked with `--example`, and `ferry run` shows wrong arguments to a command like `lks` does: the message and the usage, and exit code 2 *(see [tooling/ferry.md](tooling/ferry.md))*.
