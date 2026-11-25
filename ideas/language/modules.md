@@ -43,6 +43,7 @@ use folgue02/something/config;     // src/folgue02/something/config.lks, the pro
 use acme/http/client;              // client.lks of the dependency
 ```
 
+- Hidden files and folders, whose name starts with `.` *(i.e. `.DS_Store`, an editor's swap file)*, aren't modules, tests or commands of a project, and bundles leave them out.
 - A project's modules live under `src/author/name/`, so every module has the same full path in its own project and in the projects that use it, and every path belongs to a single package.
 - Versions follow [semver](https://semver.org): `MAJOR.MINOR.PATCH` *(i.e. `1.4.2`)*. A new major version may break code that uses the package, a minor one only adds, and a patch only fixes.
     - For now a dependency asks for an exact version. Ranges written like Cargo's *(i.e. `^1.4`, `~1.4`)* can come later.

@@ -574,6 +574,11 @@ fn bundle_makes_one_file_for_each_command() {
             ("bin/bye.lks", "outln('bye');"),
             ("src/me/app/Greeter.lks", "pub class Greeter {\n    pub string @name;\n    pub string greet() = f\"hello {@name}\";\n}\n"),
             ("resources/texts/hello.txt", "from a resource\n"),
+            // Hidden files are left out of bundles
+            ("resources/.DS_Store", "junk"),
+            ("resources/texts/.hidden.txt", "junk"),
+            ("src/me/app/.scratch.lks", "this isn't Lakescript"),
+            ("bin/.old.lks", "this isn't one either"),
         ],
     );
     // While developing, from the folder
@@ -581,6 +586,8 @@ fn bundle_makes_one_file_for_each_command() {
     w.ok(&dir, &["bundle"]);
     let hello = dir.join("dist/hello.lkb");
     assert!(hello.is_file() && dir.join("dist/bye.lkb").is_file());
+    // A hidden script of bin/ isn't a command
+    assert!(!dir.join("dist/.old.lkb").exists());
     // The bundle has everything: it runs without the project or its dependencies
     let copy = w.dir.join("hello.lkb");
     std::fs::copy(&hello, &copy).unwrap();
@@ -588,6 +595,15 @@ fn bundle_makes_one_file_for_each_command() {
     std::fs::remove_dir_all(w.home().join("repository")).unwrap();
     let out = Command::new(&lks).arg(&copy).arg("b").output().unwrap();
     assert_eq!(stdout(&out), "hi hello x from a resource ['texts'] ['b']\n", "{}", stderr(&out));
+    // It runs as a program, with the lks on PATH
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&copy).unwrap().permissions().mode() & 0o111, 0o111);
+        let path = format!("{}:{}", lks.parent().unwrap().display(), std::env::var("PATH").unwrap_or_default());
+        let out = Command::new(&copy).arg("c").env("PATH", path).output().unwrap();
+        assert_eq!(stdout(&out), "hi hello x from a resource ['texts'] ['c']\n", "{}", stderr(&out));
+    }
 
     // Only one, and not with errors
     let dir = w.project("app", &app(""), &[("bin/one.lks", "outln(1);"), ("bin/two.lks", "outln(2);")]);

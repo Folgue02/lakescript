@@ -628,10 +628,14 @@ fn bundle(only: Option<&String>) -> Result<ExitCode, Fail> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// Every file under a folder, sorted, so a bundle is the same every time.
+/// Every file under a folder, sorted, so a bundle is the same every time,
+/// without the hidden ones *(i.e. `.DS_Store`, `.git/`)*.
 fn files_in(dir: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
             let path = entry.path();
             if path.is_dir() {
                 walk(&path, out);

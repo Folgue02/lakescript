@@ -31,8 +31,8 @@ pub fn register(m: &mut Exports) {
         let a = Args::new("resources::exists?", values, 1, 1)?;
         let name = a.str(0)?;
         let name = checked(&name)?;
-        // `''` is `resources/` itself, not a resource
-        if name.is_empty() {
+        // `''` is `resources/` itself, not a resource, and hidden files aren't ones
+        if name.is_empty() || hidden(&name) {
             return Ok(Value::Bool(false));
         }
         Ok(Value::Bool(match where_they_are(ctx)? {
@@ -73,9 +73,18 @@ fn checked(name: &str) -> Result<String, NativeError> {
     Ok(parts.join("/"))
 }
 
+/// Whether a name has a part that starts with `.` *(i.e. `.DS_Store`)*:
+/// bundles leave those out, so they're never resources, also in a folder.
+fn hidden(clean: &str) -> bool {
+    clean.split('/').any(|part| part.starts_with('.'))
+}
+
 fn read(ctx: &NativeContext, name: &str) -> Result<Rc<[u8]>, NativeError> {
     let clean = checked(name)?;
     let missing = |place: &str| NativeError::new(NOT_FOUND, format!("there's no resource '{name}' in {place}"));
+    if hidden(&clean) {
+        return Err(missing("resources/: hidden files aren't resources"));
+    }
     match where_they_are(ctx)? {
         Place::Folder(folder) => {
             let path = folder.join(&clean);
@@ -91,6 +100,9 @@ fn read(ctx: &NativeContext, name: &str) -> Result<Rc<[u8]>, NativeError> {
 /// The names of what's directly inside a folder of `resources/`, sorted.
 fn list(ctx: &NativeContext, folder: &str) -> Result<Vec<String>, NativeError> {
     let clean = checked(folder)?;
+    if hidden(&clean) {
+        return Err(NativeError::new(NOT_FOUND, format!("there's no folder '{folder}' in resources/: hidden folders aren't resources")));
+    }
     let mut names = match where_they_are(ctx)? {
         Place::Folder(root) => {
             let dir = root.join(&clean);
@@ -117,6 +129,7 @@ fn list(ctx: &NativeContext, folder: &str) -> Result<Vec<String>, NativeError> {
             names
         }
     };
+    names.retain(|n| !n.starts_with('.'));
     names.sort();
     Ok(names)
 }
@@ -130,6 +143,7 @@ mod tests {
         assert_eq!(checked("templates/page.html").unwrap(), "templates/page.html");
         assert_eq!(checked("./a//b").unwrap(), "a/b");
         assert_eq!(checked("").unwrap(), "");
+        assert!(super::hidden(".DS_Store") && super::hidden("a/.git/config") && !super::hidden("a/b.txt"));
         for bad in ["../x", "a/../../b", "/etc/passwd", "a\\b", "C:/x"] {
             assert!(checked(bad).is_err(), "{bad}");
         }

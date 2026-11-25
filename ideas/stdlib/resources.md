@@ -20,6 +20,7 @@ for ($level in resources::list('levels'))
 | `exists?(string $name)` | `bool` | `true` if there's a resource or a folder of them with that name. `''` isn't one, so it's `false` |
 | `list(string $folder = '')` | `list<string>` | The names of what's directly inside a folder of `resources/`, files and folders, sorted *(i.e. `resources::list('levels')` is `['1.txt', '2.txt']`)*. Throws a `FileNotFound` if there's no such folder. A project without `resources/` has none, so `list()` is `[]` |
 
+- **Hidden files aren't resources**: a name with a part that starts with `.` *(i.e. `.DS_Store`, `.git/config`)* is never found, and `list()` leaves them out, also when they're read from the folder, so a folder and a bundle give the same, since bundles leave them out.
 - **A name is a path inside `resources/`**, with `/` on every system *(i.e. `'templates/page.html'`)*. A name that would leave it *(i.e. `'../x'`, `'/etc/passwd'`)* is a `ValueError`.
 - **The same names everywhere**: they're read from `resources/` while a project is developed and run with `ferry run`, and from inside the `.lkb` once it's shipped, so the code doesn't change.
 - **Where `resources/` is**:

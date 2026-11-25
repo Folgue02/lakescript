@@ -84,6 +84,7 @@ impl Project {
             .flatten()
             .map(|e| e.path())
             .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "lks"))
+            .filter(|p| !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')))
             .filter_map(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
             .collect();
         commands.sort();
@@ -132,8 +133,13 @@ impl Project {
     }
 }
 
+/// The files under a folder, without the hidden ones *(i.e. `.DS_Store`, an
+/// editor's `.list.lks.swp`)*, which aren't modules, tests or commands.
 fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let path = entry.path();
         if path.is_dir() {
             walk(&path, files);

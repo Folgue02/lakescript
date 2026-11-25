@@ -142,3 +142,24 @@ fn a_bundle_under_another_name() {
     assert!(lakescript::is_bundle(&copy));
     assert_eq!(run_bundle(&copy).unwrap(), "ran\n");
 }
+
+#[test]
+fn hidden_files_arent_resources() {
+    let dir = TempDir::new("hidden");
+    let code = "use std/resources;\noutln([resources::list(), resources::exists?('.DS_Store'), resources::exists?('.git/config'), (try resources::read('.DS_Store')).isError()]);";
+    let script = dir.file("t.lks", code);
+    dir.file("resources/a.txt", "a");
+    dir.file("resources/.DS_Store", "junk");
+    dir.file("resources/.git/config", "junk");
+    let expected = "[['a.txt'], false, false, true]\n";
+    assert_eq!(run_file(&script, |_| {}).unwrap(), expected);
+    // The same in a bundle, also one made by another tool, with them inside
+    let files = vec![
+        ("bin/t.lks".to_string(), code.as_bytes().to_vec()),
+        ("resources/a.txt".to_string(), b"a".to_vec()),
+        ("resources/.DS_Store".to_string(), b"junk".to_vec()),
+    ];
+    let out = dir.0.join("t.lkb");
+    write_bundle(&out, "t", "a/b", "1.0.0", &files).unwrap();
+    assert_eq!(run_bundle(&out).unwrap(), expected);
+}
