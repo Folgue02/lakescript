@@ -1102,7 +1102,7 @@ impl<'a> Interpreter<'a> {
                                 cache.remember(&o.class, slot);
                                 Some(slot)
                             });
-                            slot.map(|slot| o.fields.borrow()[slot].clone())
+                            slot.map(|slot| o.fields.borrow()[slot].copy())
                         }
                         _ => None,
                     };
@@ -1111,6 +1111,49 @@ impl<'a> Interpreter<'a> {
                         None => get_field(&object, &proto.names[n as usize], span!())?,
                     };
                     self.stack.push(v);
+                }
+                Op::GetLocalField { slot, name: n } => {
+                    let at = base + slot as usize;
+                    let known = match &self.stack[at] {
+                        Value::Object(o) => {
+                            let cache = &proto.field_cache[n as usize];
+                            let slot = cache.get(&o.class).or_else(|| {
+                                let slot = o.class.field(&proto.names[n as usize])?;
+                                cache.remember(&o.class, slot);
+                                Some(slot)
+                            });
+                            slot.map(|slot| o.fields.borrow()[slot].copy())
+                        }
+                        _ => None,
+                    };
+                    let v = match known {
+                        Some(v) => v,
+                        None => get_field(&self.stack[at].clone(), &proto.names[n as usize], span!())?,
+                    };
+                    self.stack.push(v);
+                }
+                Op::SetLocalField { slot, name: n } => {
+                    let value = self.pop();
+                    let at = base + slot as usize;
+                    let value = match &self.stack[at] {
+                        Value::Object(o) => match proto.field_cache[n as usize].get(&o.class) {
+                            Some(i) if !o.class.fields[i].constant || o.building.get() => {
+                                std::mem::replace(&mut o.fields.borrow_mut()[i], value).discard();
+                                None
+                            }
+                            _ => Some(value),
+                        },
+                        _ => Some(value),
+                    };
+                    if let Some(value) = value {
+                        let object = self.stack[at].clone();
+                        set_field(&object, &proto.names[n as usize], value, span!())?;
+                        if let Value::Object(o) = &object
+                            && let Some(i) = o.class.field(&proto.names[n as usize])
+                        {
+                            proto.field_cache[n as usize].remember(&o.class, i);
+                        }
+                    }
                 }
                 Op::SetField(n) => {
                     let value = self.pop();

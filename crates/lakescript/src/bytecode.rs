@@ -143,6 +143,12 @@ pub enum Op {
     Class(u32),
     /// `$object.name`, with the name in `Proto::names`.
     GetField(u32),
+    /// `GetField` of the object in a local slot *(i.e. `@x`, `$p.x`)*,
+    /// without pushing the object.
+    GetLocalField { slot: u32, name: u32 },
+    /// Sets a field of the object in a local slot, `@`, without pushing
+    /// the object, and pushes nothing.
+    SetLocalField { slot: u32, name: u32 },
     /// Pops the value and the object, and pushes the value back.
     SetField(u32),
     /// `Class::name` or `Class::$name`: pops the class.
@@ -438,6 +444,8 @@ impl Proto {
                 | Op::ModuleMember { name, .. }
                 | Op::Fail(name)
                 | Op::GetField(name)
+                | Op::GetLocalField { name, .. }
+                | Op::SetLocalField { name, .. }
                 | Op::SetField(name)
                 | Op::Static { name, .. }
                 | Op::SetStatic(name)

@@ -1002,6 +1002,23 @@ impl<'a> Compiler<'a> {
 
     // ---- Classes ----
 
+    /// The slot of `@` or of a variable, when it's a plain local slot, for the
+    /// instructions that use a field of it where it is.
+    fn slot_of(&mut self, target: &Expr) -> Option<u32> {
+        let key = match &target.kind {
+            ExprKind::This => "$@".to_string(),
+            ExprKind::Variable(name) => format!("${name}"),
+            _ => return None,
+        };
+        if !self.visible(&key) {
+            return None;
+        }
+        match self.resolve(&key) {
+            Resolved::Local(Place::Slot(s), _) => Some(s),
+            _ => None,
+        }
+    }
+
     fn load_this(&mut self) {
         if self.visible("$@") {
             let resolved = self.resolve("$@");
@@ -1591,6 +1608,14 @@ impl<'a> Compiler<'a> {
             }
             ExprKind::This => self.load_this(),
             ExprKind::Field { target, name, nullable } => {
+                // `@x` and `$p.x` on a variable in a slot: read where it is
+                if !*nullable
+                    && let Some(slot) = self.slot_of(target)
+                {
+                    let n = self.name(name);
+                    self.emit(Op::GetLocalField { slot, name: n });
+                    return Ok(());
+                }
                 self.expr(target)?;
                 let to_end = nullable.then(|| self.emit(Op::JumpIfNull(0)));
                 let n = self.name(name);
@@ -1776,6 +1801,23 @@ impl<'a> Compiler<'a> {
                 };
                 if !keep {
                     self.emit(Op::Pop);
+                }
+            }
+            // `@x = ...` and `@x += ...`: `@` can't change, so its field is
+            // set where it is, after the value
+            ExprKind::Field { target: object, name, .. } if matches!(object.kind, ExprKind::This) && self.slot_of(object).is_some() => {
+                let slot = self.slot_of(object).unwrap_or_default();
+                let n = self.name(name);
+                if let Some(op) = op {
+                    self.emit_at(Op::GetLocalField { slot, name: n }, target.span);
+                    self.expr(value)?;
+                    self.emit_at(binary_op(op), span);
+                } else {
+                    self.expr(value)?;
+                }
+                self.emit_at(Op::SetLocalField { slot, name: n }, target.span);
+                if keep {
+                    self.emit_at(Op::GetLocalField { slot, name: n }, target.span);
                 }
             }
             ExprKind::Field { target: object, name, .. } => {
@@ -2058,15 +2100,30 @@ fn binary_op(op: BinaryOp) -> Op {
 // enough, and at worst a variable gets a cell it didn't need.
 
 fn collect_function(decl: &FunctionDecl, inside: bool, out: &mut HashSet<String>) {
+    // A nested function's own parameters are never the variables around it,
+    // since names can't be shadowed, so they're left out: a loop variable `$x`
+    // doesn't get a cell because a method has a parameter `$x`. A parameter
+    // that would shadow one is an error before the function's body runs, so
+    // nothing it does can tell. Its other variables stay in: a body can use
+    // the one around it before it declares its own, which is an error only
+    // when it gets there. The function being compiled (`inside` false) keeps
+    // all of them, for the closures inside it.
+    let mut used = HashSet::new();
     for param in &decl.params {
         if let Some(default) = &param.default {
-            collect_expr(default, inside, out);
+            collect_expr(default, inside, &mut used);
         }
     }
     match &decl.body {
-        FunctionBody::Expr(e) => collect_expr(e, inside, out),
-        FunctionBody::Block(stmts) => collect_stmts(stmts, inside, out),
+        FunctionBody::Expr(e) => collect_expr(e, inside, &mut used),
+        FunctionBody::Block(stmts) => collect_stmts(stmts, inside, &mut used),
     }
+    if inside {
+        for param in &decl.params {
+            used.remove(&format!("${}", param.name));
+        }
+    }
+    out.extend(used);
 }
 
 fn collect_stmts(stmts: &[Stmt], inside: bool, out: &mut HashSet<String>) {
