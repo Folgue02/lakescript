@@ -822,11 +822,12 @@ impl<'a> Interpreter<'a> {
                 Op::JumpIfFalse { target, keyword } => match self.pop() {
                     Value::Bool(true) => {}
                     Value::Bool(false) => ip = target as usize,
-                    other => {
-                        let keyword = ["if", "while", "? :"][keyword as usize];
-                        let message = format!("the condition of `{keyword}` must be a bool, but this is a {}", other.type_name());
-                        return error_as(exceptions::TYPE_ERROR, message, span!());
-                    }
+                    other => return Err(not_a_condition(keyword, &other, span!())),
+                },
+                Op::JumpIfTrue { target, keyword } => match self.pop() {
+                    Value::Bool(true) => ip = target as usize,
+                    Value::Bool(false) => {}
+                    other => return Err(not_a_condition(keyword, &other, span!())),
                 },
                 Op::JumpIfNot { op, target } => {
                     let r = self.pop();
@@ -1448,7 +1449,7 @@ impl<'a> Interpreter<'a> {
                     let at = base + slot as usize;
                     let Value::Int(i) = self.stack[at + 1] else { unreachable!("the index of a `for`") };
                     let item = match &self.stack[at] {
-                        Value::List(list) => list.borrow().get(i as usize).cloned(),
+                        Value::List(list) => list.borrow().get(i as usize).map(Value::copy),
                         Value::Range(range) => range_at(range, i).map(Value::Int),
                         _ => unreachable!("set by ForPrepare"),
                     };
@@ -1458,6 +1459,8 @@ impl<'a> Interpreter<'a> {
                     };
                     self.stack[at + 1] = Value::Int(i + 1);
                     match kind {
+                        // Into the loop's variable, the slot after its own four
+                        for_kind::STORE => std::mem::replace(&mut self.stack[at + 4], item).discard(),
                         for_kind::INDEXED => {
                             self.stack.push(Value::Int(i));
                             self.stack.push(item);
@@ -2351,6 +2354,20 @@ fn set_index(container: &Value, index: Value, value: Value, span: Span) -> Exec<
 
 fn key_error(value: &Value, span: Span) -> Flow {
     flow_error(format!("map keys can be strings or numbers, not a {}", value.type_name()), span)
+}
+
+/// A condition that isn't a bool: of `if`, `while` or `? :`, or a side of
+/// `&&` or `||` *(see `KEYWORD_AND` in the compiler)*.
+#[cold]
+fn not_a_condition(keyword: u8, value: &Value, span: Span) -> Flow {
+    match keyword {
+        3 | 4 => logic_error(keyword == 3, span),
+        _ => {
+            let keyword = ["if", "while", "? :"][keyword as usize];
+            let message = format!("the condition of `{keyword}` must be a bool, but this is a {}", value.type_name());
+            flow_error_as(exceptions::TYPE_ERROR, message, span)
+        }
+    }
 }
 
 fn logic_error(and: bool, span: Span) -> Flow {

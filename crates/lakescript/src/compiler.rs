@@ -229,6 +229,12 @@ impl<'a> Compiler<'a> {
     }
 
     /// Points the jump at `at` to the next instruction.
+    fn patch_all(&mut self, jumps: Vec<usize>) {
+        for at in jumps {
+            self.patch(at);
+        }
+    }
+
     fn patch(&mut self, at: usize) {
         let target = self.here();
         self.patch_to(at, target);
@@ -245,6 +251,7 @@ impl<'a> Compiler<'a> {
             | Op::PushCatch(t)
             | Op::PushTry(t)
             | Op::JumpIfFalse { target: t, .. }
+            | Op::JumpIfTrue { target: t, .. }
             | Op::JumpIfNot { target: t, .. }
             | Op::JumpLogic { target: t, .. }
             | Op::JumpIfGiven { target: t, .. }
@@ -526,11 +533,11 @@ impl<'a> Compiler<'a> {
                 match otherwise {
                     Some(otherwise) => {
                         let to_end = self.emit(Op::Jump(0));
-                        self.patch(to_else);
+                        self.patch_all(to_else);
                         self.scoped(otherwise)?;
                         self.patch(to_end);
                     }
-                    None => self.patch(to_else),
+                    None => self.patch_all(to_else),
                 }
             }
             StmtKind::While { cond, body } => {
@@ -542,7 +549,7 @@ impl<'a> Compiler<'a> {
                 self.push_loop(start, sp_slot);
                 self.scoped(body)?;
                 self.emit(Op::Jump(start as u32));
-                self.patch(exit);
+                self.patch_all(exit);
                 self.pop_loop();
                 self.close_scope();
             }
@@ -717,7 +724,14 @@ impl<'a> Compiler<'a> {
             ForPattern::Value(name) => {
                 let taken = format!("`${name}` already exists. Variables can't be declared twice");
                 let target = self.declare(&format!("${name}"), false, &taken);
-                self.define(target);
+                match target {
+                    // Into its slot, the one after the loop's own, by `ForNext`
+                    // itself, without pushing it first
+                    Target::Local(Place::Slot(s)) if s == slot + 4 => {
+                        self.f().proto.code[next] = Op::ForNext { slot, exit: 0, kind: for_kind::STORE };
+                    }
+                    _ => self.define(target),
+                }
             }
             ForPattern::Indexed { index: a, value: b } | ForPattern::KeyValue { key: a, value: b } => {
                 if a == b {
@@ -1517,7 +1531,7 @@ impl<'a> Compiler<'a> {
                 let to_else = self.condition(cond, 2)?;
                 self.expr(then)?;
                 let to_end = self.emit(Op::Jump(0));
-                self.patch(to_else);
+                self.patch_all(to_else);
                 self.expr(otherwise)?;
                 self.patch(to_end);
             }
@@ -1585,7 +1599,7 @@ impl<'a> Compiler<'a> {
                 let to_else = self.condition(cond, 0)?;
                 self.branch(then)?;
                 let to_end = self.emit(Op::Jump(0));
-                self.patch(to_else);
+                self.patch_all(to_else);
                 self.branch(otherwise)?;
                 self.patch(to_end);
             }
@@ -1677,18 +1691,65 @@ impl<'a> Compiler<'a> {
     }
 
     /// A condition, and a jump that's taken when it's false. Returns the jump to patch.
-    fn condition(&mut self, cond: &Expr, keyword: u8) -> Compiled<usize> {
+    /// A condition, as jumps taken when it's false, to patch to where that
+    /// goes. Comparisons compare and jump in one instruction, and `&&` and
+    /// `||` are jumps too, without making their bool. `keyword` says what
+    /// the condition is of, for the error when it isn't a bool.
+    fn condition(&mut self, cond: &Expr, keyword: u8) -> Compiled<Vec<usize>> {
         if let ExprKind::Binary { op, left, right } = &cond.kind {
             use BinaryOp::*;
-            if matches!(op, Eq | NotEq | Lt | Gt | LtEq | GtEq) {
-                self.check_stack(cond.span)?;
-                self.expr(left)?;
-                self.expr(right)?;
-                return Ok(self.emit_at(Op::JumpIfNot { op: *op, target: 0 }, cond.span));
+            match op {
+                Eq | NotEq | Lt | Gt | LtEq | GtEq => {
+                    self.check_stack(cond.span)?;
+                    self.expr(left)?;
+                    self.expr(right)?;
+                    return Ok(vec![self.emit_at(Op::JumpIfNot { op: *op, target: 0 }, cond.span)]);
+                }
+                // False when either side is
+                And => {
+                    self.check_stack(cond.span)?;
+                    let mut to_false = self.condition(left, KEYWORD_AND)?;
+                    to_false.extend(self.condition(right, KEYWORD_AND)?);
+                    return Ok(to_false);
+                }
+                // The right side only when the left one is false
+                Or => {
+                    self.check_stack(cond.span)?;
+                    let to_true = self.condition_true(left, KEYWORD_OR)?;
+                    let to_false = self.condition(right, KEYWORD_OR)?;
+                    self.patch_all(to_true);
+                    return Ok(to_false);
+                }
+                _ => {}
             }
         }
         self.expr(cond)?;
-        Ok(self.emit_at(Op::JumpIfFalse { target: 0, keyword }, cond.span))
+        Ok(vec![self.emit_at(Op::JumpIfFalse { target: 0, keyword }, cond.span)])
+    }
+
+    /// Like `condition`, with the jumps taken when it's true.
+    fn condition_true(&mut self, cond: &Expr, keyword: u8) -> Compiled<Vec<usize>> {
+        if let ExprKind::Binary { op, left, right } = &cond.kind {
+            match op {
+                // True when both sides are: a false left side goes on after it
+                BinaryOp::And => {
+                    self.check_stack(cond.span)?;
+                    let to_false = self.condition(left, KEYWORD_AND)?;
+                    let to_true = self.condition_true(right, KEYWORD_AND)?;
+                    self.patch_all(to_false);
+                    return Ok(to_true);
+                }
+                BinaryOp::Or => {
+                    self.check_stack(cond.span)?;
+                    let mut to_true = self.condition_true(left, KEYWORD_OR)?;
+                    to_true.extend(self.condition_true(right, KEYWORD_OR)?);
+                    return Ok(to_true);
+                }
+                _ => {}
+            }
+        }
+        self.expr(cond)?;
+        Ok(vec![self.emit_at(Op::JumpIfTrue { target: 0, keyword }, cond.span)])
     }
 
     /// The value of an `if` or `switch` branch.
@@ -2090,6 +2151,11 @@ fn binary_op(op: BinaryOp) -> Op {
         other => Op::Binary(other),
     }
 }
+
+/// What `JumpIfFalse` and `JumpIfTrue` say a condition that isn't a bool is
+/// of: `if`, `while` and `? :` are 0 to 2, and a side of `&&` or `||` these.
+const KEYWORD_AND: u8 = 3;
+const KEYWORD_OR: u8 = 4;
 
 // ---- Which names closures use ----
 //

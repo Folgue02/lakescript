@@ -80,6 +80,9 @@ pub enum Op {
     /// Pops a condition, which must be a bool. `keyword` says which one it was
     /// for the error: `0` is `if`, `1` is `while`, `2` is `? :`.
     JumpIfFalse { target: u32, keyword: u8 },
+    /// Jumps if the bool on top is `true`, for the left side of `||` in a
+    /// condition. `keyword` is like `JumpIfFalse`'s.
+    JumpIfTrue { target: u32, keyword: u8 },
     /// Compares the two values on top with `==`, `!=`, `<`, `>`, `<=` or `>=`,
     /// and jumps when it's false. It's the condition of an `if`, `while` or
     /// `? :` in one instruction.
@@ -228,6 +231,9 @@ pub mod for_kind {
     pub const KEY_VALUE: u8 = 2;
     /// `for ([$a, $b] in ...)`
     pub const LIST: u8 = 3;
+    /// `for ($x in ...)` on `ForNext` only, when `$x` is the slot right after
+    /// the loop's four: the element goes there instead of on the stack.
+    pub const STORE: u8 = 4;
 }
 
 /// Where a closure finds a variable of the function around it.
