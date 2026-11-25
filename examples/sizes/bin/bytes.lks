@@ -1,8 +1,12 @@
-//! Reads sizes written as text and writes them in bytes.
+//! Reads sizes written as text and writes them in bytes. Without any, its
+//! help, which is a file of `resources/`.
 //!
 //! `ferry run bytes '1.5 KB' '2 MB'`
 use std/process;
+use std/resources;
 use folgue02/sizes/units;
 
+if (process::args().empty?())
+    out(resources::read('help.txt'));
 for ($arg in process::args())
     outln(units::bytes($arg));

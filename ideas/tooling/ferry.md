@@ -86,6 +86,7 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 | `ferry doc [package\|std\|name] [--open]` | Makes the docs of the project, of a package or of the standard library, and opens them with `--open`. With a name *(i.e. `units::bytes`)*, writes its docs in the terminal *(see [docs.md](docs.md))* |
 | `ferry test [filter]` | Runs the tests in `tests/`, or only the ones whose name has `filter` *(see [testing.md](testing.md))* |
 | `ferry add <repository:author/name@version>` | Adds a dependency to `ferry.toml` and downloads it *(i.e. `ferry add github:acme/http@1.4.2`)* |
+| `ferry bundle [command]` | Makes a bundle in `dist/` for each command of `bin/`, or only for one: the program in one file, `dist/todo.lkb`, with every module it needs and the project's `resources/`, run with `lks todo.lkb` or `./todo.lkb` *(see [bundles.md](bundles.md))*. It checks the project first, and makes nothing if it has errors |
 | `ferry install [repository:author/name@version]` | Installs the commands of an application into `~/.ferry/bin`: the project in the current folder, or one downloaded from a repository |
 
 ## What ferry says
@@ -132,6 +133,7 @@ The author and name of a project are its real ones, as the repository has them *
 - Installing the project in the current folder copies it to `~/.ferry/installed/<ID>/` first, so changing or deleting the folder doesn't break the installed commands.
 - Installing again replaces the commands of that project. A command with the same name from another project is an error, so one project never silently replaces another's.
 - The launcher skips the type check, since `ferry install` already did it.
+- The launcher copies `resources/` with the project, and passes it to `lks` with `--resources`, so `std/resources` reads the installed copy. `ferry run` and `ferry test` read the project's own.
 - The launcher and `ferry run` pass the name of the command to `lks` with `--name`, so the `Usage:` line of `--help` says `cinder`, what was typed, not `cinder.lks` *(see Parsing in [language/cli.md](../language/cli.md))*.
 
 ## How a project runs

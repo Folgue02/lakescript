@@ -10,9 +10,11 @@ license.workspace = true
 # `lakescript = { version = "...", default-features = false, features = ["dates"] }`)*.
 # A script that uses one that was left out is told so.
 [features]
-default = ["archive", "csv", "dates", "html", "http", "terminal"]
+default = ["archive", "bundle", "csv", "dates", "html", "http", "terminal"]
 # std/archive: zip, tar and tar.gz. Entries say when they changed as dates
 archive = ["dep:zip", "dep:tar", "dep:flate2", "dates"]
+# Bundles: running a .lkb, and writing one for `ferry bundle`
+bundle = ["dep:zip"]
 # std/format/csv
 csv = ["dep:csv"]
 # The dates of std/time, and std/time/zone. `time::now()` is always there

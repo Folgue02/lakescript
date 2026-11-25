@@ -28,6 +28,9 @@ Options:
                    separated by `:`
   --color <when>   When to use colors: auto (on a terminal, the default),
                    always or never. NO_COLOR also turns them off
+  --resources <folder>
+                   Where std/resources reads the files of the script,
+                   instead of resources/ next to it
   --name <name>    The name of the command in the Usage: line of the
                    script's --help, instead of the name of its file
   --no-type-check  Run the script without checking its types first,
@@ -67,6 +70,8 @@ struct Options {
     module_path: Vec<std::path::PathBuf>,
     /// `--name`: what the script is run as, for its `Usage:` line.
     name: Option<String>,
+    /// `--resources`: where `std/resources` reads from.
+    resources: Option<std::path::PathBuf>,
     color: When,
 }
 
@@ -105,6 +110,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
             "--module-path" => match args.next() {
                 Some(folders) => options.module_path.extend(std::env::split_paths(&folders)),
                 None => return Err("`--module-path` needs the folders after it".into()),
+            },
+            "--resources" => match args.next() {
+                Some(folder) => options.resources = Some(folder.into()),
+                None => return Err("`--resources` needs the folder after it".into()),
             },
             "--name" => match args.next() {
                 Some(name) => options.name = Some(name),
@@ -164,6 +173,9 @@ fn run() -> ExitCode {
     if let Some(name) = &options.name {
         engine.set_command_name(name);
     }
+    if let Some(folder) = &options.resources {
+        engine.set_resources(folder);
+    }
     for folder in options.module_path.drain(..) {
         engine.add_module_root(folder);
     }
@@ -172,10 +184,22 @@ fn run() -> ExitCode {
             engine.add_module_root(folder);
         }
     }
+    // A bundle made by `ferry bundle`, which checked its types already
+    let bundle = Path::new(&script).extension().is_some_and(|e| e == "lkb");
     if options.test {
+        if bundle {
+            eprintln!("{} `lks --test` runs the tests of a script, and {script} is a bundle: its project's tests run with `ferry test`", paint().error("lks:"));
+            return ExitCode::from(2);
+        }
         return test(&mut engine, &script, &args, options.color);
     }
-    match engine.run_file(Path::new(&script)) {
+    let result = if bundle {
+        engine.set_type_check(false);
+        engine.run_bundle(Path::new(&script))
+    } else {
+        engine.run_file(Path::new(&script))
+    };
+    match result {
         Ok(outcome) => ExitCode::from(outcome.code().clamp(0, 255) as u8),
         // Arguments that don't match the script's command: the message and
         // the usage, without the code, and code 2 like most command-line tools
@@ -227,8 +251,10 @@ fn on_ctrl_c(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
 /// An error with the line of code it points to, read from the file it's in.
 fn show(diagnostic: &lakescript::Diagnostic, script: &str) -> String {
     let file = diagnostic.file.as_deref().unwrap_or(script);
-    match std::fs::read_to_string(file) {
-        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(script, &source, paint()),
+    // A bundle is a zip: its code isn't shown from it
+    let bundle = Path::new(file).extension().is_some_and(|e| e == "lkb");
+    match std::fs::read_to_string(file).ok().filter(|_| !bundle) {
+        Some(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(script, &source, paint()),
         _ => diagnostic.render_painted(script, paint()),
     }
 }

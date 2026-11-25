@@ -1,6 +1,6 @@
 # Shipping a program in one file
 
-*Being designed.* A **bundle**: a project shipped as a single file with every module it needs, its dependencies' too, run by `lks`, like Java's fat jars or Python's zipapps *(`.pyz`)*.
+*Built in phase 12.* A **bundle**: a project shipped as a single file with every module it needs, its dependencies' too, run by `lks`, like Java's fat jars or Python's zipapps *(`.pyz`)*.
 
 ## Decided
 
@@ -14,6 +14,19 @@
 - **One `.lkb` for each command of `bin/`**, like `ferry install` writes one launcher for each: `ferry bundle` makes `todo.lkb` and `backup.lkb`, and `ferry bundle todo` only that one. Each file is what someone runs, without a first argument to choose a command, unlike busybox. Decided after the speed review.
 - **`std/resources`** reads the files of `resources/`, and only reads them, since a bundle can't change: `resources::read($name)` *(text)*, `readBytes($name)`, `exists?($name)` and `list($folder = '')`, named like the functions of `std/fs`. The names are paths inside `resources/`, with `/` *(i.e. `'templates/page.html'`)*.
 - **Where `resources/` is**: in a project, the project's own folder; in a bundle, inside the file; and for a script run with `lks` outside a project, next to the script *(the real file's folder, through a link, like `use` finds modules)*. `lks --resources <folder>` gives another folder for a script.
+
+## How it's made
+
+- **Inside a `.lkb`**, a zip after its first line `#!/usr/bin/env lks`:
+    - `bundle.toml`: the command, the project and its version, and the oldest `lks` that can run it, the one of the `ferry` that made it. An older `lks` stops with an error that says which version it needs *(i.e. `todo.lkb needs lks 0.12.0 or newer, and this is lks 0.11.2`)*.
+    - `bin/`: every script of `bin/`, so a command can `use` the files next to it, like when it's run with `ferry run`.
+    - `src/`: every module of the project and of its dependencies, in one tree. Each package's modules are under its own `author/name/`, so they never clash.
+    - `resources/`: the project's resources. A dependency's aren't in it *(see [resources.md](../stdlib/resources.md))*.
+- **`ferry bundle [command]`** type checks the project like `ferry check`, makes nothing if there are errors, and writes the bundles in `dist/`, which `ferry new` puts in the `.gitignore`. A bundle is the same every time for the same project, since the files go in in order.
+- **`lks todo.lkb`** reads the whole file into memory, and its modules are read from there at paths inside it *(i.e. `todo.lkb/src/folgue02/todo/list.lks`)*, which errors show, so `use` finds them the same way as on disk. The module path is the bundle's `bin/`, then its `src/`, then the usual ones.
+    - It runs without checking the types again, like the commands of `ferry install`: `ferry bundle` did it, and types never change what the code does. A newer `lks` with a stricter checker still runs a bundle made before.
+    - `lks --test` on a bundle is an error: a project's tests run with `ferry test`.
+- The bundle code is in `crates/lakescript/src/bundle.rs`, behind the feature `bundle` of the crate *(the `zip` crate)*, on by default. `lakescript::write_bundle` writes one and `Engine::run_bundle` runs one.
 
 ## Still open
 

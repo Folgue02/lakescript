@@ -326,6 +326,8 @@ fn the_example_project_works() {
     assert_eq!(w.ok(&example, &["run", "human", "1536", "1048576"]), "1.5 KB\n1 MB\n");
     assert_eq!(w.ok(&example, &["run", "bytes", "1.5 KB", "2 mb"]), "1536\n2097152\n");
     assert!(w.fails(&example, &["run", "bytes", "1 XB"]).contains("unknown unit 'XB'"));
+    // Its help is a resource
+    assert!(w.ok(&example, &["run", "bytes"]).starts_with("Usage: bytes <size>..."));
 }
 
 #[test]
@@ -555,4 +557,57 @@ fn every_pub_item_of_the_standard_library_is_documented() {
         }
     }
     assert!(missing.is_empty(), "not in the notes of ideas/stdlib (then run tools/docs/stdlib.py):\n{}", missing.join("\n"));
+}
+
+#[test]
+fn bundle_makes_one_file_for_each_command() {
+    build_lks();
+    let lks = Path::new(env!("CARGO_BIN_EXE_ferry")).with_file_name("lks");
+    let w = World::new();
+    w.publish("acme", "lib", "1.0.0", "", &[("src/acme/lib/m.lks", "pub string hi() = 'hi';")]);
+    let read = "use acme/lib/m;\nuse me/app/Greeter;\nuse std/process;\nuse std/resources;\noutln(f\"{m::hi()} {Greeter('x').greet()} {resources::read('texts/hello.txt').trim()} {resources::list()} {process::args()}\");";
+    let dir = w.project(
+        "app",
+        &app("\"local:acme/lib\" = \"1.0.0\"\n"),
+        &[
+            ("bin/hello.lks", read),
+            ("bin/bye.lks", "outln('bye');"),
+            ("src/me/app/Greeter.lks", "pub class Greeter {\n    pub string @name;\n    pub string greet() = f\"hello {@name}\";\n}\n"),
+            ("resources/texts/hello.txt", "from a resource\n"),
+        ],
+    );
+    // While developing, from the folder
+    assert_eq!(w.ok(&dir, &["run", "hello", "a"]), "hi hello x from a resource ['texts'] ['a']\n");
+    w.ok(&dir, &["bundle"]);
+    let hello = dir.join("dist/hello.lkb");
+    assert!(hello.is_file() && dir.join("dist/bye.lkb").is_file());
+    // The bundle has everything: it runs without the project or its dependencies
+    let copy = w.dir.join("hello.lkb");
+    std::fs::copy(&hello, &copy).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    std::fs::remove_dir_all(w.home().join("repository")).unwrap();
+    let out = Command::new(&lks).arg(&copy).arg("b").output().unwrap();
+    assert_eq!(stdout(&out), "hi hello x from a resource ['texts'] ['b']\n", "{}", stderr(&out));
+
+    // Only one, and not with errors
+    let dir = w.project("app", &app(""), &[("bin/one.lks", "outln(1);"), ("bin/two.lks", "outln(2);")]);
+    w.ok(&dir, &["bundle", "two"]);
+    assert!(dir.join("dist/two.lkb").is_file() && !dir.join("dist/one.lkb").exists());
+    assert!(w.fails(&dir, &["bundle", "three"]).contains("has no command `three`"));
+    write(&dir.join("bin/one.lks"), "const number $x = 'a';");
+    assert!(w.fails(&dir, &["bundle"]).contains("so it wasn't bundled"));
+    let lib = w.project("lib", "[project]\nauthor = \"me\"\nname = \"lib\"\nversion = \"1.0.0\"\nkind = \"library\"\n", &[]);
+    assert!(w.fails(&lib, &["bundle"]).contains("no commands to install or bundle"));
+}
+
+#[test]
+fn installed_commands_read_their_resources() {
+    build_lks();
+    let w = World::new();
+    let dir = w.project("app", &app(""), &[("bin/show.lks", "use std/resources;\noutln(resources::read('a.txt'));"), ("resources/a.txt", "kept")]);
+    w.ok(&dir, &["install"]);
+    // From the installed copy, which has resources/ too
+    std::fs::remove_dir_all(&dir).unwrap();
+    let out = Command::new(w.home().join("bin/show")).output().unwrap();
+    assert_eq!(stdout(&out), "kept\n", "{}", stderr(&out));
 }

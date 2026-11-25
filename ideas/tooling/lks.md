@@ -8,6 +8,7 @@ lks [options] <script> [arguments for the script...]
 
 - The options of `lks` go before the script. The first argument that isn't an option is the script, and every argument after it is passed to the script as it is, even if it looks like an option of `lks` *(i.e. in `lks deploy.lks --help`, `--help` belongs to `deploy.lks`)*.
 - `--` ends the options: the next argument is the script, even if it starts with `-`.
+- **A script ending in `.lkb` is a bundle** made by `ferry bundle`, run with the modules and the resources inside it *(see [bundles.md](bundles.md))*.
 - The exit code is the script's *(see [general.md](../stdlib/general.md))*. A wrong command line for `lks` itself exits with code `2`.
 
 ## Options

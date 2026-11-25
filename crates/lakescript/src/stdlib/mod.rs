@@ -19,6 +19,7 @@ mod json;
 mod path;
 mod process;
 mod random;
+mod resources;
 mod template;
 #[cfg(feature = "terminal")]
 mod terminal;
@@ -54,6 +55,7 @@ pub const MODULES: &[&str] = &[
     "std/process",
     "std/process/Platform",
     "std/random",
+    "std/resources",
     "std/template",
     #[cfg(feature = "terminal")]
     "std/terminal",
@@ -218,6 +220,7 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/path" => path::register(&mut exports),
         "std/process/native" => process::register(&mut exports),
         "std/random/native" => random::register(&mut exports),
+        "std/resources" => resources::register(&mut exports),
         "std/template" => template::register(&mut exports),
         "std/test" => test::register(&mut exports),
         "std/time/native" => time::register(&mut exports),

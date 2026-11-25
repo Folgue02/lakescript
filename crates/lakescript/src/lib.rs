@@ -26,6 +26,8 @@ mod modules;
 mod operators;
 mod parser;
 mod paths;
+#[cfg(feature = "bundle")]
+mod bundle;
 mod siblings;
 mod small_alloc;
 mod patterns;
@@ -45,6 +47,8 @@ pub use engine::{CapturedOutput, Engine, Outcome};
 pub use interrupt::on_ctrl_c;
 pub use paths::{canonical, without_verbatim};
 pub use small_alloc::SmallAlloc;
+#[cfg(feature = "bundle")]
+pub use bundle::{BundleInfo, write_bundle};
 pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use token::Span;
 pub use value::{Key, NativeContext, NativeError, NativeResult, Value};

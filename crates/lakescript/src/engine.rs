@@ -397,6 +397,40 @@ impl Engine {
         self.host.state.script_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
     }
 
+    /// The folder `std/resources` reads from, instead of `resources/` next to
+    /// the script *(i.e. a project's own `resources/`, or `lks --resources`)*.
+    pub fn set_resources(&mut self, folder: &Path) {
+        self.host.state.resources = crate::host::Resources::Folder(folder.to_path_buf());
+    }
+
+    /// Runs a bundle, a `.lkb` made by `ferry bundle` *(see
+    /// `ideas/tooling/bundles.md`)*: its command, with the modules and the
+    /// resources inside it. `process::scriptPath()` gives the `.lkb`.
+    #[cfg(feature = "bundle")]
+    pub fn run_bundle(&mut self, path: &Path) -> Result<Outcome, Diagnostic> {
+        let opened = crate::bundle::open(path).map_err(|m| Diagnostic::new(m, Default::default()))?;
+        let file = crate::paths::canonical(path);
+        // Its files are read from memory, at paths inside it *(i.e. `todo.lkb/src/...`)*
+        for (name, bytes) in &opened.files {
+            if name.ends_with(".lks") && (name.starts_with("bin/") || name.starts_with("src/")) {
+                let text = String::from_utf8_lossy(bytes).into_owned();
+                self.host.loader.overlay.insert(file.join(name), text);
+            }
+        }
+        let script = file.join("bin").join(format!("{}.lks", opened.info.command));
+        let source = self.host.loader.overlay.get(&script).cloned().unwrap_or_default();
+        // Like a project: the folder of the script, then `src/`
+        let src = file.join("src");
+        if !self.host.loader.roots.contains(&src) {
+            self.host.loader.roots.insert(0, src);
+        }
+        self.use_script_path(&script);
+        self.host.state.script_path = Some(file.clone());
+        self.host.state.script_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        self.host.state.resources = crate::host::Resources::Files(std::rc::Rc::new(crate::bundle::resources(&opened.files)));
+        self.run(&source)
+    }
+
     /// The name of the command the script is run as, for the `Usage:` line
     /// of `--help` *(i.e. `cinder`, for `ferry run cinder`)*. Without it,
     /// it's the name of the script's path as it was given.

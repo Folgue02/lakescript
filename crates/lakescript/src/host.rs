@@ -66,6 +66,19 @@ pub fn seed() -> u64 {
     (nanos ^ (std::process::id() as u64).rotate_left(32) ^ address) | 1
 }
 
+/// Where the files of `std/resources` are.
+#[derive(Clone)]
+pub enum Resources {
+    /// `resources/` in the folder of the script, the real file's.
+    NextToScript,
+    /// A folder given by the program that runs the script: a project's
+    /// `resources/`, or `lks --resources`.
+    Folder(PathBuf),
+    /// Inside a bundle, by their path in `resources/`.
+    #[cfg_attr(not(feature = "bundle"), allow(dead_code))]
+    Files(std::rc::Rc<HashMap<String, std::rc::Rc<[u8]>>>),
+}
+
 /// The part of the outside world a script can change. Changes stay in here:
 /// the real process's folder and environment are never touched.
 pub struct ScriptState {
@@ -77,6 +90,8 @@ pub struct ScriptState {
     /// The name the person typed to run the script, when the program that
     /// runs it knows it *(i.e. `cinder` for `ferry run cinder`, see `lks --name`)*.
     pub command_name: Option<String>,
+    /// Where `std/resources` reads from *(see `ideas/tooling/bundles.md`)*.
+    pub resources: Resources,
     pub cwd: PathBuf,
     /// Variables set (`Some`) or removed (`None`) by the script, over the real environment.
     pub env: HashMap<String, Option<String>>,
@@ -89,6 +104,7 @@ impl ScriptState {
             script_path: None,
             script_name: None,
             command_name: None,
+            resources: Resources::NextToScript,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             env: HashMap::new(),
         }

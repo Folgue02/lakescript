@@ -319,6 +319,12 @@ list<string> lines();
 bool piped?();
 void flush();
 
+module std/resources
+string read(string $name);
+bytes readBytes(string $name);
+bool exists?(string $name);
+list<string> list(string $folder = '');
+
 module std/format/json
 T parse<T>(string $text, ?type<T> $type = null);
 list<T> parseAll<T>(string $text, ?type<T> $type = null);

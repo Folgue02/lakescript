@@ -44,6 +44,9 @@ Commands:
                               i.e. ferry doc units::bytes
   add <repository:author/name@version>
                               Add a dependency, i.e. ferry add github:acme/http@1.4.2
+  bundle [command]            Make a .lkb in dist/ for each command of bin/, or only
+                              for one: the program in one file, with its modules and
+                              resources/, run with `lks todo.lkb` or `./todo.lkb`
   install [repository:author/name@version]
                               Install the commands of an application into ~/.ferry/bin:
                               the project in this folder, or one from a repository
@@ -123,6 +126,11 @@ fn start() -> ExitCode {
             [spec] => add(spec),
             _ => return usage_error("`ferry add` takes one package, i.e. `ferry add github:acme/http@1.4.2`"),
         },
+        "bundle" => match rest {
+            [] => bundle(None),
+            [command] => bundle(Some(command)),
+            _ => return usage_error("`ferry bundle` takes one command at most, i.e. `ferry bundle todo`"),
+        },
         "install" => match rest {
             [] => install_here(),
             [spec] => install_package(spec),
@@ -172,7 +180,7 @@ fn new(spec: &str, library: bool, example: bool) -> Result<ExitCode, Fail> {
         format!("[project]\nauthor = \"{author}\"\nname = \"{name}\"\nversion = \"0.1.0\"\nkind = \"{kind}\"\n\n[dependencies]\n"),
     )?;
     // What ferry makes inside the project, like the docs
-    write(dir.join(".gitignore"), ".ferry/\n".to_string())?;
+    write(dir.join(".gitignore"), ".ferry/\ndist/\n".to_string())?;
     std::fs::create_dir_all(&src).map_err(|e| format!("can't create {}: {e}", src.display()))?;
     if example {
         write(src.join("greeting.lks"), "pub string greet(string $who) = f\"Hello, {$who}!\";\n".to_string())?;
@@ -218,6 +226,7 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
     engine.set_args(args.to_vec());
     // `Usage: cinder`, what was typed, not `cinder.lks`
     engine.set_command_name(&command);
+    engine.set_resources(&project.dir.join("resources"));
     match engine.run_file(&script) {
         Ok(outcome) => Ok(ExitCode::from(outcome.code().clamp(0, 255) as u8)),
         // The person's mistake in the arguments, like `lks` shows it
@@ -470,7 +479,9 @@ fn test(filter: Option<&str>) -> Result<ExitCode, Fail> {
     let mut broken = 0;
     for file in &files {
         let shown = relative(&project, file);
-        match engine(&module_path).run_tests(file, filter) {
+        let mut tests = engine(&module_path);
+        tests.set_resources(&project.dir.join("resources"));
+        match tests.run_tests(file, filter) {
             Ok(found) if found.is_empty() => {}
             Ok(found) => {
                 eprintln!("{shown}");
@@ -558,6 +569,83 @@ fn with_dependency(text: &str, key: &str, version: &str) -> String {
     lines.join("\n") + "\n"
 }
 
+/// `ferry bundle`: a `.lkb` in `dist/` for each command, or for one, after
+/// checking the project *(see ideas/tooling/bundles.md)*.
+fn bundle(only: Option<&String>) -> Result<ExitCode, Fail> {
+    let (_, project, dependencies) = open_project()?;
+    application(&project)?;
+    let commands = project.commands();
+    let chosen = match only {
+        Some(command) if commands.contains(command) => vec![command.clone()],
+        Some(command) => return Err(format!("{} has no command `{command}`. The ones there are: {}", project.id, commands.join(", ")).into()),
+        None => commands.clone(),
+    };
+    let errors = check_project(&project, &dependencies)?;
+    if errors > 0 {
+        return Err(format!("{} has {errors} {}, so it wasn't bundled", project.id, if errors == 1 { "error" } else { "errors" }).into());
+    }
+    let read = |path: &Path| std::fs::read(path).map_err(|e| Fail(format!("can't read {}: {e}", path.display())));
+    // The path inside the bundle, with `/` on every system
+    let inside = |folder: &str, root: &Path, file: &Path| {
+        let parts: Vec<String> = file.strip_prefix(root).unwrap_or(file).components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+        format!("{folder}/{}", parts.join("/"))
+    };
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    // Every script of bin/, which a command can `use` like the files next to it
+    for command in &commands {
+        files.push((format!("bin/{command}.lks"), read(&project.command_file(command))?));
+    }
+    // The modules of the project and of its dependencies, each under its own author/name/
+    let mut modules = 0;
+    let mut seen = std::collections::HashSet::new();
+    for root in resolve::module_path(&project, &dependencies) {
+        for file in files_in(&root) {
+            if file.extension().is_none_or(|e| e != "lks") {
+                continue;
+            }
+            let name = inside("src", &root, &file);
+            if seen.insert(name.clone()) {
+                files.push((name, read(&file)?));
+                modules += 1;
+            }
+        }
+    }
+    let resources_dir = project.dir.join("resources");
+    let resources = files_in(&resources_dir);
+    for file in &resources {
+        files.push((inside("resources", &resources_dir, file), read(file)?));
+    }
+    let dist = project.dir.join("dist");
+    std::fs::create_dir_all(&dist).map_err(|e| format!("can't create {}: {e}", dist.display()))?;
+    for command in &chosen {
+        let out = dist.join(format!("{command}.lkb"));
+        lakescript::write_bundle(&out, command, &project.id, &project.manifest.project.version, &files).map_err(|e| format!("can't write {}: {e}", out.display()))?;
+        let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        let s = |n: usize| if n == 1 { "" } else { "s" };
+        let detail = format!("{modules} module{}, {} resource{}, {} KB", s(modules), resources.len(), s(resources.len()), size.div_ceil(1024));
+        status("Bundled", &format!("{} ({detail})", relative(&project, &out)));
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Every file under a folder, sorted, so a bundle is the same every time.
+fn files_in(dir: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(dir, &mut files);
+    files.sort();
+    files
+}
+
 fn install_here() -> Result<ExitCode, Fail> {
     let (home, project, dependencies) = open_project()?;
     application(&project)?;
@@ -567,7 +655,7 @@ fn install_here() -> Result<ExitCode, Fail> {
     // A copy, so changing or deleting the folder doesn't break the installed commands
     let target = home.installed(&project.id);
     let _ = std::fs::remove_dir_all(&target);
-    for part in [MANIFEST, project::LOCK, "src", "bin"] {
+    for part in [MANIFEST, project::LOCK, "src", "bin", "resources"] {
         let from = project.dir.join(part);
         if from.exists() {
             copy(&from, &target.join(part))?;
@@ -597,7 +685,7 @@ fn install_package(spec: &str) -> Result<ExitCode, Fail> {
 
 fn application(project: &Project) -> Result<(), Fail> {
     if project.manifest.project.kind == Kind::Library || project.commands().is_empty() {
-        return Err(format!("{} is a library, with no commands to install. Other projects use it with `ferry add`", project.id).into());
+        return Err(format!("{} is a library, with no commands to install or bundle. Other projects use it with `ferry add`", project.id).into());
     }
     Ok(())
 }
@@ -650,7 +738,8 @@ fn write_launchers(home: &Home, project: &Project, dependencies: &[Dependency]) 
     let lks = lks_program();
     for command in &commands {
         let script = project.command_file(command).display().to_string();
-        let launcher = launcher_text(&project.id, &project.manifest.project.version, &lks.display().to_string(), &module_path.to_string_lossy(), command, &script, windows);
+        let resources = project.dir.join("resources").display().to_string();
+        let launcher = launcher_text(&project.id, &project.manifest.project.version, &lks.display().to_string(), &module_path.to_string_lossy(), &resources, command, &script, windows);
         let path = bin.join(launcher_name(command, windows));
         std::fs::write(&path, launcher).map_err(|e| format!("can't write {}: {e}", path.display()))?;
         make_executable(&path)?;
@@ -670,7 +759,8 @@ fn launcher_name(command: &str, windows: bool) -> String {
 
 /// What an installed command runs: `lks` with the project's module path,
 /// and the name of the command for the `Usage:` line of its `--help`.
-fn launcher_text(id: &str, version: &str, lks: &str, module_path: &str, name: &str, script: &str, windows: bool) -> String {
+#[allow(clippy::too_many_arguments)]
+fn launcher_text(id: &str, version: &str, lks: &str, module_path: &str, resources: &str, name: &str, script: &str, windows: bool) -> String {
     if windows {
         // `cmd` can't always run or find a path that starts with `\\?\`, the
         // form Rust gives real paths in on Windows, so every path is written
@@ -679,17 +769,19 @@ fn launcher_text(id: &str, version: &str, lks: &str, module_path: &str, name: &s
         let q = |text: &str| format!("\"{}\"", text.replace('%', "%%"));
         let module_path: Vec<String> = module_path.split(';').map(plain).collect();
         format!(
-            "@echo off\r\nrem Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\r\n{OWNER_CMD}{id}\r\n{} --no-type-check --module-path {} --name {} -- {} %*\r\n",
+            "@echo off\r\nrem Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\r\n{OWNER_CMD}{id}\r\n{} --no-type-check --module-path {} --resources {} --name {} -- {} %*\r\n",
             q(&plain(lks)),
             q(&module_path.join(";")),
+            q(&plain(resources)),
             q(name),
             q(&plain(script)),
         )
     } else {
         format!(
-            "#!/bin/sh\n# Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\n{OWNER}{id}\nexec {} --no-type-check --module-path {} --name {} -- {} \"$@\"\n",
+            "#!/bin/sh\n# Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\n{OWNER}{id}\nexec {} --no-type-check --module-path {} --resources {} --name {} -- {} \"$@\"\n",
             quote(lks),
             quote(module_path),
+            quote(resources),
             quote(name),
             quote(script),
         )
@@ -729,18 +821,18 @@ mod tests {
 
     #[test]
     fn launchers_for_each_system() {
-        let sh = launcher_text("a/b", "1.0.0", "/bin/lks", "/x/src", "go", "/x/bin/go.lks", false);
+        let sh = launcher_text("a/b", "1.0.0", "/bin/lks", "/x/src", "/x/resources", "go", "/x/bin/go.lks", false);
         assert!(sh.starts_with("#!/bin/sh\n"), "{sh}");
         assert!(sh.contains("\n# ferry-project: a/b\n"), "{sh}");
-        assert!(sh.ends_with("exec '/bin/lks' --no-type-check --module-path '/x/src' --name 'go' -- '/x/bin/go.lks' \"$@\"\n"), "{sh}");
-        let cmd = launcher_text("a/b", "1.0.0", r"C:\lks\lks.exe", r"C:\x\src;C:\100%", "go", r"C:\x\bin\go.lks", true);
+        assert!(sh.ends_with("exec '/bin/lks' --no-type-check --module-path '/x/src' --resources '/x/resources' --name 'go' -- '/x/bin/go.lks' \"$@\"\n"), "{sh}");
+        let cmd = launcher_text("a/b", "1.0.0", r"C:\lks\lks.exe", r"C:\x\src;C:\100%", r"C:\x\resources", "go", r"C:\x\bin\go.lks", true);
         assert!(cmd.starts_with("@echo off\r\n"), "{cmd}");
         assert!(cmd.contains("\r\nrem ferry-project: a/b\r\n"), "{cmd}");
-        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;C:\100%%" --name "go" -- "C:\x\bin\go.lks" %*"#;
+        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;C:\100%%" --resources "C:\x\resources" --name "go" -- "C:\x\bin\go.lks" %*"#;
         assert!(cmd.ends_with(&format!("{last}\r\n")), "{cmd}");
         // Paths in the form `\\?\C:\...` are written without it, which `cmd` can't run
-        let cmd = launcher_text("a/b", "1.0.0", r"\\?\C:\lks\lks.exe", r"\\?\C:\x\src;\\?\UNC\pc\share\src", "go", r"\\?\C:\x\bin\go.lks", true);
-        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;\\pc\share\src" --name "go" -- "C:\x\bin\go.lks" %*"#;
+        let cmd = launcher_text("a/b", "1.0.0", r"\\?\C:\lks\lks.exe", r"\\?\C:\x\src;\\?\UNC\pc\share\src", r"\\?\C:\x\resources", "go", r"\\?\C:\x\bin\go.lks", true);
+        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;\\pc\share\src" --resources "C:\x\resources" --name "go" -- "C:\x\bin\go.lks" %*"#;
         assert!(cmd.ends_with(&format!("{last}\r\n")), "{cmd}");
         assert!(!cmd.contains(r"\\?\"), "{cmd}");
         assert_eq!(launcher_name("go", true), "go.cmd");

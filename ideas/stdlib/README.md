@@ -27,6 +27,7 @@ A program that embeds Lakescript can leave out the modules that need big crates.
 | Feature | Module | Crates it needs |
 |---------|--------|-----------------|
 | `archive` | `std/archive`. It needs `dates` too | `zip`, `tar`, `flate2` |
+| `bundle` | Running bundles, `.lkb` files, and writing them for `ferry bundle` *(see [bundles.md](../tooling/bundles.md))*. `std/resources` is always there, and reads folders without it | `zip` |
 | `csv` | `std/format/csv` | `csv` |
 | `dates` | The dates of `std/time`, `std/time/zone`, and `fs::modified()` as a date. `time::now()` is always there, and without dates `fs::modified()` gives seconds | `jiff` |
 | `html` | `std/html` | `scraper` |
@@ -83,6 +84,7 @@ What's coming next is in [planned.md](planned.md).
 | [process.md](process.md) | `std/process`: arguments, the current folder, the platform, finding and running programs |
 | [bytes.md](bytes.md) | `std/bytes`: bytes from hex and base64 |
 | [archive.md](archive.md) | `std/archive`: zip, tar and tar.gz archives, read, extracted and written |
+| [resources.md](resources.md) | `std/resources`: the files that aren't code, in `resources/` or inside a bundle |
 | [random.md](random.md) | `std/random`: random numbers, `true` or `false`, UUIDs and the seed |
 | [html.md](html.md) | `std/html`: reading HTML and finding its parts with CSS selectors |
 | [http.md](http.md) | `std/http`: requests to web servers |

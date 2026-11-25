@@ -132,3 +132,31 @@ fn the_usage_line_says_what_was_typed() {
     assert!(stderr(&lks(&["--name"])).contains("`--name` needs the name"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn bundles_and_resources() {
+    let dir = std::env::temp_dir().join(format!("lks-cli-bundle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("res")).unwrap();
+    let script = dir.join("show.lks");
+    std::fs::write(&script, "use std/resources;\nuse std/process;\noutln(resources::read('a.txt'));\noutln(process::args());\n").unwrap();
+    std::fs::write(dir.join("res/a.txt"), "from --resources").unwrap();
+    let path = script.display().to_string();
+    let res = dir.join("res").display().to_string();
+    assert_eq!(stdout(&lks(&["--resources", &res, &path, "x"])), "from --resources\n['x']\n");
+    assert!(stderr(&lks(&["--resources"])).contains("`--resources` needs the folder"));
+    // A bundle, with its arguments after it
+    let bundle = dir.join("show.lkb");
+    let files = vec![
+        ("bin/show.lks".to_string(), std::fs::read(&script).unwrap()),
+        ("resources/a.txt".to_string(), b"from the bundle".to_vec()),
+    ];
+    lakescript::write_bundle(&bundle, "show", "me/show", "1.0.0", &files).unwrap();
+    let bundle = bundle.display().to_string();
+    let out = lks(&[&bundle, "y", "--z"]);
+    assert_eq!(stdout(&out), "from the bundle\n['y', '--z']\n", "{}", stderr(&out));
+    let out = lks(&["--test", &bundle]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("is a bundle"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

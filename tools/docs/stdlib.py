@@ -25,7 +25,7 @@ root = repo / 'ideas' / 'stdlib'
 out = Path(sys.argv[1]) if len(sys.argv) > 1 else repo / 'crates' / 'ferry' / 'src' / 'stdlib.toml'
 TYPES = ['any', 'string', 'number', 'bool', 'list', 'map', 'range', 'regex', 'bytes', 'command']
 # The file of each module
-MODULES = ['archive', 'bytes', 'dirs', 'fs', 'path', 'env', 'io', 'process', 'random', 'http', 'html', 'format/json', 'format/csv', 'template', 'terminal', 'test', 'time']
+MODULES = ['archive', 'bytes', 'dirs', 'fs', 'path', 'env', 'io', 'process', 'random', 'resources', 'http', 'html', 'format/json', 'format/csv', 'template', 'terminal', 'test', 'time']
 MEMBER_HEADERS = ('Method', 'Function', 'Constant', 'Field')
 # Sections for the people who make Lakescript, not for the ones who use it
 INTERNAL = ('Backlog', "How it's made", 'Later', 'Not doing', 'Still open', 'Being discussed')

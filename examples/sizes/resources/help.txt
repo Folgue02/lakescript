@@ -1,0 +1,4 @@
+Usage: bytes <size>...
+
+Writes sizes in bytes. A size is a number, then a space and a unit, in any
+case: '1.5 KB', '2 mb'. Without a unit, it's bytes.
