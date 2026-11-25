@@ -625,7 +625,7 @@ impl<'a> Interpreter<'a> {
             ip += 1;
             match op {
                 // ---- Values ----
-                Op::Const(c) => self.stack.push(proto.consts[c as usize].clone()),
+                Op::Const(c) => self.stack.push(proto.consts[c as usize].copy()),
                 Op::Int(n) => self.stack.push(Value::Int(n as i64)),
                 Op::Null => self.stack.push(Value::Null),
                 Op::True => self.stack.push(Value::Bool(true)),
@@ -646,7 +646,7 @@ impl<'a> Interpreter<'a> {
                     std::mem::replace(&mut self.stack[base + s as usize], v).discard();
                 }
                 Op::LoadCell(c) => {
-                    let v = self.frames[fi].cells[c as usize].borrow().clone();
+                    let v = self.frames[fi].cells[c as usize].borrow().copy();
                     self.stack.push(v);
                 }
                 Op::StoreCell(c) => {
@@ -662,7 +662,7 @@ impl<'a> Interpreter<'a> {
                     self.frames[fi].cells[cell as usize] = Rc::new(RefCell::new(v));
                 }
                 Op::LoadUpvalue(u) => {
-                    let v = self.upvalue(fi, u).borrow().clone();
+                    let v = self.upvalue(fi, u).borrow().copy();
                     self.stack.push(v);
                 }
                 Op::StoreUpvalue(u) => {
@@ -988,6 +988,16 @@ impl<'a> Interpreter<'a> {
                 Op::Index => {
                     let index = self.pop();
                     let container = self.pop();
+                    // A list and a whole number, the most common, without a call
+                    if let (Value::List(list), Value::Int(i)) = (&container, &index) {
+                        let items = list.borrow();
+                        let pos = if *i < 0 { items.len() as i64 + *i } else { *i };
+                        let v = if pos >= 0 && (pos as usize) < items.len() { items[pos as usize].copy() } else { Value::Null };
+                        drop(items);
+                        container.discard();
+                        self.stack.push(v);
+                        continue;
+                    }
                     let v = if let Value::Object(_) = &container {
                         self.frames[fi].ip = ip;
                         self.call_operator_method(&container, "get", "IIndex", "[]", vec![index], span!())?
@@ -2310,7 +2320,7 @@ fn index_value(strings: &mut crate::strings::StringIndex, container: Value, inde
             }
             let pos = pos as usize;
             Ok(match &container {
-                Value::List(l) => l.borrow()[pos].clone(),
+                Value::List(l) => l.borrow()[pos].copy(),
                 Value::Str(s) => Value::string(strings.char_at(s, pos).unwrap_or("")),
                 Value::Bytes(b) => Value::Int(b[pos] as i64),
                 _ => unreachable!(),

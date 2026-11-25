@@ -1,4 +1,8 @@
 use std::io::IsTerminal;
+// Faster for the many small values scripts make and drop *(see `lakescript::SmallAlloc`)*
+#[global_allocator]
+static ALLOCATOR: lakescript::SmallAlloc = lakescript::SmallAlloc;
+
 use std::path::Path;
 use std::sync::OnceLock;
 use std::process::ExitCode;

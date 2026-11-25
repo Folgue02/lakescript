@@ -1,6 +1,9 @@
 //! `ferry`, the tool for Lakescript projects: their file, their
 //! dependencies, and installing their commands *(see ideas/tooling/ferry.md)*.
 
+// Faster for the many small values scripts make and drop *(see `lakescript::SmallAlloc`)*
+#[global_allocator]
+static ALLOCATOR: lakescript::SmallAlloc = lakescript::SmallAlloc;
 
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
