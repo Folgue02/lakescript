@@ -1,0 +1,7 @@
+// Building and splitting 300,000 strings
+let $total = 0;
+for ($i in 0..300_000) {
+    const $line = f"item-{$i},{$i * 2},done";
+    $total += $line.split(',').length();
+}
+outln($total);

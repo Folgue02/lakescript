@@ -1,0 +1,4 @@
+// `.map()` and `.filter()` with lambdas, 1 million items
+const $numbers = (0..1_000_000).toList();
+const $even = $numbers.map(($n) -> $n * 2).filter(($n) -> $n % 3 == 0);
+outln($even.length());

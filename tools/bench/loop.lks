@@ -1,0 +1,6 @@
+// A loop with a `%` test, 3 million times
+let $count = 0;
+for ($i in 0..3_000_000) {
+    if ($i % 3 == 0) $count++;
+}
+outln($count);

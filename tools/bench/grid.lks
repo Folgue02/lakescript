@@ -1,0 +1,20 @@
+// A 2D grid in a list, like cinder's map: 200 passes over 100x100 cells
+class Grid {
+    pub const number @width;
+    pub const number @height;
+    list<number> @cells = [];
+    pub new(@width, @height) {
+        for ($i in 0..@width * @height) @cells.push(0);
+    }
+    pub number get(number $x, number $y) = @cells[$y * @width + $x] ?? 0;
+    pub void set(number $x, number $y, number $v) { @cells[$y * @width + $x] = $v; }
+}
+const $g = Grid(100, 100);
+for ($pass in 0..200) {
+    for ($y in 0..$g.height) {
+        for ($x in 0..$g.width) {
+            $g.set($x, $y, $g.get($x, $y) + 1);
+        }
+    }
+}
+outln($g.get(5, 5));

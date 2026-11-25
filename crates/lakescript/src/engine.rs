@@ -486,6 +486,7 @@ impl Engine {
                 fields: Vec::new(),
                 methods: HashMap::new(),
                 method_list: Vec::new(),
+                operators: Vec::new(),
                 statics: std::cell::RefCell::new(indexmap::IndexMap::new()),
                 constructor: None,
                 init: None,

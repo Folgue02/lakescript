@@ -1,0 +1,17 @@
+// Making 1 million small objects and comparing them, like a game's points
+class Point {
+    pub number @x;
+    pub number @y;
+    pub Point plus(Point $o) = Point(@x + $o.x, @y + $o.y);
+    implement IEquals {
+        bool equals?(Self $o) = @x == $o.x && @y == $o.y;
+    }
+}
+let $p = Point(0, 0);
+const $step = Point(1, 1);
+let $same = 0;
+for ($i in 0..1_000_000) {
+    $p = $p.plus($step);
+    if ($p == Point($i + 1, $i + 1)) $same++;
+}
+outln($same);

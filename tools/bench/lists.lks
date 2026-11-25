@@ -1,0 +1,6 @@
+// Pushing to a list and reading it by index, 2 million times each
+const $list = <number>[];
+for ($i in 0..2_000_000) $list.push($i);
+let $sum = 0;
+for ($i in 0..$list.length()) $sum += $list[$i]!;
+outln($sum);

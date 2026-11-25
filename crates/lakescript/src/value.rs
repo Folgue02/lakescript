@@ -63,6 +63,11 @@ pub struct Class {
     /// The same methods by number, which a place that calls one remembers
     /// *(see `bytecode::InlineCache`)*.
     pub(crate) method_list: Vec<Rc<Function>>,
+    /// The method of each operator interface it implements, in the order of
+    /// `operators::INTERFACES` *(i.e. its `equals?` for `==`)*, found once
+    /// when the class is made instead of by name every time. Empty for the
+    /// interfaces themselves.
+    pub(crate) operators: Vec<Option<Rc<Function>>>,
     pub(crate) statics: RefCell<IndexMap<Rc<str>, StaticSlot>>,
     /// `new`, or `None` for the one that takes every field.
     pub(crate) constructor: Option<Rc<Function>>,

@@ -1,0 +1,9 @@
+// 3 million reads of a field
+class Point {
+    pub number @x;
+    pub number @y;
+}
+const $p = Point(1, 2);
+let $sum = 0;
+for ($i in 0..3_000_000) $sum += $p.x;
+outln($sum);

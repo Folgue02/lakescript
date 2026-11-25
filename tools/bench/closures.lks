@@ -1,0 +1,5 @@
+// 2 million calls of a closure that changes a variable around it
+let $total = 0;
+const $add = ($n) { $total += $n; };
+for ($i in 0..2_000_000) $add($i);
+outln($total);

@@ -1,0 +1,15 @@
+// Arithmetic in a while loop with locals, 5 million passes
+number collatz(number $limit) {
+    let $steps = 0;
+    let $n = 1;
+    while ($n < $limit) {
+        let $x = $n;
+        while ($x != 1) {
+            $x = if ($x % 2 == 0) $x / 2 else 3 * $x + 1;
+            $steps++;
+        }
+        $n++;
+    }
+    return $steps;
+}
+outln(collatz(60_000));

@@ -302,7 +302,13 @@ impl<'a> Interpreter<'a> {
             return error(TOO_DEEP, span);
         }
         let Function::User(user) = &*function else { unreachable!("only a script's functions get frames") };
-        self.stack.resize(base + user.proto.slots as usize, Value::Null);
+        // Without `resize`, which clones the `null` through a call for every slot
+        let slots = base + user.proto.slots as usize;
+        if self.stack.len() > slots {
+            self.drop_to(slots);
+        } else {
+            self.stack.resize_with(slots, || Value::Null);
+        }
         let cells = if user.proto.cells == 0 { Vec::new() } else { vec![self.empty_cell.clone(); user.proto.cells as usize] };
         self.frames.push(Frame { function, ip: 0, base, cells, given });
         Ok(())
@@ -323,8 +329,8 @@ impl<'a> Interpreter<'a> {
     fn call_op(&mut self, argc: usize, span: Span) -> Exec<bool> {
         self.check_interrupt(span)?;
         let callee = self.stack.len() - argc - 1;
-        let function = match &self.stack[callee] {
-            Value::Function(f) => f.clone(),
+        match &self.stack[callee] {
+            Value::Function(_) => {}
             Value::Class(class) => {
                 let class = class.clone();
                 let args = self.stack.split_off(callee + 1);
@@ -334,7 +340,9 @@ impl<'a> Interpreter<'a> {
                 return Ok(false);
             }
             other => return error_as(exceptions::TYPE_ERROR, format!("a {} can't be called", other.type_name()), span),
-        };
+        }
+        // Taken out of its place below the frame, which nothing reads, instead of cloned
+        let Value::Function(function) = std::mem::replace(&mut self.stack[callee], Value::Null) else { unreachable!("checked above") };
         if let Function::User(user) = &*function {
             if user.proto.simple && argc == user.proto.params.len() {
                 self.push_frame(function, callee + 1, u64::MAX, span)?;
@@ -489,13 +497,44 @@ impl<'a> Interpreter<'a> {
         self.stack.pop().expect("the compiler keeps the stack balanced")
     }
 
+    /// Drops the values of the stack above `len`, like `truncate`, without a
+    /// call for each number, bool and `null`.
+    #[inline(always)]
+    fn drop_to(&mut self, len: usize) {
+        let old = self.stack.len();
+        if len >= old {
+            return;
+        }
+        // Safety: the length goes down first, so a drop that panics can't drop
+        // a value twice, and each value above `len` is dropped once, in place
+        unsafe {
+            self.stack.set_len(len);
+            let start = self.stack.as_mut_ptr().add(len);
+            for i in 0..old - len {
+                let v = start.add(i);
+                if !matches!(*v, Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null) {
+                    std::ptr::drop_in_place(v);
+                }
+            }
+        }
+    }
+
     fn top(&mut self) -> &mut Value {
         self.stack.last_mut().expect("the compiler keeps the stack balanced")
     }
 
-    fn code_of(&self, frame: usize) -> (Rc<Proto>, Rc<Globals>) {
+    /// The code and the top level of a frame, borrowed instead of cloned, so a
+    /// call and a return don't touch two reference counts each.
+    ///
+    /// Safety: the frame's `Rc<Function>` keeps them alive while the frame is
+    /// in `self.frames`, and they never move, since they're inside its
+    /// allocation. `dispatch` uses them only while the frame exists: it takes
+    /// them again after every call and return, and leaves when something is
+    /// thrown, before the frames are dropped.
+    #[inline(always)]
+    fn code_ref<'f>(&self, frame: usize) -> (&'f Rc<Proto>, &'f Rc<Globals>) {
         match &*self.frames[frame].function {
-            Function::User(user) => (user.proto.clone(), user.globals.clone()),
+            Function::User(user) => unsafe { (&*(&user.proto as *const Rc<Proto>), &*(&user.globals as *const Rc<Globals>)) },
             _ => unreachable!("only a script's functions get frames"),
         }
     }
@@ -517,7 +556,7 @@ impl<'a> Interpreter<'a> {
     /// Runs instructions until the frame `entry` returns or something is thrown.
     fn dispatch(&mut self, entry: usize) -> Exec<Value> {
         let mut fi = self.frames.len() - 1;
-        let (mut proto, mut globals) = self.code_of(fi);
+        let (mut proto, mut globals) = self.code_ref(fi);
         let mut ip = self.frames[fi].ip;
         let mut base = self.frames[fi].base;
 
@@ -529,7 +568,7 @@ impl<'a> Interpreter<'a> {
         macro_rules! reload {
             () => {{
                 fi = self.frames.len() - 1;
-                (proto, globals) = self.code_of(fi);
+                (proto, globals) = self.code_ref(fi);
                 ip = self.frames[fi].ip;
                 base = self.frames[fi].base;
             }};
@@ -689,11 +728,11 @@ impl<'a> Interpreter<'a> {
                 Op::Add => arith!(BinaryOp::Add, |a: i64, b: i64| a.checked_add(b).map(Value::Int), |a: f64, b: f64| Some(Value::Float(a + b))),
                 Op::Sub => arith!(BinaryOp::Sub, |a: i64, b: i64| a.checked_sub(b).map(Value::Int), |a: f64, b: f64| Some(Value::Float(a - b))),
                 Op::Mul => arith!(BinaryOp::Mul, |a: i64, b: i64| a.checked_mul(b).map(Value::Int), |a: f64, b: f64| Some(Value::Float(a * b))),
-                Op::Div => arith!(BinaryOp::Div, |a: i64, b: i64| Some(Value::Float(a as f64 / b as f64)), |a: f64, b: f64| Some(Value::Float(a / b))),
+                Op::Div => arith!(BinaryOp::Div, |a: i64, b: i64| Some(int_div(a, b)), |a: f64, b: f64| Some(Value::Float(a / b))),
                 Op::Rem => arith!(
                     BinaryOp::Rem,
                     |a: i64, b: i64| if b == 0 { None } else { Some(Value::Int(a.wrapping_rem(b))) },
-                    |a: f64, b: f64| if b == 0.0 { None } else { Some(Value::Float(a % b)) }
+                    |a: f64, b: f64| if b == 0.0 { None } else { Some(Value::Float(float_rem(a, b))) }
                 ),
                 Op::Eq | Op::NotEq => {
                     let r = self.pop();
@@ -1205,8 +1244,9 @@ impl<'a> Interpreter<'a> {
                         if let Some(method) = method {
                             if let Function::User(user) = &*method {
                                 if user.proto.simple && argc as usize + 1 == user.proto.params.len() {
-                                    // The method's frame starts at the object, its `@`
-                                    self.stack.insert(at, Value::Function(method.clone()));
+                                    // The method's frame starts at the object, its `@`. Below
+                                    // it goes the place of the function, which nothing reads
+                                    self.stack.insert(at, Value::Null);
                                     self.push_frame(method, at + 1, u64::MAX, span!())?;
                                     reload!();
                                     continue;
@@ -1252,7 +1292,7 @@ impl<'a> Interpreter<'a> {
                 Op::Return => {
                     let value = self.pop();
                     let frame = self.frames.pop().expect("a frame is running");
-                    self.stack.truncate(frame.base - 1);
+                    self.drop_to(frame.base - 1);
                     if self.frames.len() == entry {
                         return Ok(value);
                     }
@@ -1670,6 +1710,14 @@ impl Interpreter<'_> {
         for (name, f) in info.static_methods.iter().zip(statics.into_iter().rev()) {
             static_table.insert(name.clone(), StaticSlot { value: Value::Function(f), constant: true });
         }
+        // The methods of the operator interfaces it implements, by their place
+        let operators = crate::operators::INTERFACES
+            .iter()
+            .map(|(name, method, _)| {
+                let builtin = self.host.builtin_interface(name)?;
+                interfaces.iter().any(|i| Rc::ptr_eq(i, &builtin)).then(|| table.get(*method).cloned()).flatten()
+            })
+            .collect();
         let class = Rc::new(Class {
             name: info.name.clone(),
             interface: info.interface,
@@ -1681,6 +1729,7 @@ impl Interpreter<'_> {
             required: info.required.clone(),
             fields,
             method_list: table.values().cloned().collect(),
+            operators,
             methods: table,
             statics: RefCell::new(static_table),
             constructor,
@@ -1730,6 +1779,18 @@ impl Interpreter<'_> {
         }
         if class.is_enum {
             return error_as(exceptions::TYPE_ERROR, format!("`{}` is an enum: its values are created where it's declared *(i.e. `{}::...`)*", class.name, class.name), span);
+        }
+        // The constructor that takes every field, given all of them in order and
+        // nothing to compute first: the arguments are the fields
+        if class.constructor.is_none()
+            && class.parent.is_none()
+            && class.init.is_none()
+            && class.exception.is_none()
+            && named.is_empty()
+            && positional.len() == class.fields.len()
+        {
+            let object = Object { class: class.clone(), enum_name: None, fields: RefCell::new(positional), building: std::cell::Cell::new(false) };
+            return Ok(Value::Object(Rc::new(object)));
         }
         let mut fields = vec![Value::Null; class.fields.len()];
         if class.exception.is_some() {
@@ -1788,6 +1849,14 @@ impl Interpreter<'_> {
                 format!("`{}` takes {n} argument{}, but it was given {}", class.name, if n == 1 { "" } else { "s" }, positional.len()),
                 span,
             );
+        }
+        // Every field given in order: nothing else to check
+        if named.is_empty() && positional.len() == class.fields.len() {
+            let mut fields = o.fields.borrow_mut();
+            for (slot, v) in fields.iter_mut().zip(positional) {
+                *slot = v;
+            }
+            return Ok(());
         }
         let mut given = vec![false; class.fields.len()];
         {
@@ -1860,14 +1929,17 @@ impl Interpreter<'_> {
         let Value::Object(o) = object else {
             return error_as(exceptions::TYPE_ERROR, format!("`{symbol}` needs an object here, not a {}", object.type_label()), span);
         };
-        let implements = self.host.builtin_interface(interface).is_some_and(|i| o.class.is_a(&i));
-        let found = o.class.methods.get(method).cloned().filter(|_| implements);
+        let found = crate::operators::index(interface).and_then(|i| o.class.operators.get(i).cloned().flatten());
         let Some(function) = found else {
             let message = format!("`{}` has no `{symbol}`: implement `{interface}` to give it one", o.class.name);
             return error_as(exceptions::TYPE_ERROR, message, span);
         };
-        args.insert(0, object.clone());
-        self.call(&function, args, Vec::new(), span)
+        debug_assert!(crate::operators::INTERFACES.iter().any(|(i, m, _)| *i == interface && *m == method));
+        // The object first, without moving the others to make room
+        let mut all = Vec::with_capacity(args.len() + 1);
+        all.push(object.clone());
+        all.append(&mut args);
+        self.call(&function, all, Vec::new(), span)
     }
 
     /// `==` on two objects: `equals?` when their class implements `IEquals`,
@@ -1954,12 +2026,12 @@ impl Interpreter<'_> {
         if Rc::ptr_eq(a, b) {
             return Ok(true);
         }
-        let related = a.class.is_a(&b.class) || b.class.is_a(&a.class);
-        let equals = self.host.builtin_interface("IEquals").is_some_and(|i| a.class.is_a(&i));
-        if !related || !equals {
+        // Its `equals?`, found when the class was made
+        let Some(Some(method)) = a.class.operators.get(crate::operators::EQUALS).cloned() else { return Ok(false) };
+        if !(a.class.is_a(&b.class) || b.class.is_a(&a.class)) {
             return Ok(false);
         }
-        let v = self.call_operator_method(&l, "equals?", "IEquals", "==", vec![r], span)?;
+        let v = self.call(&method, vec![l, r], Vec::new(), span)?;
         Ok(matches!(v, Value::Bool(true)))
     }
 
@@ -2418,6 +2490,33 @@ pub fn contains(container: &Value, value: &Value) -> Result<bool, String> {
     }
 }
 
+/// `/` of two whole numbers. A division that's exact stays a whole number,
+/// so the numbers that come from it stay fast *(i.e. `%` on them needs no
+/// `fmod`)*. Scripts can't tell: `number` is one type, and `6 / 3` prints
+/// `2` either way. `0 / -5` stays a float, since it's `-0`.
+#[inline(always)]
+fn int_div(a: i64, b: i64) -> Value {
+    if b != 0 && a.checked_rem(b) == Some(0) && !(a == 0 && b < 0) {
+        if let Some(q) = a.checked_div(b) {
+            return Value::Int(q);
+        }
+    }
+    Value::Float(a as f64 / b as f64)
+}
+
+/// `%` of two floats, with whole ones done as integers, which is many times
+/// faster than `fmod` and gives the same number, its sign included.
+#[inline(always)]
+fn float_rem(a: f64, b: f64) -> f64 {
+    const EXACT: f64 = 9_007_199_254_740_992.0;
+    if a.fract() == 0.0 && b.fract() == 0.0 && a.abs() < EXACT && b.abs() < EXACT && b != 0.0 {
+        let r = ((a as i64) % (b as i64)) as f64;
+        // `fmod` keeps the sign of `a` also for a result of 0 *(i.e. `-4 % 2` is `-0`)*
+        return if r == 0.0 { 0.0f64.copysign(a) } else { r };
+    }
+    a % b
+}
+
 pub fn arithmetic(op: BinaryOp, l: &Value, r: &Value) -> Result<Value, String> {
     use BinaryOp::*;
     match (l, r) {
@@ -2428,7 +2527,7 @@ pub fn arithmetic(op: BinaryOp, l: &Value, r: &Value) -> Result<Value, String> {
                 Add => a.checked_add(b).map_or_else(|| float(a as f64 + b as f64), |n| Ok(Value::Int(n))),
                 Sub => a.checked_sub(b).map_or_else(|| float(a as f64 - b as f64), |n| Ok(Value::Int(n))),
                 Mul => a.checked_mul(b).map_or_else(|| float(a as f64 * b as f64), |n| Ok(Value::Int(n))),
-                Div => float(a as f64 / b as f64),
+                Div => Ok(int_div(a, b)),
                 Rem if b == 0 => Err("remainder by zero".into()),
                 Rem => Ok(Value::Int(a.wrapping_rem(b))),
                 Pow if b >= 0 && b <= u32::MAX as i64 => {
@@ -2446,7 +2545,7 @@ pub fn arithmetic(op: BinaryOp, l: &Value, r: &Value) -> Result<Value, String> {
                 Mul => a * b,
                 Div => a / b,
                 Rem if b == 0.0 => return Err("remainder by zero".into()),
-                Rem => a % b,
+                Rem => float_rem(a, b),
                 Pow => a.powf(b),
                 _ => unreachable!(),
             }))

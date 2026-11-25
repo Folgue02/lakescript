@@ -1,0 +1,9 @@
+// 2 million calls of a method
+class Counter {
+    number @n = 0;
+    pub void add(number $by) { @n += $by; }
+    pub number total() = @n;
+}
+const $c = Counter();
+for ($i in 0..2_000_000) $c.add(1);
+outln($c.total());

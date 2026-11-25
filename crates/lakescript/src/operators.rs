@@ -31,6 +31,15 @@ pub const INTERFACES: &[(&str, &str, Spec)] = &[
     ("IContains", "contains", Spec { generics: &["T"], params: &[("value", "T")], ret: "bool" }),
 ];
 
+/// The place of an interface in `INTERFACES`, and in `Class::operators`.
+#[inline]
+pub fn index(interface: &str) -> Option<usize> {
+    INTERFACES.iter().position(|(name, ..)| *name == interface)
+}
+
+/// The place of `IEquals` in `INTERFACES`.
+pub const EQUALS: usize = 0;
+
 /// The interface and method behind a binary operator on an object.
 pub fn for_binary(op: crate::ast::BinaryOp) -> Option<(&'static str, &'static str)> {
     use crate::ast::BinaryOp::*;
