@@ -82,19 +82,20 @@ On the branch `optimize-interpreter`. The benchmarks are in `tools/bench`, with 
 
 | | Before | After | Python |
 |---|---|---|---|
-| `fib(32)` | 197 | 202 | 126 |
-| A loop with a `%` test, 3 million times | 49 | 47 | 118 |
-| 2 million calls of a method | 98 | 71 | 76 |
-| 3 million reads of a field | 63 | 59 | 103 |
-| `.map()` and `.filter()` with lambdas, 1 million items | 102 | 72 | 75 |
-| Building and splitting 300,000 strings | 102 | 47 | 73 |
+| `fib(32)` | 197 | 192 | 126 |
+| A loop with a `%` test, 3 million times | 49 | 48 | 118 |
+| 2 million calls of a method | 98 | 76 | 76 |
+| 3 million reads of a field | 63 | 57 | 103 |
+| `.map()` and `.filter()` with lambdas, 1 million items | 102 | 74 | 75 |
+| Building and splitting 300,000 strings | 102 | 50 | 73 |
 | A map with string keys, 300,000 updates | 45 | 34 | 48 |
-| 1 million small objects, made and compared with `==` | 496 | 203 | 232 |
-| 2 million pushes to a list, and reading them by index | 145 | 117 | 158 |
-| 2 million calls of a closure | 67 | 68 | 98 |
-| Collatz in `while` loops, 6 million steps | 354 | 197 | 222 |
-| A grid of 100 by 100 in a class, 200 passes | 298 | 202 | 191 |
-| cinder's bot, 5 games *(turns a second)* | 669 | 868 | |
+| 1 million small objects, made and compared with `==` | 496 | 183 | 232 |
+| 1 million objects of a class with values on its fields | 235 | 85 | 137 |
+| 2 million pushes to a list, and reading them by index | 145 | 109 | 158 |
+| 2 million calls of a closure | 67 | 63 | 98 |
+| Collatz in `while` loops, 6 million steps | 354 | 191 | 222 |
+| A grid of 100 by 100 in a class, 200 passes | 298 | 194 | 191 |
+| cinder's bot, 5 games *(billions of CPU cycles)* | 69.2 | 48.3 | |
 
 Wall times move by a few percent with the load of the machine, so changes were judged by CPU cycles and instructions too, which `run.py` shows.
 
@@ -108,12 +109,16 @@ What changed:
 - **Fields of a local object** *(`@x`, `$p.x`)* are read where the object is, and `@x = ...` set there, without copying the object onto the stack and dropping it again *(`GetLocalField`, `SetLocalField`)*.
 - **`&&` and `||` in conditions are jumps**: no bool is made and checked, and the comparisons on their sides compare and jump in one instruction. A side that isn't a bool gives the same error, at the same place.
 - **A loop's element goes straight into its variable**, from `ForNext` *(the kind `STORE`)*.
+- **The instructions that are rare in hot code are methods of their own**, out of `dispatch`: interpolation, regexes, commands, `.is()` and `.as()`, slices, updates of indexes, `super` methods, closures, `throw`, calls with named arguments, the generic operators, setting a field of something that isn't `@`, and map and spread literals. A smaller loop lets the compiler keep the common instructions fast: 11 to 15% fewer cycles for calls, loops and fields, and 9% for cinder.
+- **Values on fields that need no code** *(a number, a string, a bool, `null`, or an empty `[]` or `{}`)* are kept by the class and given when an object is made, without running `init`, a new list or map for each object. When one of a class's values needs code *(i.e. `= Point(0, 0)`)*, `init` runs as before.
+- **`.is()` and `.as()` of a class by its name** check the class with `is_a`, without walking the type and allocating to find it, and `!` of an `.is()` in a condition is a jump on it. Every `equals?` checks its `Self` parameter this way: objects 17% fewer cycles.
 - **Calls and returns borrow the code** of the running function instead of cloning two shared pointers, a call takes the function from its place on the stack, and a frame's slots are made and dropped without a call for each number. Numbers are copied without a call where lists, cells, fields and constants are read.
 
 What's left, and why:
 
 - **`fib` is still 1.6 times Python's**, and calls in general cost the most: a frame, the function's reference count, and the `RefCell` of the globals. The instructions it runs went down 10%, but the time didn't follow: the dispatch loop already runs about 6 instructions a cycle, and what's left is work that waits on itself. Closing it needs a register VM or a bigger change to how calls work.
-- **The dispatch loop is sensitive to its own size**: a new instruction, or a bigger arm of the `match`, can make the compiler lay out the rest worse *(i.e. a separate instruction for the loop's element made `while` loops 6% slower, so it became a kind of `ForNext`)*. Changes there are measured on cinder before they're kept.
+- **The dispatch loop is sensitive to its own size**: a new instruction, or a bigger arm of the `match`, can make the compiler lay out the rest worse *(i.e. a separate instruction for the loop's element made `while` loops 6% slower, so it became a kind of `ForNext`)*. That's why the rare instructions moved out of it, and why a change there is measured on cinder before it's kept.
+- **Tried, and not kept: running the `equals?` of `==` in the loop that's running**, like a method call, instead of going into the VM again. It made objects 5% faster, but cinder wasn't faster, and it needed a stack of its own that the unwinding of exceptions keeps in step. Once `==` found `equals?` without looking it up by name, going into the VM again cost little.
 - **A built-in method's arguments are a `Vec`**, one allocation for each call with arguments *(i.e. `$list.push($x)`)*. `SmallAlloc` makes it cheap, so it was left.
 
 ## Where it lives
