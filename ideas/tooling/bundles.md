@@ -11,8 +11,10 @@
 - **`process::scriptPath()`** gives the path of the file.
 - **Files that aren't code, like Java's resources**: `resources/` holds them *(i.e. templates, default configs, images)*. While developing, they're read from that folder; when shipped, from inside the file. A module of the standard library reads them the same way in both cases, so the code doesn't change.
 
+- **One `.lkb` for each command of `bin/`**, like `ferry install` writes one launcher for each: `ferry bundle` makes `todo.lkb` and `backup.lkb`, and `ferry bundle todo` only that one. Each file is what someone runs, without a first argument to choose a command, unlike busybox. Decided after the speed review.
+- **`std/resources`** reads the files of `resources/`, and only reads them, since a bundle can't change: `resources::read($name)` *(text)*, `readBytes($name)`, `exists?($name)` and `list($folder = '')`, named like the functions of `std/fs`. The names are paths inside `resources/`, with `/` *(i.e. `'templates/page.html'`)*.
+- **Where `resources/` is**: in a project, the project's own folder; in a bundle, inside the file; and for a script run with `lks` outside a project, next to the script *(the real file's folder, through a link, like `use` finds modules)*. `lks --resources <folder>` gives another folder for a script.
+
 ## Still open
 
-- One file per command of `bin/`, or one with every command, chosen by its first argument like busybox.
-- The functions of `std/resources` *(i.e. `read()`, `readBytes()`, `exists?()`, `list()`)*, and where `resources/` is for a script outside a project.
 - Later: a program that doesn't need `lks` installed, `lks` itself with the file at its end, like `deno compile` and `bun build --compile`. Several MB each, and one per platform.

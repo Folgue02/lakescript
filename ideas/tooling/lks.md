@@ -17,6 +17,7 @@ lks [options] <script> [arguments for the script...]
 | `--module-path <folders>` | More folders where `use` looks for modules, separated by `:`, after the script's folder and before `LKS_PATH`. It's what the commands installed by [ferry](ferry.md) use |
 | `--color <when>` | When errors and the help have colors: `auto` (on a terminal, the default), `always` or `never` *(see [diagnostics.md](diagnostics.md#colors))* |
 | `--test` | Runs the tests of the script, its functions named `test...`, instead of the script *(see [testing.md](testing.md))* |
+| `--resources <folder>` | Where `std/resources` reads the files of a script outside a project, instead of the folder `resources/` next to it *(see [bundles.md](bundles.md))* |
 | `--name <name>` | The name of the command for the `Usage:` line of `--help`, instead of the name of the script's path *(i.e. `--name cinder`)*. `ferry run` and the commands `ferry install` writes pass it, since the person typed `cinder`, not `cinder.lks` *(see Parsing in [cli.md](../language/cli.md))* |
 | `--no-type-check` | Runs the script without checking its types first, for scripts that were already checked. Since types never change what the code does, it behaves the same |
 | `-h`, `--help` | Shows the help |
