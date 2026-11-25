@@ -23,10 +23,35 @@ outln(['a', 'b', 'c'].random());           // also for choosing and shuffling li
 | `uuid()` | `string` | A random UUID, version 4, in lowercase *(i.e. `'f47ac10b-58cc-4372-a567-0e02b2c3d479'`)*. Its bits come from the system, so `seed()` doesn't change them, and two runs never give the same ones |
 | `seed(number $seed)` | `void` | Starts the generator again from a whole number, so the numbers that follow are the same on every run, for tests and for things that must be repeatable *(i.e. a level of a game)*. It's also the generator of `$list.random()`, `$list.shuffle()` and `$list.shuffled()` |
 
+| `state()` | `string` | The state of the generator, to put it back later with `restore()`, like Python's `random.getstate()` *(i.e. to save a game and load it)*. It's a string, so it can be written to JSON: a number can't hold the 64 bits |
+| `restore(string $state)` | `void` | Puts back a state from `state()`, like Python's `random.setstate()`: the numbers that follow are the ones that followed the `state()` call. Throws a `ValueError` for a string that isn't one |
+
 - Choosing and shuffling are methods of lists, not functions here: `$list.random()` gives an element, and `$list.shuffle()` and `$list.shuffled()` put them in random order *(see [list.md](types/list.md))*.
 - Without `seed()`, the numbers are different on every run.
 - It's good enough for scripts, games and tests, not for secrets: passwords and keys need a generator made for them.
 
+## Random
+
+A generator of its own, for a stream of numbers that nothing else in the script moves forward, like Python's `random.Random(seed)` and Java's `new Random(seed)` *(i.e. the levels of a game from their seed, while the rest of the game uses the shared one)*. `random::Random(42)` starts it from a seed, and `random::Random()` from the system, like a script without `seed()`.
+
+```
+const $level = random::Random(7);
+outln($level.between(1, 6));           // the same on every run, whatever else uses random
+const $saved = $level.state();
+```
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `number()` | `number` | Like `random::number()`, from this generator |
+| `between(number $min, number $max)` | `number` | Like `random::between()`, from this generator |
+| `bool()` | `bool` | Like `random::bool()`, from this generator |
+| `seed(number $seed)` | `void` | Starts it again from a whole number, like `random::seed()` |
+| `state()` | `string` | Its state, like `random::state()` |
+| `restore(string $state)` | `void` | Puts back a state, like `random::restore()`. A state of one generator can go into another, and into the shared one |
+
+- It has no `uuid()`: the bits of a UUID never come from a generator *(see `uuid()`)*, so it would be the same as `random::uuid()`.
+- `$list.random()`, `$list.shuffle()` and `$list.shuffled()` keep using the shared generator.
+
 ## How it's made
 
-- In Rust, in `crates/lakescript/src/stdlib/random.rs`, on the generator every script already has for lists *(xorshift64\*, started from the time and the process)*. `uuid()` gets its bits from the keys the system gives Rust's hash maps instead.
+- `random.lks` has `Random` and the functions, over `std/random/native` *(`crates/lakescript/src/stdlib/random.rs`)*, on the generator every script already has for lists *(xorshift64\*, started from the time and the process)*. A `Random` keeps its own state in Rust data, a `Value::Handle`. A state is its 64 bits in hexadecimal. `uuid()` gets its bits from the keys the system gives Rust's hash maps instead.

@@ -508,9 +508,16 @@ thread_local! {
 
 /// A value being walked, noted while it is, so a value that contains itself
 /// is found instead of walked forever *(i.e. `$list << $list`)*.
-struct Visiting(&'static std::thread::LocalKey<RefCell<Vec<(usize, usize)>>>);
+pub(crate) struct Visiting(&'static std::thread::LocalKey<RefCell<Vec<(usize, usize)>>>);
 
 impl Visiting {
+    /// Notes that two lists or two maps are being compared, for the
+    /// comparisons that call `equals?` *(see `Interpreter::values_equal`)*.
+    /// `None` when they already are.
+    pub(crate) fn comparing(a: usize, b: usize) -> Option<Visiting> {
+        Visiting::enter(&COMPARING, (a, b))
+    }
+
     /// `None` when `what` is already being walked.
     fn enter(stack: &'static std::thread::LocalKey<RefCell<Vec<(usize, usize)>>>, what: (usize, usize)) -> Option<Visiting> {
         stack.with(|s| {

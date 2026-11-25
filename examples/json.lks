@@ -54,3 +54,8 @@ class Package {
 const $packages = json::parse('[{"name": "lakescript", "keywords": ["scripts", "types"]}, {"name": "ferry"}]', list<Package>);
 for ($p in $packages)
     outln(f"{$p.name}: {$p.keywords.length()} keywords");
+
+// Objects are written with every field, so they read back the same
+const $written = json::stringify($packages[0]);
+outln($written);
+outln(json::parse($written, Package).name);

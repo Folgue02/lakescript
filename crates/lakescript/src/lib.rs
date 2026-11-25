@@ -26,6 +26,7 @@ mod modules;
 mod operators;
 mod parser;
 mod paths;
+mod siblings;
 mod patterns;
 mod stack;
 mod stdlib;
@@ -41,7 +42,7 @@ pub use checker::names::{Definition, Name};
 pub use diagnostic::{Call, Diagnostic};
 pub use engine::{CapturedOutput, Engine, Outcome};
 pub use interrupt::on_ctrl_c;
-pub use paths::canonical;
+pub use paths::{canonical, without_verbatim};
 pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use token::Span;
 pub use value::{Key, NativeContext, NativeError, NativeResult, Value};
@@ -70,4 +71,28 @@ pub fn parse_file(source: &str, file: u32) -> Result<Vec<ast::Stmt>, Diagnostic>
 /// Like `parse_file`, with the stack budget of the engine.
 pub(crate) fn parse_budgeted(source: &str, file: u32, stack_budget: usize) -> Result<Vec<ast::Stmt>, Diagnostic> {
     parser::parse_with_budget(lexer::tokenize_file(source, file)?, stack_budget)
+}
+
+/// Like `parse_budgeted`, for the file at `path`: the types of its folder
+/// that it uses without `use` get one *(see `siblings`)*. With `recover`, it
+/// goes on after syntax errors, and gives them.
+pub(crate) fn parse_in(
+    source: &str,
+    file: u32,
+    stack_budget: usize,
+    loader: &modules::Loader,
+    path: Option<&std::path::Path>,
+    recover: bool,
+) -> Result<(Vec<ast::Stmt>, Vec<Diagnostic>), Diagnostic> {
+    let tokens = lexer::tokenize_file(source, file)?;
+    let names = if path.is_some() { siblings::type_names(&tokens) } else { Vec::new() };
+    let (mut program, errors) = if recover {
+        parser::parse_recovering(tokens, stack_budget)
+    } else {
+        (parser::parse_with_budget(tokens, stack_budget)?, Vec::new())
+    };
+    if let Some(path) = path {
+        loader.add_siblings(&mut program, names, path);
+    }
+    Ok((program, errors))
 }

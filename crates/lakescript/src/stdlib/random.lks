@@ -1,0 +1,58 @@
+//! Random numbers, `true` or `false`, UUIDs, the seed and the state *(see
+//! ideas/stdlib/random.md)*, from the generator the script shares with
+//! `$list.random()` and `$list.shuffle()`, or from a `Random` of its own.
+//! Its Rust part, `std/random/native`, makes the numbers.
+
+use std/random/native;
+
+/// A generator of its own, for a stream of numbers that nothing else in the
+/// script moves forward *(i.e. `random::Random(42)`)*.
+pub class Random {
+    const any @generator;
+
+    /// Starts it from a whole number, or from the system without one.
+    pub new(?number $seed = null) {
+        @generator = native::generator($seed);
+    }
+
+    /// From 0 to 1, without 1, from this generator.
+    pub number number() = native::number(@generator);
+
+    /// A whole number from `$min` to `$max`, both included, from this generator.
+    pub number between(number $min, number $max) = native::between(@generator, $min, $max);
+
+    /// `true` or `false`, half the times each, from this generator.
+    pub bool bool() = native::bool(@generator);
+
+    /// Starts it again from a whole number.
+    pub void seed(number $seed) = native::seed(@generator, $seed);
+
+    /// Its state, to put it back later with `restore()`.
+    pub string state() = native::state(@generator);
+
+    /// Puts back a state from `state()`. Throws a `ValueError` for a string that isn't one.
+    pub void restore(string $state) = native::restore(@generator, $state);
+}
+
+/// From 0 to 1, without 1 *(i.e. `if (random::number() < 0.1)`)*.
+pub number number() = native::number(null);
+
+/// A whole number from `$min` to `$max`, both included *(i.e. `random::between(1, 6)`)*.
+pub number between(number $min, number $max) = native::between(null, $min, $max);
+
+/// `true` or `false`, half the times each.
+pub bool bool() = native::bool(null);
+
+/// A random UUID, version 4, whose bits come from the system.
+pub string uuid() = native::uuid();
+
+/// Starts the shared generator again from a whole number, so what follows is
+/// the same on every run, also for `$list.random()` and `$list.shuffle()`.
+pub void seed(number $seed) = native::seed(null, $seed);
+
+/// The state of the shared generator, to put it back later with `restore()`.
+pub string state() = native::state(null);
+
+/// Puts back a state from `state()`: the numbers that follow are the ones
+/// that followed it. Throws a `ValueError` for a string that isn't one.
+pub void restore(string $state) = native::restore(null, $state);

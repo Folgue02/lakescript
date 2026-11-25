@@ -350,8 +350,10 @@ impl Parser {
             }
             TokenKind::Keyword(Keyword::Let) => {
                 self.advance();
+                // `let ?Point $best = null;`, the same as without `let`
+                let ty = if matches!(self.peek().kind, TokenKind::Variable(_)) { None } else { Some(self.parse_type()?) };
                 let name = self.expect_variable("after `let`")?;
-                self.declaration_value(false, name, None)?
+                self.declaration_value(false, name, ty)?
             }
             TokenKind::Keyword(Keyword::Const) => {
                 self.advance();
@@ -1005,13 +1007,37 @@ impl Parser {
             let iterable = self.expression()?;
             self.expect(&TokenKind::RParen, "after the `for`")?;
             let body = Box::new(self.statement()?);
-            return Ok(StmtKind::For { pattern: ForPattern::List { names, rest }, iterable, body });
+            return Ok(StmtKind::For { pattern: ForPattern::List { names, rest }, ty: None, iterable, body });
         }
+        // The type of the element, before its variable *(i.e. `for (IGenerator $g in ...)`)*
+        let typed = |p: &mut Self| -> Result<Option<TypeExpr>> {
+            if matches!(p.peek().kind, TokenKind::Variable(_)) { Ok(None) } else { p.parse_type().map(Some) }
+        };
+        let mut ty = typed(self)?;
         let first = self.expect_variable("in the `for`")?;
-        let pattern = if self.eat(&TokenKind::Comma) {
-            ForPattern::Indexed { index: first, value: self.expect_variable("after `,`")? }
-        } else if self.eat(&TokenKind::FatArrow) {
-            ForPattern::KeyValue { key: first, value: self.expect_variable("after `=>`")? }
+        let pattern = if self.check(&TokenKind::Comma) || self.check(&TokenKind::FatArrow) {
+            if ty.is_some() {
+                return self.error_here("the type goes before the variable of the element *(i.e. `for ($i, string $line in $lines)`)*");
+            }
+            let indexed = self.eat(&TokenKind::Comma);
+            if !indexed {
+                self.advance();
+            }
+            // `for ($i, [$name, $age] in ...)`: the element destructured
+            if self.check(&TokenKind::LBracket) {
+                let (names, rest) = self.list_pattern()?;
+                if indexed {
+                    ForPattern::IndexedList { index: first, names, rest }
+                } else {
+                    ForPattern::KeyValueList { key: first, names, rest }
+                }
+            } else if indexed {
+                ty = typed(self)?;
+                ForPattern::Indexed { index: first, value: self.expect_variable("after `,`")? }
+            } else {
+                ty = typed(self)?;
+                ForPattern::KeyValue { key: first, value: self.expect_variable("after `=>`")? }
+            }
         } else {
             ForPattern::Value(first)
         };
@@ -1019,7 +1045,7 @@ impl Parser {
         let iterable = self.expression()?;
         self.expect(&TokenKind::RParen, "after the `for`")?;
         let body = Box::new(self.statement()?);
-        Ok(StmtKind::For { pattern, iterable, body })
+        Ok(StmtKind::For { pattern, ty, iterable, body })
     }
 
     // ---- Types ----
@@ -1692,7 +1718,13 @@ impl Parser {
     fn list_items(&mut self) -> Result<Vec<Expr>> {
         let mut items = Vec::new();
         while !self.check(&TokenKind::RBracket) {
-            items.push(self.expression()?);
+            let start = self.peek().span;
+            if self.eat(&TokenKind::Ellipsis) {
+                let inner = self.expression()?;
+                items.push(Expr { span: self.span_from(start), kind: ExprKind::Spread(Box::new(inner)) });
+            } else {
+                items.push(self.expression()?);
+            }
             if !self.eat(&TokenKind::Comma) {
                 break;
             }
@@ -1861,7 +1893,7 @@ fn can_start_expression(kind: &TokenKind) -> bool {
     use TokenKind::*;
     match kind {
         Int(_) | Float(_) | Str(_) | FStr(_) | Regex { .. } | Bytes(_) | Command(_) | WordList(_)
-        | Variable(_) | Ident(_) | LParen | LBracket | LBrace | Lt | Minus | Plus | Bang | Tilde | PlusPlus
+        | Variable(_) | Field(_) | At | Ident(_) | LParen | LBracket | LBrace | Lt | Minus | Plus | Bang | Tilde | PlusPlus
         | MinusMinus => true,
         Keyword(k) => matches!(k, self::Keyword::True | self::Keyword::False | self::Keyword::Null | self::Keyword::If | self::Keyword::Switch | self::Keyword::Try),
         TestOp(name) => path_test_op(name).is_some(),

@@ -24,7 +24,7 @@ TYPES = {
 # The modules written in Rust, by their file. The ones written in Lakescript
 # (i.e. std/http) get their types from their own code
 MODULES = {'general': 'general', 'bytes': 'std/bytes', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
-           'random': 'std/random', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
+           'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
            'template': 'std/template', 'test': 'std/test'}
 
 # Types described outside ideas/stdlib, and the Rust parts of the modules
@@ -57,6 +57,21 @@ void format(string $path);
 void check(string $path);
 void write(string $path, list<list<any>> $added);
 
+module std/dirs/native
+?string base(string $kind);
+string app(string $kind, string $name);
+?string user(string $kind);
+
+module std/random/native
+any generator(?number $seed);
+number number(any $generator);
+number between(any $generator, number $min, number $max);
+bool bool(any $generator);
+string uuid();
+void seed(any $generator, number $seed);
+string state(any $generator);
+void restore(any $generator, string $state);
+
 module std/process/native
 list<string> args();
 ?string scriptPath();
@@ -85,7 +100,11 @@ string strip(string $text);
 number visibleWidth(string $text);
 bool interactive();
 list<number> size();
-string readKey();
+?string readKey(?number $timeout);
+bool enterFullScreen();
+void leaveFullScreen();
+void moveTo(number $x, number $y);
+void clearLine();
 void clear();
 string ask(string $question, ?string $default);
 void problem(string $text);

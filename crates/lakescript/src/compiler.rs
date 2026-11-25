@@ -546,7 +546,7 @@ impl<'a> Compiler<'a> {
                 self.pop_loop();
                 self.close_scope();
             }
-            StmtKind::For { pattern, iterable, body } => self.for_loop(pattern, iterable, body)?,
+            StmtKind::For { pattern, iterable, body, .. } => self.for_loop(pattern, iterable, body)?,
             StmtKind::Break | StmtKind::Continue => {
                 let is_break = matches!(stmt.kind, StmtKind::Break);
                 let Some(lp) = self.f().loops.last() else {
@@ -704,8 +704,8 @@ impl<'a> Compiler<'a> {
         let sp_slot = self.hidden_slot();
         let kind = match pattern {
             ForPattern::Value(_) => for_kind::VALUE,
-            ForPattern::Indexed { .. } => for_kind::INDEXED,
-            ForPattern::KeyValue { .. } => for_kind::KEY_VALUE,
+            ForPattern::Indexed { .. } | ForPattern::IndexedList { .. } => for_kind::INDEXED,
+            ForPattern::KeyValue { .. } | ForPattern::KeyValueList { .. } => for_kind::KEY_VALUE,
             ForPattern::List { .. } => for_kind::LIST,
         };
         self.emit_at(Op::ForPrepare { slot, kind }, iterable.span);
@@ -730,6 +730,16 @@ impl<'a> Compiler<'a> {
                 self.define(first);
             }
             ForPattern::List { names, rest } => self.destructure(names, rest, false)?,
+            // The index or key is below the element: the element is destructured first
+            ForPattern::IndexedList { index: first, names, rest } | ForPattern::KeyValueList { key: first, names, rest } => {
+                if names.iter().chain(rest.iter()).any(|n| n == first) {
+                    self.fail(format!("`${first}` is used twice in the `for`"));
+                }
+                let taken = "a variable of the `for` already exists outside it";
+                let index = self.declare(&format!("${first}"), false, taken);
+                self.destructure(names, rest, false)?;
+                self.define(index);
+            }
         }
         self.scoped(body)?;
         self.close_scope();
@@ -1427,9 +1437,23 @@ impl<'a> Compiler<'a> {
             }
             ExprKind::List { items, .. } => {
                 for item in items {
-                    self.expr(item)?;
+                    match &item.kind {
+                        ExprKind::Spread(inner) => self.expr(inner)?,
+                        _ => self.expr(item)?,
+                    }
                 }
-                self.emit(Op::List(items.len() as u32));
+                if items.iter().any(|i| matches!(i.kind, ExprKind::Spread(_))) {
+                    let kinds = items.iter().map(|i| if matches!(i.kind, ExprKind::Spread(_)) { ArgKind::Spread(i.span) } else { ArgKind::Positional }).collect();
+                    let calls = &mut self.f().proto.calls;
+                    calls.push(kinds);
+                    let layout = calls.len() as u32 - 1;
+                    self.emit(Op::ListSpread(layout));
+                } else {
+                    self.emit(Op::List(items.len() as u32));
+                }
+            }
+            ExprKind::Spread(inner) => {
+                return Err(Diagnostic::new("`...` only goes in calls and in lists *(i.e. `[...$a, ...$b]`)*", inner.span));
             }
             ExprKind::Map { entries, .. } => {
                 for (k, v) in entries {
@@ -2196,6 +2220,7 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
                 collect_expr(item, inside, out);
             }
         }
+        ExprKind::Spread(inner) => collect_expr(inner, inside, out),
         ExprKind::Map { entries, .. } => {
             for (k, v) in entries {
                 collect_expr(k, inside, out);

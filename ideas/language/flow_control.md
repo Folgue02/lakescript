@@ -65,7 +65,22 @@ for ($name => $score in $scores)
 // Maps, only the keys
 for ($name in $scores)
     outln($name);
+
+// With the index, and the element destructured, like `for ([$name, $age] in $rows)`
+for ($i, [$name, $age] in $rows)
+    outln(f"{$i}: {$name} is {$age}");
+
+// The same for the values of a map
+for ($city => [$lat, $lon] in $places)
+    outln(f"{$city}: {$lat}, {$lon}");
+
+// With the type of the element, checked against the elements
+for (IGenerator $g in $generators)
+    $g.next();
 ```
+
+- After the index or the key, a `[` destructures the element, with the same pattern as `for ([$a, $b] in $rows)` and `let [$a, ...$rest] = ...`, `...$rest` included *(i.e. `for ($i, [$first, ...$others] in $rows)`)*. The checker types it the same way: the index is a number, the key has the type of the map's keys, and each name has the type of the elements of the inner lists. Decided after cinder.
+- The variable of the element can have its type written *(i.e. `for (IGenerator $g in $list)`, `for ($i, string $line in $lines)`)*. The checker checks that the elements have it, like a declaration: a `list<Wolf>` can be gone through as `IAnimal`, and a `list<any>` as anything, like a declaration from an `any` value. A key of a map can't have one, and neither can destructuring. Without it, the type is the one of the elements.
 
 ## While loops
 

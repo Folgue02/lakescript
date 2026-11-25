@@ -222,6 +222,38 @@ fn definitions_are_found_in_the_file_and_in_modules() {
     server.stop();
 }
 
+#[test]
+fn types_in_the_same_folder_need_no_use() {
+    let dir = temp("siblings");
+    std::fs::create_dir_all(dir.join("shop")).unwrap();
+    let customer = dir.join("shop/Customer.lks");
+    std::fs::write(&customer, "/// Who buys\npub class Customer {\n    pub string @name;\n}\n").unwrap();
+    std::fs::write(dir.join("shop/Item.lks"), "pub class Item {\n    pub string @name;\n}\n").unwrap();
+    let order = dir.join("shop/Order.lks");
+    let text = "pub class Order {\n    pub Customer @customer;\n}\n";
+    std::fs::write(&order, text).unwrap();
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    server.open(&order, text);
+    assert!(server.diagnostics_for(&order).is_empty());
+    let hover = server.at("textDocument/hover", &order, 1, 10);
+    assert_eq!(hover["contents"]["value"], "```lakescript\nclass Customer\n```\n\nWho buys", "{hover}");
+    let found = server.at("textDocument/definition", &order, 1, 10);
+    assert_eq!(found["uri"], uri(&customer));
+    // Completed without a `use` in its folder, and with one from another
+    server.change(&order, "pub class Order {\n    pub Customer @customer;\n    pub It\n}\n", 2);
+    server.diagnostics_for(&order);
+    let found = server.at("textDocument/completion", &order, 2, 10);
+    let item = found.as_array().unwrap().iter().find(|i| i["label"] == "Item").cloned().unwrap_or_else(|| panic!("no Item in {found}"));
+    assert!(item["additionalTextEdits"].is_null(), "{item}");
+    server.open(&script, "const $i = It\n");
+    server.diagnostics_for(&script);
+    let found = server.at("textDocument/completion", &script, 0, 13);
+    let item = found.as_array().unwrap().iter().find(|i| i["label"] == "Item").cloned().unwrap();
+    assert_eq!(item["additionalTextEdits"][0]["newText"], "use shop/Item;\n\n");
+    server.stop();
+}
+
 /// The labels of a completion answer.
 fn labels(result: &Value) -> Vec<String> {
     result.as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect()

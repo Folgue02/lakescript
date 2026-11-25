@@ -66,6 +66,9 @@ $ git.lks push --help
 - Arguments that don't match throw a `UsageError`, which is a `ValueError`, whose message says what's wrong and then the usage. With `try` the script can handle it: `const $args = (try Git::parse()).orElse(null);`.
 - If the exception isn't caught, the script stops: `lks` prints the message and the usage to stderr, without the code around it, and exits with code `2`, like most command-line tools. So do `ferry run` and the commands `ferry install` makes, since it's the mistake of the person running the script, not of the script.
 - `--help` and `-h` print the help, generated from the `///` comments, the types, the choices and the defaults, and exit with code `0`.
+- **The name in `Usage:`** is what the person typed to run the script:
+    - `lks cinder.lks` and `lks bin/cinder.lks` say `Usage: cinder.lks`, the name of the path as it was given. A link isn't followed for it: through a link named `deploy` to `deploy.lks`, it's `deploy`.
+    - `ferry run cinder` and the command `ferry install` writes say `Usage: cinder`, since that's what was typed. They tell `lks` with `--name cinder`, which a program that runs scripts can pass too *(see [ferry.md](../tooling/ferry.md))*.
 - `Git::help()` returns the help text as a string.
 
 ### Subcommands

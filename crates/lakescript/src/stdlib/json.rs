@@ -407,7 +407,59 @@ fn newline(indent: Option<usize>, level: usize, out: &mut String) {
     }
 }
 
-fn write(value: &Value, indent: Option<usize>, level: usize, out: &mut String) -> Result<(), NativeError> {
+/// What can't be written, and where *(i.e. `` `$.onKey` is a function ``)*.
+fn unwritable(what: &str, path: &str) -> NativeError {
+    if path == "$" {
+        NativeError::new(TYPE_ERROR, format!("{what} can't be written as JSON"))
+    } else {
+        NativeError::new(TYPE_ERROR, format!("`{path}` is {what}, which JSON can't have"))
+    }
+}
+
+/// A key or a field after a path *(i.e. `$.name`, or `$["a b"]` for one that isn't a name)*.
+fn member_path(path: &str, key: &str) -> String {
+    if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') && !key.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("{path}.{key}")
+    } else {
+        let mut quoted = String::new();
+        quote(key, &mut quoted);
+        format!("{path}[{quoted}]")
+    }
+}
+
+/// The opening, members and closing of an array or an object.
+fn members(entries: Vec<(Option<String>, Value)>, open: char, close: char, indent: Option<usize>, level: usize, path: &str, out: &mut String) -> Result<(), NativeError> {
+    if entries.is_empty() {
+        out.push(open);
+        out.push(close);
+        return Ok(());
+    }
+    out.push(open);
+    for (i, (key, item)) in entries.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        newline(indent, level + 1, out);
+        let at = match key {
+            Some(key) => {
+                // JSON keys can only be strings
+                quote(key, out);
+                out.push(':');
+                if indent.is_some() {
+                    out.push(' ');
+                }
+                member_path(path, key)
+            }
+            None => format!("{path}[{i}]"),
+        };
+        write(item, indent, level + 1, &at, out)?;
+    }
+    newline(indent, level, out);
+    out.push(close);
+    Ok(())
+}
+
+fn write(value: &Value, indent: Option<usize>, level: usize, path: &str, out: &mut String) -> Result<(), NativeError> {
     if level > MAX_DEPTH {
         return Err(NativeError::new(TYPE_ERROR, "the value is nested too deeply, or contains itself"));
     }
@@ -415,63 +467,38 @@ fn write(value: &Value, indent: Option<usize>, level: usize, out: &mut String) -
         Value::Null => out.push_str("null"),
         Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         Value::Int(n) => out.push_str(&n.to_string()),
-        Value::Float(f) if !f.is_finite() => {
+        Value::Float(f) if !f.is_finite() && path == "$" => {
             return Err(NativeError::new(TYPE_ERROR, format!("JSON can't hold {}", format_number(*f))));
         }
+        Value::Float(f) if !f.is_finite() => return Err(unwritable(&format_number(*f), path)),
         Value::Float(f) => out.push_str(&format_number(*f)),
         Value::Str(s) => quote(s, out),
-        Value::List(_) | Value::Range(_) => {
-            let items: Vec<Value> = match value {
-                Value::List(l) => l.borrow().clone(),
-                Value::Range(r) => r.iter().map(Value::Int).collect(),
-                _ => unreachable!(),
-            };
-            if items.is_empty() {
-                out.push_str("[]");
-                return Ok(());
-            }
-            out.push('[');
-            for (i, item) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                newline(indent, level + 1, out);
-                write(item, indent, level + 1, out)?;
-            }
-            newline(indent, level, out);
-            out.push(']');
+        Value::List(l) => {
+            let items = l.borrow().iter().map(|v| (None, v.clone())).collect();
+            members(items, '[', ']', indent, level, path, out)?;
         }
+        Value::Range(r) => members(r.iter().map(|n| (None, Value::Int(n))).collect(), '[', ']', indent, level, path, out)?,
         Value::Map(map) => {
-            let map = map.borrow();
-            if map.is_empty() {
-                out.push_str("{}");
-                return Ok(());
-            }
-            out.push('{');
-            for (i, (key, item)) in map.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                newline(indent, level + 1, out);
-                // JSON keys can only be strings
-                quote(&key.to_value().to_string(), out);
-                out.push(':');
-                if indent.is_some() {
-                    out.push(' ');
-                }
-                write(item, indent, level + 1, out)?;
-            }
-            newline(indent, level, out);
-            out.push('}');
+            let entries = map.borrow().iter().map(|(k, v)| (Some(k.to_value().to_string()), v.clone())).collect();
+            members(entries, '{', '}', indent, level, path, out)?;
         }
-        other => return Err(NativeError::new(TYPE_ERROR, format!("a {} can't be written as JSON", other.type_name()))),
+        // A value of an enum: its name, the way it's read
+        Value::Object(o) if o.enum_name.is_some() => quote(o.enum_name.as_deref().unwrap_or_default(), out),
+        // Every field, by its name, so reading it back into its class gives the same object
+        Value::Object(o) => {
+            let fields = o.fields.borrow().clone();
+            let entries = o.class.fields.iter().zip(fields).map(|(slot, v)| (Some(slot.name.to_string()), v)).collect();
+            members(entries, '{', '}', indent, level, path, out)?;
+        }
+        Value::Handle(_) => return Err(unwritable("Rust data of the standard library", path)),
+        other => return Err(unwritable(&format!("a {}", other.type_name()), path)),
     }
     Ok(())
 }
 
 pub fn stringify(value: &Value, indent: Option<usize>) -> Result<String, NativeError> {
     let mut out = String::new();
-    write(value, indent, 0, &mut out)?;
+    write(value, indent, 0, "$", &mut out)?;
     Ok(out)
 }
 

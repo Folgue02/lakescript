@@ -78,3 +78,23 @@ fn classes_of_other_modules_are_found() {
     assert_eq!(output.text(), "3\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn objects_are_written_with_every_field() {
+    let code = format!("{CLASSES}class Account extends User {{\n    number @visits = 3;\n}}\nconst $u = User('Ana', null, [Tag('a')], Role::ADMIN);\noutln(json::stringify($u));");
+    assert_eq!(run(&code), "{\"name\":\"Ana\",\"email\":null,\"tags\":[{\"name\":\"a\"}],\"role\":\"ADMIN\"}\n");
+    // Private fields too, so reading it back gives the same object
+    let secret = "class Secret {\n    pub string @name;\n    number @visits = 0;\n}\nconst $s = Secret('x', 7);\nconst $text = json::stringify($s);\noutln($text);\noutln(json::parse($text, Secret));";
+    assert_eq!(run(secret), "{\"name\":\"x\",\"visits\":7}\nSecret(name: 'x', visits: 7)\n");
+    let back = format!("{CLASSES}const $u = User('Ana', 'a@b.c', [Tag('a'), Tag('b')], Role::ADMIN);\nconst $again = json::parse(json::stringify([$u]), list<User>);\noutln($again);");
+    assert_eq!(run(&back), "[User(name: 'Ana', email: 'a@b.c', tags: [Tag(name: 'a'), Tag(name: 'b')], role: Role::ADMIN)]\n");
+    assert_eq!(run(&format!("{CLASSES}outln(json::stringify(Tag('a'), indent: 2));")), "{\n  \"name\": \"a\"\n}\n");
+}
+
+#[test]
+fn what_json_cant_hold_says_where() {
+    let code = "class Keys {\n    pub any @onKey = () -> 1;\n}\njson::stringify({'screen' => [Keys()]});";
+    assert_eq!(error(code), "TypeError: `$.screen[0].onKey` is a function, which JSON can't have");
+    assert_eq!(error("json::stringify(() -> 1);"), "TypeError: a function can't be written as JSON");
+    assert_eq!(error("json::stringify({'a b' => 0 / 0});"), "TypeError: `$[\"a b\"]` is NaN, which JSON can't have");
+}

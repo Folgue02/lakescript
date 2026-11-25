@@ -113,3 +113,18 @@ fn keys_and_editors_need_a_terminal() {
 fn the_native_part_is_hidden() {
     assert!(error("", "use std/terminal/native;").contains("there's no module `std/terminal/native`"));
 }
+
+#[test]
+fn full_screen_without_a_terminal() {
+    // It only runs the body, and puts nothing on the screen
+    assert_eq!(run("", "terminal::fullScreen(() -> outln('drawn'));\noutln('after');"), "drawn\nafter\n");
+    // An exception in it goes on
+    assert!(error("", "terminal::fullScreen(() { throw ValueError('boom'); });").contains("boom"));
+    // `moveTo()` and `clearLine()` write their escape codes, from 0
+    assert_eq!(run("", "terminal::moveTo(0, 0);\nterminal::moveTo(4, 2);\nterminal::clearLine();"), "\x1b[1;1H\x1b[3;5H\x1b[K");
+    assert!(error("", "terminal::moveTo(-1, 0);").contains("from 0"));
+    // `readKey(timeout:)` gives `?string`, and still needs a terminal
+    assert!(error("", "const ?string $k = terminal::readKey(timeout: 0.1);").contains("no terminal"));
+    assert!(error("", "const string $k = terminal::readKey(timeout: 0.1);").contains("null"));
+    assert!(error("", "terminal::readKey(timeout: -1);").contains("0 seconds or more"));
+}

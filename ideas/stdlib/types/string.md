@@ -37,7 +37,7 @@ All the `indexOf` methods return `null` when the text isn't found.
 | `after(string $text)` | `?string` | The part after the first `$text` *(i.e. `'key=value'.after('=')` is `'value'`)* |
 | `beforeLast(string $text)` | `?string` | The part before the last `$text` *(i.e. `'archive.tar.gz'.beforeLast('.')` is `'archive.tar'`)* |
 | `afterLast(string $text)` | `?string` | The part after the last `$text` *(i.e. `'/home/me/notes.txt'.afterLast('/')` is `'notes.txt'`)* |
-| `match(regex $pattern)` | `?list<string>` | The first match: the whole match, then each group. `null` if it doesn't match *(i.e. `'v1.2'.match(%r"(\d+)\.(\d+)")` is `['1.2', '1', '2']`)* |
+| `match(regex $pattern)` | `?list<string>` | The first match: the whole match, then each group. `null` if it doesn't match *(i.e. `'v1.2'.match(%r"(\d+)\.(\d+)")` is `['1.2', '1', '2']`)*. A group that didn't take part in the match is `''`, not `null`: discussed after cinder, and kept, so the list stays a `list<string>` |
 | `matchAll(regex $pattern)` | `list<list<string>>` | Every match, each one like `match()` *(i.e. `'a1 b2'.matchAll(%r"\w(\d)")` is `[['a1', '1'], ['b2', '2']]`)* |
 
 ## Case

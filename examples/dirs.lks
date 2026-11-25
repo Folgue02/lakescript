@@ -1,0 +1,43 @@
+// std/dirs: a tool that keeps its settings where each system expects them,
+// ~/.config/notes on Linux and macOS, %APPDATA%\notes on Windows.
+use std/dirs;
+use std/env;
+use std/format/json;
+use std/fs;
+use std/path;
+
+class Settings {
+    pub string @theme = 'light';
+    pub number @runs = 0;
+}
+
+// So the example doesn't touch your real folders, a temporary one plays the
+// part of ~/.config, and of %APPDATA% on Windows
+const $base = fs::tempDir();
+env::set('XDG_CONFIG_HOME', $base);
+env::set('APPDATA', $base);
+
+const $app = dirs::app('notes');
+const $file = path::join($app.config(), 'settings.json');
+
+// Reading needs no folder: without the file, the defaults
+Settings load() = if (fs::exists?($file)) json::read($file, Settings) else Settings();
+
+void save(Settings $settings) {
+    // Writing does, so it's created now
+    const $folder = $app.config(create: true);
+    json::write(path::join($folder, 'settings.json'), {'theme' => $settings.theme, 'runs' => $settings.runs});
+}
+
+outln(f"Settings in {path::relative($file, $base)}, there yet: {fs::exists?($app.config())}");
+for ($run in 1..4) {
+    const $settings = load();
+    $settings.runs += 1;
+    if ($run == 2) $settings.theme = 'dark';
+    save($settings);
+    outln(f"Run {$settings.runs}: {$settings.theme}");
+}
+
+// The user's folders are null where there's none
+outln(f"Downloads: {if (dirs::downloads() == null) 'none' else 'found'}");
+fs::removeAll($base);

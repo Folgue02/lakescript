@@ -745,7 +745,7 @@ impl<'a> Checker<'a> {
                 self.loop_depth -= 1;
                 result?;
             }
-            StmtKind::For { pattern, iterable, body } => {
+            StmtKind::For { pattern, ty, iterable, body } => {
                 let it = self.expr(iterable, None)?;
                 let it = self.shallow(&it);
                 let mut vars: Vec<(String, Ty)> = Vec::new();
@@ -759,6 +759,22 @@ impl<'a> Checker<'a> {
                         Ty::Any | Ty::Var(_) => Ty::Any,
                         other => return c.fail(format!("can't loop over {}", a(other)), iterable.span),
                     })
+                };
+                // The type of the elements of what's destructured: a list of lists
+                let inner_of = |c: &mut Self, element: &Ty| -> Check<Ty> {
+                    Ok(match c.shallow(element) {
+                        Ty::List(e) => *e,
+                        Ty::Any | Ty::Var(_) => Ty::Any,
+                        other => return c.fail(format!("`for ([...] in ...)` needs a list of lists, but its elements are {}", a(&other)), iterable.span),
+                    })
+                };
+                let destructured = |vars: &mut Vec<(String, Ty)>, names: &[String], rest: &Option<String>, inner: Ty| {
+                    for n in names {
+                        vars.push((n.clone(), inner.clone()));
+                    }
+                    if let Some(r) = rest {
+                        vars.push((r.clone(), Ty::List(Box::new(inner))));
+                    }
                 };
                 match pattern {
                     ForPattern::Value(v) => vars.push((v.clone(), elem(self, &it)?)),
@@ -782,17 +798,38 @@ impl<'a> Checker<'a> {
                     },
                     ForPattern::List { names, rest } => {
                         let element = elem(self, &it)?;
-                        let inner = match self.shallow(&element) {
-                            Ty::List(e) => *e,
-                            Ty::Any | Ty::Var(_) => Ty::Any,
-                            other => return self.fail(format!("`for ([...] in ...)` needs a list of lists, but its elements are {}", a(&other)), iterable.span),
+                        let inner = inner_of(self, &element)?;
+                        destructured(&mut vars, names, rest, inner);
+                    }
+                    ForPattern::IndexedList { index, names, rest } => {
+                        if matches!(it, Ty::Map(..)) {
+                            return self.fail("use `for ($key => [...] in $map)` to loop over a map with its keys", iterable.span);
+                        }
+                        vars.push((index.clone(), Ty::Number));
+                        let element = elem(self, &it)?;
+                        let inner = inner_of(self, &element)?;
+                        destructured(&mut vars, names, rest, inner);
+                    }
+                    ForPattern::KeyValueList { key, names, rest } => {
+                        let (k, v) = match &it {
+                            Ty::Map(k, v) => ((**k).clone(), (**v).clone()),
+                            Ty::Any | Ty::Var(_) => (Ty::Any, Ty::Any),
+                            other => return self.fail(format!("`=>` only works with maps, and this is {}", a(other)), iterable.span),
                         };
-                        for n in names {
-                            vars.push((n.clone(), inner.clone()));
+                        vars.push((key.clone(), k));
+                        let inner = inner_of(self, &v)?;
+                        destructured(&mut vars, names, rest, inner);
+                    }
+                }
+                // The type written for the element, which its elements must have
+                if let Some(written) = ty {
+                    let declared = self.ty(written)?;
+                    if let Some((name, found)) = vars.last_mut() {
+                        if !self.assignable(found, &declared) {
+                            let found = self.resolve(found);
+                            return self.fail(format!("`${name}` is {}, but the elements are {}", a(&declared), a(&found)), written.span);
                         }
-                        if let Some(r) = rest {
-                            vars.push((r.clone(), Ty::List(Box::new(inner))));
-                        }
+                        *found = declared;
                     }
                 }
                 self.loop_depth += 1;
@@ -1140,7 +1177,7 @@ impl<'a> Checker<'a> {
             d
         };
         let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
-        let program = crate::parse_file(&source, u32::MAX).map_err(located)?;
+        let (program, _) = crate::parse_in(&source, u32::MAX, self.stack_budget, self.modules.loader, Some(file), false).map_err(located)?;
         let mut sig = ModuleSig { path: shown.clone(), ..Default::default() };
         let public_classes = program.iter().filter_map(|s| match &s.kind {
             StmtKind::Pub(inner) => match &inner.kind {
@@ -1241,12 +1278,8 @@ impl<'a> Checker<'a> {
     }
 
     /// The statements of a module, and its first syntax error when going on after them.
-    fn parse_module(&self, source: &str) -> Check<(Vec<Stmt>, Option<Diagnostic>)> {
-        if !self.modules.recover {
-            return Ok((crate::parse_file(source, u32::MAX)?, None));
-        }
-        let tokens = crate::lexer::tokenize_file(source, u32::MAX)?;
-        let (program, errors) = crate::parser::parse_recovering(tokens, self.stack_budget);
+    fn parse_module(&self, source: &str, file: &std::path::Path) -> Check<(Vec<Stmt>, Option<Diagnostic>)> {
+        let (program, errors) = crate::parse_in(source, u32::MAX, self.stack_budget, self.modules.loader, Some(file), self.modules.recover)?;
         Ok((program, errors.into_iter().next()))
     }
 
@@ -1258,7 +1291,7 @@ impl<'a> Checker<'a> {
             d
         };
         let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
-        let (program, syntax) = self.parse_module(&source).map_err(located)?;
+        let (program, syntax) = self.parse_module(&source, file).map_err(located)?;
         let mut state = State::default();
         let modules = Modules {
             loader: self.modules.loader,
@@ -1562,6 +1595,7 @@ impl<'a> Checker<'a> {
             ExprKind::Null => Ty::Null,
             ExprKind::Regex { .. } => Ty::Regex,
             ExprKind::Bytes(_) => Ty::Bytes,
+            ExprKind::Spread(_) => return self.fail("`...` only goes in calls and in lists *(i.e. `[...$a, ...$b]`)*", span),
             ExprKind::Type(te) => Ty::TypeOf(Box::new(self.ty(te)?)),
             ExprKind::Interpolated(parts) => {
                 for p in parts {
@@ -1590,18 +1624,41 @@ impl<'a> Checker<'a> {
             ExprKind::List { elem_type, items } => {
                 let mut elem = match elem_type {
                     Some(t) => self.ty(t)?,
-                    None => match expected.map(|t| self.shallow(t)) {
+                    None => match expected.map(|t| { let t = self.non_null(t); self.shallow(&t) }) {
                         Some(Ty::List(e)) => *e,
                         _ => self.fresh(),
                     },
                 };
                 let fixed = elem_type.is_some();
+                // A type expected for the list: each element must fit it, like the branches of an `if`
+                let expected_elem = !fixed && !matches!(self.shallow(&elem), Ty::Any | Ty::Var(_));
                 for item in items {
-                    let t = self.expr(item, Some(&elem))?;
+                    // `...$list`: its elements go in, so it's a list of them
+                    let t = match &item.kind {
+                        ExprKind::Spread(inner) => {
+                            let expected = Ty::List(Box::new(elem.clone()));
+                            let t = self.expr(inner, Some(&expected))?;
+                            match self.shallow(&t) {
+                                Ty::List(e) => *e,
+                                Ty::Any | Ty::Var(_) => Ty::Any,
+                                other => return self.fail(format!("only lists can be spread with `...`, and this is {}", a(&other)), inner.span),
+                            }
+                        }
+                        _ => self.expr(item, Some(&elem))?,
+                    };
                     if fixed {
                         if !self.assignable(&t, &elem) {
                             let t = self.resolve(&t);
                             return self.fail(format!("this list holds {}, not {}", plural(&elem), a(&t)), item.span);
+                        }
+                    } else if expected_elem {
+                        match &item.kind {
+                            ExprKind::Spread(inner) if !self.assignable(&t, &elem) => {
+                                let (got, want) = (self.resolve(&t), self.resolve(&elem));
+                                return self.fail(format!("`...` gives {}, but {} are expected here", plural(&got), plural(&want)), inner.span);
+                            }
+                            ExprKind::Spread(_) => {}
+                            _ => self.fits(&[(&t, item.span)], Some(&elem))?,
                         }
                     } else {
                         elem = self.join(&elem, &t);
@@ -1612,11 +1669,14 @@ impl<'a> Checker<'a> {
             ExprKind::Map { types, entries } => {
                 let (mut k, mut v) = match types {
                     Some((kt, vt)) => (self.ty(kt)?, self.ty(vt)?),
-                    None => match expected.map(|t| self.shallow(t)) {
+                    None => match expected.map(|t| { let t = self.non_null(t); self.shallow(&t) }) {
                         Some(Ty::Map(k, v)) => (*k, *v),
                         _ => (self.fresh(), self.fresh()),
                     },
                 };
+                // A type expected for the map: each key and value must fit it
+                let expected_key = types.is_none() && !matches!(self.shallow(&k), Ty::Any | Ty::Var(_));
+                let expected_value = types.is_none() && !matches!(self.shallow(&v), Ty::Any | Ty::Var(_));
                 for (key, value) in entries {
                     let kt = self.expr(key, Some(&k))?;
                     let vt = self.expr(value, Some(&v))?;
@@ -1624,8 +1684,16 @@ impl<'a> Checker<'a> {
                         if !self.assignable(&kt, &k) || !self.assignable(&vt, &v) {
                             return self.fail(format!("this map holds {} keys and {} values", k, v), key.span);
                         }
+                        continue;
+                    }
+                    if expected_key {
+                        self.fits(&[(&kt, key.span)], Some(&k))?;
                     } else {
                         k = self.join(&k, &kt);
+                    }
+                    if expected_value {
+                        self.fits(&[(&vt, value.span)], Some(&v))?;
+                    } else {
                         v = self.join(&v, &vt);
                     }
                 }
@@ -1839,9 +1907,10 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Throw(value) => {
                 self.thrown(value)?;
-                // It never gives a value, so it takes whatever type is expected there
+                // It never gives a value, so it takes whatever type is expected
+                // there, without `null` *(i.e. `$n ?? throw ...` isn't nullable)*
                 match expected {
-                    Some(t) => t.clone(),
+                    Some(t) => self.non_null(t),
                     None => self.fresh(),
                 }
             }
@@ -1999,7 +2068,7 @@ impl<'a> Checker<'a> {
     }
 
     fn lambda(&mut self, decl: &Rc<FunctionDecl>, expected: Option<&Ty>, span: Span) -> Check<Ty> {
-        let expected_fn = match expected.map(|t| self.shallow(t)) {
+        let expected_fn = match expected.map(|t| { let t = self.non_null(t); self.shallow(&t) }) {
             Some(Ty::Func(f)) => Some(f),
             _ => None,
         };
@@ -2335,7 +2404,8 @@ impl<'a> Checker<'a> {
             return Ok(Ty::Bool);
         }
         let l = self.expr(left, None)?;
-        let expected = if matches!(op, Coalesce) { Some(self.non_null(&l)) } else { None };
+        // The right side of `??` can be nullable too, like Kotlin's `?:`: then so is the result
+        let expected = if matches!(op, Coalesce) { Some(self.non_null(&l).nullable()) } else { None };
         let r = self.expr(right, expected.as_ref())?;
         let (ls, rs) = (self.shallow(&l), self.shallow(&r));
         // Objects get their operators from interfaces *(i.e. `IAdd`)*

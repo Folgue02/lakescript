@@ -123,7 +123,7 @@ pub fn call(interp: &mut Interpreter, receiver: Value, method: &str, values: Vec
         }
         "equals" => {
             args.count(1, 1)?;
-            return Ok(Value::Bool(receiver.equals(&args.value(0))));
+            return Ok(Value::Bool(interp.values_equal(&receiver, &args.value(0), span)?));
         }
         "same?" => {
             args.count(1, 1)?;
@@ -986,19 +986,23 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
         }
         "contains" => {
             a.count(1, 1)?;
-            Value::Bool(list.borrow().iter().any(|v| v.equals(&a.value(0))))
+            let items = list.borrow().clone();
+            Value::Bool(interp.position_of(&items, &a.value(0), false, span)?.is_some())
         }
         "indexOf" => {
             a.count(1, 1)?;
-            nullable(list.borrow().iter().position(|v| v.equals(&a.value(0))).map(int))
+            let items = list.borrow().clone();
+            nullable(interp.position_of(&items, &a.value(0), false, span)?.map(int))
         }
         "indexOfLast" => {
             a.count(1, 1)?;
-            nullable(list.borrow().iter().rposition(|v| v.equals(&a.value(0))).map(int))
+            let items = list.borrow().clone();
+            nullable(interp.position_of(&items, &a.value(0), true, span)?.map(int))
         }
         "count" => {
             a.count(1, 1)?;
-            int(list.borrow().iter().filter(|v| v.equals(&a.value(0))).count())
+            let items = list.borrow().clone();
+            int(interp.positions_of(&items, &a.value(0), span)?.len())
         }
         "countWhere" => {
             let f = a.func(0)?;
@@ -1072,7 +1076,8 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
         }
         "remove" => {
             a.count(1, 1)?;
-            let found = list.borrow().iter().position(|v| v.equals(&a.value(0)));
+            let items = list.borrow().clone();
+            let found = interp.position_of(&items, &a.value(0), false, span)?;
             if let Some(i) = found {
                 list.borrow_mut().remove(i);
             }
@@ -1080,9 +1085,15 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
         }
         "removeAll" => {
             a.count(1, 1)?;
-            let before = len;
-            list.borrow_mut().retain(|v| !v.equals(&a.value(0)));
-            int(before - list.borrow().len())
+            let items = list.borrow().clone();
+            let found = interp.positions_of(&items, &a.value(0), span)?;
+            let mut removed = vec![false; items.len()];
+            for &i in &found {
+                removed[i] = true;
+            }
+            let keep: Vec<Value> = items.into_iter().zip(removed).filter(|(_, r)| !r).map(|(v, _)| v).collect();
+            *list.borrow_mut() = keep;
+            int(found.len())
         }
         "removeWhere" => {
             let f = a.func(0)?;
@@ -1187,7 +1198,7 @@ fn list_method(interp: &mut Interpreter, receiver: &Value, list: &Rc<RefCell<Vec
                     Some(f) => call_fn(interp, f, vec![item.clone()], span)?,
                     None => item.clone(),
                 };
-                if !seen.iter().any(|s| s.equals(&key)) {
+                if interp.position_of(&seen, &key, false, span)?.is_none() {
                     seen.push(key);
                     out.push(item);
                 }
@@ -1426,13 +1437,16 @@ fn map_method(interp: &mut Interpreter, receiver: &Value, map: &Rc<RefCell<Index
         }
         "hasValue" => {
             a.count(1, 1)?;
-            Value::Bool(map.borrow().values().any(|v| v.equals(&a.value(0))))
+            let values: Vec<Value> = map.borrow().values().cloned().collect();
+            Value::Bool(interp.position_of(&values, &a.value(0), false, span)?.is_some())
         }
         "keys" => Value::list(map.borrow().keys().map(Key::to_value).collect()),
         "values" => Value::list(map.borrow().values().cloned().collect()),
         "keyOf" => {
             a.count(1, 1)?;
-            nullable(map.borrow().iter().find(|(_, v)| v.equals(&a.value(0))).map(|(k, _)| k.to_value()))
+            let values: Vec<Value> = map.borrow().values().cloned().collect();
+            let found = interp.position_of(&values, &a.value(0), false, span)?;
+            nullable(found.and_then(|i| map.borrow().get_index(i).map(|(k, _)| k.to_value())))
         }
 
         // Getting

@@ -50,6 +50,9 @@ pub enum ExprKind {
     Null,
     /// `[1, 2]` or `<string>[]`
     List { elem_type: Option<TypeExpr>, items: Vec<Expr> },
+    /// `...$list` inside a list literal *(i.e. `[$header, ...$rows]`)*: its
+    /// elements go into the list. Only the parser puts it there.
+    Spread(Box<Expr>),
     /// `{'a' => 1}` or `<string, number>{}`
     Map { types: Option<(TypeExpr, TypeExpr)>, entries: Vec<(Expr, Expr)> },
     Variable(String),
@@ -228,7 +231,9 @@ pub enum StmtKind {
     Class(Rc<ClassDecl>),
     If { cond: Expr, then: Box<Stmt>, otherwise: Option<Box<Stmt>> },
     While { cond: Expr, body: Box<Stmt> },
-    For { pattern: ForPattern, iterable: Expr, body: Box<Stmt> },
+    /// `ty` is the type written before the variable of the element *(i.e.
+    /// `for (IGenerator $g in $list)`)*.
+    For { pattern: ForPattern, ty: Option<TypeExpr>, iterable: Expr, body: Box<Stmt> },
     Break,
     Continue,
     Return(Option<Expr>),
@@ -404,6 +409,10 @@ pub enum ForPattern {
     KeyValue { key: String, value: String },
     /// `for ([$name, $age] in ...)`
     List { names: Vec<String>, rest: Option<String> },
+    /// `for ($i, [$name, $age] in ...)`
+    IndexedList { index: String, names: Vec<String>, rest: Option<String> },
+    /// `for ($k => [$lat, $lon] in ...)`
+    KeyValueList { key: String, names: Vec<String>, rest: Option<String> },
 }
 
 // ---- Printing ----
@@ -523,6 +532,7 @@ impl fmt::Display for Expr {
             Regex { pattern, flags } => write!(f, "(regex {pattern:?} {flags:?})"),
             Bytes(b) => write!(f, "(bytes {b:?})"),
             Type(t) => write!(f, "(type {t})"),
+            Spread(inner) => write!(f, "(... {inner})"),
             Command(parts) => write!(f, "(x {})", join(parts, " ")),
             Bool(b) => write!(f, "{b}"),
             Null => write!(f, "null"),
@@ -726,12 +736,14 @@ impl fmt::Display for Stmt {
                 None => write!(f, "(if {cond} {then})"),
             },
             While { cond, body } => write!(f, "(while {cond} {body})"),
-            For { pattern, iterable, body } => {
+            For { pattern, iterable, body, .. } => {
                 let pattern = match pattern {
                     ForPattern::Value(v) => format!("${v}"),
                     ForPattern::Indexed { index, value } => format!("${index}, ${value}"),
                     ForPattern::KeyValue { key, value } => format!("${key} => ${value}"),
                     ForPattern::List { names, rest } => list_pattern(names, rest),
+                    ForPattern::IndexedList { index, names, rest } => format!("${index}, {}", list_pattern(names, rest)),
+                    ForPattern::KeyValueList { key, names, rest } => format!("${key} => {}", list_pattern(names, rest)),
                 };
                 write!(f, "(for ({pattern}) {iterable} {body})")
             }

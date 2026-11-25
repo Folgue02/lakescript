@@ -1,0 +1,37 @@
+// std/terminal's full screen: a dot that moves on its own, steered with the
+// arrows, on a screen of its own that's given back when it ends. `q` quits.
+use std/terminal;
+
+if (!terminal::interactive?()) {
+    outln('fullscreen.lks needs a terminal: run it as `lks examples/fullscreen.lks`');
+    exit(0);
+}
+
+terminal::fullScreen(() {
+    let $x = 0;
+    let $y = 1;
+    let $dx = 1;
+    let $dy = 0;
+    while (true) {
+        const $width = terminal::width();
+        const $height = terminal::height();
+        terminal::moveTo(0, 0);
+        out(f"x {$x}, y {$y}. The arrows steer, q quits");
+        terminal::clearLine();
+        terminal::moveTo($x, $y);
+        out('●');
+        // Up to a tenth of a second for a key, or `null`, and the dot moves on
+        const $key = terminal::readKey(timeout: 0.1);
+        terminal::moveTo($x, $y);
+        out(' ');
+        if ($key == 'q') break;
+        if ($key == 'up') { $dx = 0; $dy = -1; }
+        if ($key == 'down') { $dx = 0; $dy = 1; }
+        if ($key == 'left') { $dx = -1; $dy = 0; }
+        if ($key == 'right') { $dx = 1; $dy = 0; }
+        if ($key == 'resize') terminal::clear();
+        $x = ($x + $dx + $width) % $width;
+        $y = 1 + ($y - 1 + $dy + $height - 1) % ($height - 1);
+    }
+});
+outln('Back to the terminal as it was');

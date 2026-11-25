@@ -39,18 +39,23 @@ pub struct Host {
 impl Host {
     /// A random number, from xorshift64*. Good enough for scripts, not for secrets.
     pub fn random(&mut self) -> u64 {
-        let mut x = self.rng;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.rng = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        xorshift(&mut self.rng)
     }
 
     /// A random number from `0` to `n - 1`.
     pub fn random_below(&mut self, n: usize) -> usize {
         (self.random() % n as u64) as usize
     }
+}
+
+/// The next 64 bits of a xorshift64* generator, and its next state.
+pub fn xorshift(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    *state = x;
+    x.wrapping_mul(0x2545_F491_4F6C_DD1D)
 }
 
 /// A seed that's different on every run.
@@ -66,6 +71,12 @@ pub fn seed() -> u64 {
 pub struct ScriptState {
     pub args: Vec<String>,
     pub script_path: Option<PathBuf>,
+    /// The name of the path of the script as it was given, without following
+    /// links *(i.e. `deploy` for a link to `deploy.lks`)*, for `Usage:`.
+    pub script_name: Option<String>,
+    /// The name the person typed to run the script, when the program that
+    /// runs it knows it *(i.e. `cinder` for `ferry run cinder`, see `lks --name`)*.
+    pub command_name: Option<String>,
     pub cwd: PathBuf,
     /// Variables set (`Some`) or removed (`None`) by the script, over the real environment.
     pub env: HashMap<String, Option<String>>,
@@ -76,6 +87,8 @@ impl ScriptState {
         ScriptState {
             args: Vec::new(),
             script_path: None,
+            script_name: None,
+            command_name: None,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             env: HashMap::new(),
         }

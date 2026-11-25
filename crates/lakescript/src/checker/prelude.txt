@@ -319,13 +319,6 @@ list<string> lines();
 bool piped?();
 void flush();
 
-module std/random
-number number();
-number between(number $min, number $max);
-bool bool();
-string uuid();
-void seed(number $seed);
-
 module std/format/json
 T parse<T>(string $text, ?type<T> $type = null);
 list<T> parseAll<T>(string $text, ?type<T> $type = null);
@@ -432,6 +425,21 @@ void format(string $path);
 void check(string $path);
 void write(string $path, list<list<any>> $added);
 
+module std/dirs/native
+?string base(string $kind);
+string app(string $kind, string $name);
+?string user(string $kind);
+
+module std/random/native
+any generator(?number $seed);
+number number(any $generator);
+number between(any $generator, number $min, number $max);
+bool bool(any $generator);
+string uuid();
+void seed(any $generator, number $seed);
+string state(any $generator);
+void restore(any $generator, string $state);
+
 module std/process/native
 list<string> args();
 ?string scriptPath();
@@ -460,7 +468,11 @@ string strip(string $text);
 number visibleWidth(string $text);
 bool interactive();
 list<number> size();
-string readKey();
+?string readKey(?number $timeout);
+bool enterFullScreen();
+void leaveFullScreen();
+void moveTo(number $x, number $y);
+void clearLine();
 void clear();
 string ask(string $question, ?string $default);
 void problem(string $text);

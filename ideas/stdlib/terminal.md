@@ -76,10 +76,41 @@ The values of `Style` *(as many as terminals can show, with plain names)*:
 | `interactive?()` | `bool` | `true` when there's a person at a terminal: stdin and stderr are terminals |
 | `width()` | `number` | Its width, in columns, or 80 when it isn't a terminal |
 | `height()` | `number` | Its height, in lines, or 24 when it isn't a terminal |
-| `readKey()` | `string` | One key, without waiting for enter *(i.e. `'a'`, `'enter'`, `'up'`, `'space'`, `'escape'`, `'ctrl+d'`, `'f1'`)*. Ctrl+C throws an `Interrupted`, and without a terminal it throws an `IOError` |
+| `readKey(?number $timeout = null)` | `?string` | One key, without waiting for enter *(i.e. `'a'`, `'enter'`, `'up'`, `'space'`, `'escape'`, `'ctrl+d'`, `'f1'`)*. With `$timeout`, in seconds, it waits that long at most, and gives `null` when no key came, for programs that move on their own *(i.e. `terminal::readKey(timeout: 0.1)`)*. Without it, it waits for a key, and is never `null`. Inside `fullScreen()`, resizing the terminal gives `'resize'`. Ctrl+C throws an `Interrupted`, and without a terminal it throws an `IOError` |
 | `clear()` | `void` | Clears the screen |
 
 - A person is at a terminal when stdin and stderr are terminals, and the script isn't run by a program that captures what it writes *(i.e. the tests of the engine)*.
+
+## Full screen
+
+For programs that take the whole terminal, like games, editors and dashboards, and give it back as it was when they end *(like `vim`, `less` and `htop`)*.
+
+```
+use std/terminal;
+
+terminal::fullScreen(() {
+    let $x = 0;
+    while (true) {
+        terminal::moveTo($x, 0);
+        out('@');
+        terminal::clearLine();
+        const $key = terminal::readKey(timeout: 0.1);
+        if ($key == 'q') break;
+        if ($key == 'right') $x++;
+    }
+});
+```
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `fullScreen(() -> void $body)` | `void` | Runs `$body` on a screen of its own: it switches to the terminal's alternate screen, hides the cursor and clears it. When `$body` ends, also by an exception or Ctrl+C, it always shows the cursor again and goes back to what the terminal had before. Without a terminal, it only runs `$body` |
+| `moveTo(number $x, number $y)` | `void` | Moves the cursor to a column and a row, both from 0: `moveTo(0, 0)` is the top-left corner, and the last row is `height() - 1`. What's written next starts there |
+| `clearLine()` | `void` | Clears from the cursor to the end of its line, to write a row over an old one. `moveTo(0, $y)` first clears the whole row |
+
+- What's written with `out()` goes where the cursor is. Writing a whole frame and then reading a key draws it at once, since `readKey()` writes out what's waiting first.
+- Inside it, what's typed isn't shown on the screen while the program does other things, only what it draws.
+- `fullScreen()` inside another one only runs `$body`.
+- With `crossterm`, which also works on the consoles of Windows. Programs that wrote the escape codes themselves *(i.e. cinder's `ui/ansi.lks`)* can use these instead.
 
 ## Progress bars
 

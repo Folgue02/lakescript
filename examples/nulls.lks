@@ -36,3 +36,7 @@ if (!$muffins) {
     outln('No muffins');
 }
 outln(f"Any tea? {!!$stock['tea']}");
+
+// `??` with a nullable right side: the result can still be null
+const ?number $scones = $stock['scone'] ?? (if ($stock['tea'] == null) null else 0);
+outln(f"Scones: {$scones ?? 'none'}");

@@ -14,6 +14,6 @@ Methods that every value has, whatever its type.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `equals(any $other)` | `bool` | Compares the contents, also for lists and maps *(i.e. `[1, 2].equals([1, 2])` is `true`)* |
+| `equals(any $other)` | `bool` | Compares the contents, also for lists and maps *(i.e. `[1, 2].equals([1, 2])` is `true`)*. Objects inside them are compared like `==` compares them, through `equals?` when their class implements `IEquals` |
 | `same?(any $other)` | `bool` | `true` only for the same value: the same list, map or object, never two equal copies. Numbers, strings and bools are the same when they're equal *(i.e. `[1].same?([1])` is `false`)* |
 | `toString()` | `string` | The value as text, the same that `outln` prints *(i.e. `[1, 2].toString()` is `'[1, 2]'`)* |

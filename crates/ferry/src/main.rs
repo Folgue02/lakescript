@@ -213,6 +213,8 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
     let script = project.command_file(&command);
     let mut engine = engine(&resolve::module_path(&project, &dependencies));
     engine.set_args(args.to_vec());
+    // `Usage: cinder`, what was typed, not `cinder.lks`
+    engine.set_command_name(&command);
     match engine.run_file(&script) {
         Ok(outcome) => Ok(ExitCode::from(outcome.code().clamp(0, 255) as u8)),
         // The person's mistake in the arguments, like `lks` shows it
@@ -645,7 +647,7 @@ fn write_launchers(home: &Home, project: &Project, dependencies: &[Dependency]) 
     let lks = lks_program();
     for command in &commands {
         let script = project.command_file(command).display().to_string();
-        let launcher = launcher_text(&project.id, &project.manifest.project.version, &lks.display().to_string(), &module_path.to_string_lossy(), &script, windows);
+        let launcher = launcher_text(&project.id, &project.manifest.project.version, &lks.display().to_string(), &module_path.to_string_lossy(), command, &script, windows);
         let path = bin.join(launcher_name(command, windows));
         std::fs::write(&path, launcher).map_err(|e| format!("can't write {}: {e}", path.display()))?;
         make_executable(&path)?;
@@ -663,22 +665,29 @@ fn launcher_name(command: &str, windows: bool) -> String {
     if windows { format!("{command}.cmd") } else { command.to_string() }
 }
 
-/// What an installed command runs: `lks` with the project's module path.
-fn launcher_text(id: &str, version: &str, lks: &str, module_path: &str, script: &str, windows: bool) -> String {
+/// What an installed command runs: `lks` with the project's module path,
+/// and the name of the command for the `Usage:` line of its `--help`.
+fn launcher_text(id: &str, version: &str, lks: &str, module_path: &str, name: &str, script: &str, windows: bool) -> String {
     if windows {
-        // `%` would start a variable in a `.cmd` file, so it's written twice
+        // `cmd` can't always run or find a path that starts with `\\?\`, the
+        // form Rust gives real paths in on Windows, so every path is written
+        // without it. `%` would start a variable in a `.cmd` file, so it's written twice
+        let plain = |path: &str| lakescript::without_verbatim(path).unwrap_or_else(|| path.to_string());
         let q = |text: &str| format!("\"{}\"", text.replace('%', "%%"));
+        let module_path: Vec<String> = module_path.split(';').map(plain).collect();
         format!(
-            "@echo off\r\nrem Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\r\n{OWNER_CMD}{id}\r\n{} --no-type-check --module-path {} -- {} %*\r\n",
-            q(lks),
-            q(module_path),
-            q(script),
+            "@echo off\r\nrem Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\r\n{OWNER_CMD}{id}\r\n{} --no-type-check --module-path {} --name {} -- {} %*\r\n",
+            q(&plain(lks)),
+            q(&module_path.join(";")),
+            q(name),
+            q(&plain(script)),
         )
     } else {
         format!(
-            "#!/bin/sh\n# Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\n{OWNER}{id}\nexec {} --no-type-check --module-path {} -- {} \"$@\"\n",
+            "#!/bin/sh\n# Installed by ferry from {id} {version}. Don't edit it: `ferry install` writes it again.\n{OWNER}{id}\nexec {} --no-type-check --module-path {} --name {} -- {} \"$@\"\n",
             quote(lks),
             quote(module_path),
+            quote(name),
             quote(script),
         )
     }
@@ -717,15 +726,20 @@ mod tests {
 
     #[test]
     fn launchers_for_each_system() {
-        let sh = launcher_text("a/b", "1.0.0", "/bin/lks", "/x/src", "/x/bin/go.lks", false);
+        let sh = launcher_text("a/b", "1.0.0", "/bin/lks", "/x/src", "go", "/x/bin/go.lks", false);
         assert!(sh.starts_with("#!/bin/sh\n"), "{sh}");
         assert!(sh.contains("\n# ferry-project: a/b\n"), "{sh}");
-        assert!(sh.ends_with("exec '/bin/lks' --no-type-check --module-path '/x/src' -- '/x/bin/go.lks' \"$@\"\n"), "{sh}");
-        let cmd = launcher_text("a/b", "1.0.0", r"C:\lks\lks.exe", r"C:\x\src;C:\100%", r"C:\x\bin\go.lks", true);
+        assert!(sh.ends_with("exec '/bin/lks' --no-type-check --module-path '/x/src' --name 'go' -- '/x/bin/go.lks' \"$@\"\n"), "{sh}");
+        let cmd = launcher_text("a/b", "1.0.0", r"C:\lks\lks.exe", r"C:\x\src;C:\100%", "go", r"C:\x\bin\go.lks", true);
         assert!(cmd.starts_with("@echo off\r\n"), "{cmd}");
         assert!(cmd.contains("\r\nrem ferry-project: a/b\r\n"), "{cmd}");
-        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;C:\100%%" -- "C:\x\bin\go.lks" %*"#;
+        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;C:\100%%" --name "go" -- "C:\x\bin\go.lks" %*"#;
         assert!(cmd.ends_with(&format!("{last}\r\n")), "{cmd}");
+        // Paths in the form `\\?\C:\...` are written without it, which `cmd` can't run
+        let cmd = launcher_text("a/b", "1.0.0", r"\\?\C:\lks\lks.exe", r"\\?\C:\x\src;\\?\UNC\pc\share\src", "go", r"\\?\C:\x\bin\go.lks", true);
+        let last = r#""C:\lks\lks.exe" --no-type-check --module-path "C:\x\src;\\pc\share\src" --name "go" -- "C:\x\bin\go.lks" %*"#;
+        assert!(cmd.ends_with(&format!("{last}\r\n")), "{cmd}");
+        assert!(!cmd.contains(r"\\?\"), "{cmd}");
         assert_eq!(launcher_name("go", true), "go.cmd");
         assert_eq!(launcher_name("go", false), "go");
     }

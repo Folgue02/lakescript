@@ -189,7 +189,7 @@ Operands: a variable declared with `let`. `$x op= $y` is the same as `$x = $x op
 | Operator | Name           | Example             | Behaviour |
 |----------|----------------|---------------------|-----------|
 | `?.`     | Nullable call or field | `$user?.name()`, `$node?.next` | If the left side is `null`, it's `null`: the method isn't called, or the field isn't read. Chains work: `$node?.next?.value` |
-| `??`     | Coalesce       | `$nickname ?? $name`| The left side, or the right side if the left side is `null`. The right side is only evaluated when needed. Indexes past the end of a list or a string and missing keys of a map are `null`, so `$args[0] ?? 'world'` gives a default |
+| `??`     | Coalesce       | `$nickname ?? $name`| The left side, or the right side if the left side is `null`. The right side is only evaluated when needed, and it can be nullable too: then so is the result *(i.e. `$a ?? $b` with two `?number`s is a `?number`, like Kotlin's `?:`)*. Indexes past the end of a list or a string and missing keys of a map are `null`, so `$args[0] ?? 'world'` gives a default |
 | `?[]`    | Nullable index | `$data?['user']?['name']` | If the left side is `null`, the whole expression is `null` and the index isn't used |
 
 - `?.` and `?[]` can't be assigned to *(i.e. `$node?.value = 1`)*, since there may be nothing there to change: check for `null` first.
@@ -206,7 +206,7 @@ Operands: a variable declared with `let`. `$x op= $y` is the same as `$x = $x op
 
 ### Spread
 
-`...$list` passes the elements of a list as separate arguments *(i.e. `greet(...$names)`)*. It can only be used in function calls.
+`...$list` passes the elements of a list as separate arguments *(i.e. `greet(...$names)`)*, and puts them inside a list literal *(i.e. `[$header, ...$rows]`, `[...$a, ...$b]`)*, like in JavaScript. It can be used in calls and in list literals, and with any number of them anywhere in the list. The type of the list is the one of all its elements together, like for any list literal.
 
 ### Test operators
 

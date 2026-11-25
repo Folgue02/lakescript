@@ -99,6 +99,9 @@ pub enum Op {
     /// Checks that the value on top can be a map key.
     CheckKey,
     List(u32),
+    /// A list literal with `...`: the layout of its items *(positional or
+    /// spread)* in `calls`.
+    ListSpread(u32),
     /// Pops pairs of key and value.
     Map(u32),
     /// Joins the values into a string.

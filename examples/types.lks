@@ -55,3 +55,10 @@ outln(describe('HI'));
 const $long = ($s) -> $s.length() > 2;
 (string) -> bool $test = $long;
 outln($names.filter($test));
+
+// `let` with a type, for a variable that starts as null
+let ?string $longest = null;
+// And the type of a loop's element, checked against the elements
+for (string $name in $names)
+    if ($longest == null || $name.length() > $longest.length()) $longest = $name;
+outln(f"Longest: {$longest}");

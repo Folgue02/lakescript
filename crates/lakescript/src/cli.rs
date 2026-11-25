@@ -33,15 +33,11 @@ impl Interpreter<'_> {
         self.parse_command(&class, &tokens, &prog, span)
     }
 
-    /// The name of the script, for the help *(i.e. `git.lks`)*.
+    /// The name the script was run as, for the help: what the person typed
+    /// *(i.e. `git.lks`, or `git` for `ferry run git`)*.
     fn program_name(&self) -> String {
-        self.host
-            .state
-            .script_path
-            .as_ref()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "script".to_string())
+        let state = &self.host.state;
+        state.command_name.clone().or_else(|| state.script_name.clone()).unwrap_or_else(|| "script".to_string())
     }
 
     fn parse_command(&mut self, class: &Rc<Class>, tokens: &[String], prog: &str, span: Span) -> Exec<Value> {

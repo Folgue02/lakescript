@@ -74,7 +74,7 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 
 - A package is downloaded once per version, and every project that uses it shares it.
 - Adding `~/.ferry/bin` to `PATH` makes every installed command available everywhere.
-- The launchers run the `lks` next to `ferry`, by its full path, or the one on `PATH`. On Windows that path is written without the `\\?\` Rust gives real paths there, which `cmd` can't always run.
+- The launchers run the `lks` next to `ferry`, by its full path, or the one on `PATH`. On Windows every path in a launcher *(`lks.exe`, the module path and the script)* is written without the `\\?\` Rust gives real paths there, which `cmd` can't run: it says it can't find the program.
 
 ## Commands
 
@@ -101,6 +101,7 @@ error: github:acme/http has no version 1.5.0: there's no tag v1.5.0 in https://g
 
 - `--color auto|always|never` goes before the command *(i.e. `ferry --color never check`)*, so it never mixes with the arguments of a script in `ferry run`.
 - `ferry run` adds nothing to what the script prints.
+- Everything after the name of the command goes to the script as it is, so its flags need no `--` to be told from ferry's *(i.e. `ferry run cinder --seed 42`)*, unlike `cargo run -- ...`. A `--` is passed on too, which is how a script gets positional arguments that start with `-` *(i.e. `ferry run tool -- -name`)*. Discussed after cinder, and kept.
 
 ## Configuring repositories
 
@@ -131,6 +132,7 @@ The author and name of a project are its real ones, as the repository has them *
 - Installing the project in the current folder copies it to `~/.ferry/installed/<ID>/` first, so changing or deleting the folder doesn't break the installed commands.
 - Installing again replaces the commands of that project. A command with the same name from another project is an error, so one project never silently replaces another's.
 - The launcher skips the type check, since `ferry install` already did it.
+- The launcher and `ferry run` pass the name of the command to `lks` with `--name`, so the `Usage:` line of `--help` says `cinder`, what was typed, not `cinder.lks` *(see Parsing in [language/cli.md](../language/cli.md))*.
 
 ## How a project runs
 
@@ -146,5 +148,6 @@ The author and name of a project are its real ones, as the repository has them *
 
 ## Later
 
+- Data files in packages *(i.e. the levels of a game)*: being discussed with the bundles, as their `resources/` *(see [bundles.md](bundles.md))*. Raised again by cinder.
 - Version ranges *(i.e. `^1.4`)*.
 - `ferry uninstall`, `ferry remove` and `ferry update`.

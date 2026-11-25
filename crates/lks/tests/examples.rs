@@ -73,9 +73,10 @@ fn language_examples() {
         ("examples/operators.lks", "[true, true]"),
         ("examples/interfaces.lks", "a square with sides of 3"),
         ("examples/control_flow.lks", "['child', 'teenager', 'adult']"),
+        ("examples/control_flow.lks", "1. Ana, 30\n2. Bo, 25\nLima is at -12, -77\nOslo is at 60, 11\n"),
         ("examples/strings.lks", "['userAccountName', 'user_account_name', 'user-account-name', 'User Account Name']"),
         ("examples/collections.lks", "{ 'a' => 3, 'b' => 1, 'c' => 1 }"),
-        ("examples/collections.lks", "[[1, 'fig'], [2, 'pear'], [2, 'apple']]"),
+        ("examples/collections.lks", "[[1, 'fig'], [2, 'pear'], [2, 'apple']]\n4\n"),
         ("examples/patterns.lks", "Year 2026, month 11, day 19"),
         ("examples/errors.lks", "app.json: `port` is missing (the key was port)"),
         ("examples/errors.lks", "ConfigError: the port must be a number"),
@@ -83,6 +84,7 @@ fn language_examples() {
         ("examples/errors.lks", "https\ntrue"),
         ("examples/errors.lks", "'eighty' isn't a number, through 3 calls:\n  at the script (errors.lks:104:5)\n  at portOf (errors.lks:101:46)\n  at portNumber (errors.lks:100:36)\n"),
         ("examples/types.lks", "the string 'hi'"),
+        ("examples/types.lks", "Longest: Ana"),
     ] {
         let out = run_ok(&[script]);
         assert!(out.contains(expected), "{script} didn't print {expected:?}:\n{out}");
@@ -101,6 +103,7 @@ fn system_examples() {
     assert!(json.contains("lakescript by folgue02, indent 4"));
     assert!(json.contains("['start', 'stop']"));
     assert!(json.contains("lakescript: 2 keywords\nferry: 0 keywords"), "{json}");
+    assert!(json.contains("{\"name\":\"lakescript\",\"keywords\":[\"scripts\",\"types\"]}\nlakescript\n"), "{json}");
     let csv = run_ok(&["examples/csv.lks"]);
     assert!(csv.contains("Smith, John | 17 | Boston"), "{csv}");
     assert!(csv.contains("{ 'Lisbon' => 2, 'Boston' => 1 }"), "{csv}");
@@ -160,7 +163,7 @@ fn html() {
 #[test]
 fn nulls() {
     let out = run_ok(&["examples/nulls.lks"]);
-    assert_eq!(out, "Tea: 11 left after this cup\nCake: 3 left\nFirst: CAKE\nNo pie: `$stock['pie']` is null\nNo muffins\nAny tea? true\n");
+    assert_eq!(out, "Tea: 11 left after this cup\nCake: 3 left\nFirst: CAKE\nNo pie: `$stock['pie']` is null\nNo muffins\nAny tea? true\nScones: 0\n");
 }
 
 #[test]
@@ -185,6 +188,13 @@ fn terminal() {
     let output = lks(&["examples/terminal.lks"], Some("\n"));
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stderr).contains("ValueError: write a name, please"));
+}
+
+#[test]
+fn fullscreen() {
+    // Without a terminal it says so: on one, it was tried in a pseudo-terminal
+    let out = run_ok(&["examples/fullscreen.lks"]);
+    assert_eq!(out, "fullscreen.lks needs a terminal: run it as `lks examples/fullscreen.lks`\n");
 }
 
 #[test]
@@ -267,7 +277,14 @@ fn archive() {
 #[test]
 fn random() {
     let out = run_ok(&["examples/random.lks"]);
-    assert_eq!(out, "Dice: 1 and 4\nCoin: tails\nWinner: Bo\nOrder: [1, 4, 2, 3, 5]\nChance: 91%\nID: 36 characters, version 4\n");
+    assert_eq!(out, "Dice: 1 and 4\nCoin: tails\nWinner: Bo\nOrder: [1, 4, 2, 3, 5]\nChance: 91%\nID: 36 characters, version 4\nSaved and restored: true\nSame level: true\n");
+}
+
+#[test]
+fn dirs() {
+    let out = run_ok(&["examples/dirs.lks"]);
+    let downloads = if out.ends_with("Downloads: found\n") { "found" } else { "none" };
+    assert_eq!(out, format!("Settings in notes/settings.json, there yet: false\nRun 1: light\nRun 2: dark\nRun 3: dark\nDownloads: {downloads}\n"));
 }
 
 #[test]

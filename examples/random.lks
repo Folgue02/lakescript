@@ -18,3 +18,15 @@ outln(f"Chance: {(random::number() * 100).round()}%");
 // UUIDs come from the system: different on every run, with or without a seed
 const $id = random::uuid();
 outln(f"ID: {$id.length()} characters, version {$id[14]}");
+
+// The state, to save it and put it back later: the same numbers follow
+random::seed(5);
+const $saved = random::state();
+const $roll = random::between(1, 6);
+random::restore($saved);
+outln(f"Saved and restored: {$roll == random::between(1, 6)}");
+
+// A generator of its own: the same level from its seed, whatever else uses random
+const $level = random::Random(2026);
+const $again = random::Random(2026);
+outln(f"Same level: {$level.between(1, 100) == $again.between(1, 100)}");

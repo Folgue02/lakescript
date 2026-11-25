@@ -80,6 +80,8 @@ Point();                  // error: `x` has no value
     - With a superclass, its fields come first. This only works when the superclass also has the constructor that takes every field. If it has its own `new`, the class has to write one too, and call the superclass's with `@super(...)`.
     - Enum values use it too *(i.e. `SICK(canWork: false)` without a `new` in the enum)*.
 - `@super(...)` can go anywhere in `new`, like in Java 25. Before it, `new` can do any work and set its own class's fields, but can't read `@` or call its methods, since the superclass's fields aren't set yet. It has to run exactly once on every path through `new`. The checker finds both mistakes before the script runs.
+    - A `@field` parameter *(i.e. `new(@kind, ...)`)* isn't also a `$kind` variable, so before `@super(...)` it can't be read at all. A constructor that needs the argument for `@super(...)` takes it as `$kind` and sets `@kind = $kind;` itself. Discussed after cinder, and kept.
+- A field that holds a function is called with parentheses around it, `(@onKey)($key)`, since `@onKey($key)` calls the method `onKey`. Discussed after cinder, and kept: a field and a method can't be told apart otherwise.
 - `@super` is the object seen as its superclass: `@super(...)` calls its constructor, and `@super.sayHello()` calls the superclass's version of a method that's overridden. `super` can't be the name of a field.
 - Methods that replace the superclass's go in an `override { ... }` block, and the methods of an interface in an `implement Interface { ... }` block. So where a method is says where it comes from, and two interfaces with a method of the same name don't clash.
     - A class implements an interface when it has its `implement` block, so `.is(IEquals)` can be checked when the script runs.
@@ -184,6 +186,7 @@ An object prints as its class and its fields, in the order of the constructor th
 ## Equality and operators
 
 - `==` on two objects calls `equals?` when their class implements `IEquals`. Otherwise it's true only for the same object. Objects of classes that aren't related *(neither is the other's superclass)* are never equal, without calling `equals?`.
+    - Everything else that compares values does it the same way: `.equals()` on lists and maps, `-in` and `-notin` on a list, and the methods that look for a value *(i.e. `contains`, `indexOf`, `count`, `unique`, `remove`, `removeAll`, `hasValue`, `keyOf`)*.
 - `$a.same?($b)` is always true only for the same object. Every value has it.
 - The other operators work the same way: on objects, each one calls the method of an interface the class implements. Numbers, strings, lists and maps keep working as they do now, without calling anything.
 - These interfaces are built in, so they're used without `use`. Each operator has its own, so a class only gets the ones that make sense for it *(i.e. a `Path` with `/` but no `+`)*:

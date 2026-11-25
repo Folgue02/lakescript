@@ -76,6 +76,7 @@ What's coming next is in [planned.md](planned.md).
 | [general.md](general.md) | The functions available without `use`: `out`, `outln`, `err`, `errln` and `exit` |
 | [fs.md](fs.md) | `std/fs`: files and folders |
 | [path.md](path.md) | `std/path`: building and splitting paths |
+| [dirs.md](dirs.md) | `std/dirs`: the folders of a tool for its configuration, data and cache, and the user's folders |
 | [env.md](env.md) | `std/env`: environment variables |
 | [time.md](time.md) | `std/time`: the current time, dates, their formats and zones *(`std/time/zone`)* |
 | [io.md](io.md) | `std/io`: reading stdin |

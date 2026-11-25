@@ -57,8 +57,13 @@ outln($byLength);
 
 outln($stock.filter(($k, $v) -> $v > 0).keys());
 outln($stock.sortedBy(($k, $v) -> -$v));
-outln({'port' => 80}.merged({'port' => 8080, 'host' => 'localhost'}));
+// A map of numbers can't take a string: values of several types need `any`
+outln(<string, any>{'port' => 80}.merged({'port' => 8080, 'host' => 'localhost'}));
 
 // Sorting with a comparison function, for values `<` can't compare, like lists
 const $rows = [[2, 'pear'], [1, 'fig'], [2, 'apple']];
 outln($rows.sortedWith(($a, $b) -> $a[0] - $b[0]));
+
+// `...` puts the elements of a list inside another
+const $header = ['n', 'fruit'];
+outln([$header, ...$rows.map(($r) -> [$r[0].toString(), $r[1].as(string)])].length());

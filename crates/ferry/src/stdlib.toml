@@ -91,7 +91,7 @@ group = "Types"
 kind = "method"
 name = "equals"
 code = "bool equals(any $other)"
-text = "Compares the contents, also for lists and maps *(i.e. `[1, 2].equals([1, 2])` is `true`)*"
+text = "Compares the contents, also for lists and maps *(i.e. `[1, 2].equals([1, 2])` is `true`)*. Objects inside them are compared like `==` compares them, through `equals?` when their class implements `IEquals`"
 group = "Comparing and printing"
 
 [[modules.items.members]]
@@ -308,7 +308,7 @@ group = "Searching"
 kind = "method"
 name = "match"
 code = "?list<string> match(regex $pattern)"
-text = "The first match: the whole match, then each group. `null` if it doesn't match *(i.e. `'v1.2'.match(%r\"(\\d+)\\.(\\d+)\")` is `['1.2', '1', '2']`)*"
+text = "The first match: the whole match, then each group. `null` if it doesn't match *(i.e. `'v1.2'.match(%r\"(\\d+)\\.(\\d+)\")` is `['1.2', '1', '2']`)*. A group that didn't take part in the match is `''`, not `null`: discussed after cinder, and kept, so the list stays a `list<string>`"
 group = "Searching"
 
 [[modules.items.members]]
@@ -2184,6 +2184,147 @@ text = "Bytes written in base64, standard or for URLs *(with `-` and `_`)*, with
 group = "Functions"
 
 [[modules]]
+short = "dirs"
+path = "std/dirs"
+title = "std/dirs"
+text = "The folders where a tool keeps its things, on every system: its configuration, its data, its cache. `use std/dirs;`, then `dirs::app('myapp')`, and the folders of the user like downloads.\n\n```\nuse std/dirs;\nuse std/format/json;\nuse std/fs;\nuse std/path;\n\nconst $app = dirs::app('myapp');\nconst $file = path::join($app.config(), 'settings.json');\nconst $settings = if (fs::exists?($file)) json::read($file) else {};\n\njson::write(path::join($app.config(create: true), 'settings.json'), $settings);\noutln(dirs::downloads() ?? 'no downloads folder');\n```"
+
+[[modules.groups]]
+name = "Functions"
+text = "- These give the path, and never create the folder. The home folder is `path::home()` *(see [`std/path`](path.html))*.\n- Paths use `/`, like every path in Lakescript *(i.e. `C:/Users/ana/AppData/Roaming`)*.\n- The variables are read as the script sees them, so `env::set('XDG_CONFIG_HOME', ...)` changes them *(i.e. in tests)*. An `XDG_` variable that isn't an absolute path is ignored, as the XDG spec says."
+
+[[modules.groups]]
+name = "The user's folders"
+text = "- `null` when the user has no such folder.\n- **Linux**: what `~/.config/user-dirs.dirs` says, the file of `xdg-user-dirs` that desktops write and translate *(i.e. `~/Descargas` in Spanish)*. A folder that isn't in it is the English name in the home folder if it exists. One set to the home folder itself is turned off, so it's `null`.\n- **macOS**: the folder in the home folder, if it exists. Videos are `~/Movies`.\n- **Windows**: the Known Folders of the system, so a folder moved elsewhere *(i.e. documents in OneDrive)* is found where it is."
+
+[[modules.items]]
+kind = "function"
+name = "app"
+code = "App app(string $name)"
+text = "The folders of a tool with that name, like `dirs::App($name)` *(i.e. `dirs::app('myapp').config()` is `~/.config/myapp`)*. Throws a `ValueError` if the name is empty or has `/` or `\\`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "config"
+code = "string config()"
+text = "The folder for configuration: `$XDG_CONFIG_HOME` or `~/.config` on Linux and macOS, `%APPDATA%` on Windows"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "data"
+code = "string data()"
+text = "The folder for data: `$XDG_DATA_HOME` or `~/.local/share` on Linux and macOS, `%LOCALAPPDATA%` on Windows"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "cache"
+code = "string cache()"
+text = "The folder for caches: `$XDG_CACHE_HOME` or `~/.cache` on Linux and macOS, `%LOCALAPPDATA%` on Windows"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "state"
+code = "string state()"
+text = "The folder for state, like history and logs: `$XDG_STATE_HOME` or `~/.local/state` on Linux and macOS, `%LOCALAPPDATA%` on Windows"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "temp"
+code = "string temp()"
+text = "The folder for temporary files: `$TMPDIR` or `/tmp` on Linux and macOS, `%TEMP%` on Windows"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "runtime"
+code = "?string runtime()"
+text = "The folder for sockets and lock files, which is emptied when the user logs out: `$XDG_RUNTIME_DIR` *(i.e. `/run/user/1000`)*, or `null` when it isn't set, as on macOS and Windows"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "desktop"
+code = "?string desktop()"
+text = "The desktop *(i.e. `~/Desktop`)*"
+group = "The user's folders"
+
+[[modules.items]]
+kind = "function"
+name = "documents"
+code = "?string documents()"
+text = "The documents *(i.e. `~/Documents`)*"
+group = "The user's folders"
+
+[[modules.items]]
+kind = "function"
+name = "downloads"
+code = "?string downloads()"
+text = "The downloads *(i.e. `~/Downloads`)*"
+group = "The user's folders"
+
+[[modules.items]]
+kind = "function"
+name = "music"
+code = "?string music()"
+text = "The music *(i.e. `~/Music`)*"
+group = "The user's folders"
+
+[[modules.items]]
+kind = "function"
+name = "pictures"
+code = "?string pictures()"
+text = "The pictures *(i.e. `~/Pictures`)*"
+group = "The user's folders"
+
+[[modules.items]]
+kind = "function"
+name = "videos"
+code = "?string videos()"
+text = "The videos *(i.e. `~/Videos`, `~/Movies` on macOS)*"
+group = "The user's folders"
+
+[[modules.items]]
+kind = "class"
+name = "App"
+code = "class App"
+text = "The folders of a tool, created as `dirs::App('myapp')` or with `dirs::app('myapp')`, which is the same. Its own `new` throws a `ValueError` if the name is empty or has `/` or `\\`, so both check it. Each method gives the path, and creates the folder and the ones above it with `create: true`, for when the tool is about to write in it. Reading a configuration that isn't there doesn't need the folder, so it isn't created without being asked.\n\n\n\n- macOS uses the folders of Linux, not `~/Library/Application Support`, like most command-line tools *(i.e. git, gh, nvim, fish)*: the same paths on both, and easy to find and edit by hand.\n- On Windows the configuration is in `%APPDATA%` (Roaming), which follows the user to the other machines of a domain, and the rest is in `%LOCALAPPDATA%`, which stays on the machine, so nothing big is copied around. It's what Microsoft says each one is for, and what gh and Node's env-paths do."
+
+[[modules.items.members]]
+kind = "field"
+name = "name"
+code = "string @name"
+text = "The name of the tool"
+
+[[modules.items.members]]
+kind = "method"
+name = "config"
+code = "string config(bool $create = false)"
+text = "Its configuration: `~/.config/myapp` on Linux and macOS, `%APPDATA%\\myapp` on Windows"
+
+[[modules.items.members]]
+kind = "method"
+name = "data"
+code = "string data(bool $create = false)"
+text = "Its data: `~/.local/share/myapp` on Linux and macOS, `%LOCALAPPDATA%\\myapp\\data` on Windows"
+
+[[modules.items.members]]
+kind = "method"
+name = "cache"
+code = "string cache(bool $create = false)"
+text = "Its cache, which can be deleted: `~/.cache/myapp` on Linux and macOS, `%LOCALAPPDATA%\\myapp\\cache` on Windows"
+
+[[modules.items.members]]
+kind = "method"
+name = "state"
+code = "string state(bool $create = false)"
+text = "Its state, which is kept but isn't worth copying to another machine *(i.e. history, logs)*: `~/.local/state/myapp` on Linux and macOS, `%LOCALAPPDATA%\\myapp\\state` on Windows"
+
+[[modules]]
 short = "fs"
 path = "std/fs"
 title = "std/fs"
@@ -2679,7 +2820,7 @@ text = "Random numbers, `true` or `false`, UUIDs, and a seed to get the same one
 
 [[modules.groups]]
 name = "Functions"
-text = "- Choosing and shuffling are methods of lists, not functions here: `$list.random()` gives an element, and `$list.shuffle()` and `$list.shuffled()` put them in random order *(see [`list`](types.list.html))*.\n- Without `seed()`, the numbers are different on every run.\n- It's good enough for scripts, games and tests, not for secrets: passwords and keys need a generator made for them."
+text = "| `state()` | `string` | The state of the generator, to put it back later with `restore()`, like Python's `random.getstate()` *(i.e. to save a game and load it)*. It's a string, so it can be written to JSON: a number can't hold the 64 bits |\n| `restore(string $state)` | `void` | Puts back a state from `state()`, like Python's `random.setstate()`: the numbers that follow are the ones that followed the `state()` call. Throws a `ValueError` for a string that isn't one |\n\n- Choosing and shuffling are methods of lists, not functions here: `$list.random()` gives an element, and `$list.shuffle()` and `$list.shuffled()` put them in random order *(see [`list`](types.list.html))*.\n- Without `seed()`, the numbers are different on every run.\n- It's good enough for scripts, games and tests, not for secrets: passwords and keys need a generator made for them."
 
 [[modules.items]]
 kind = "function"
@@ -2715,6 +2856,48 @@ name = "seed"
 code = "void seed(number $seed)"
 text = "Starts the generator again from a whole number, so the numbers that follow are the same on every run, for tests and for things that must be repeatable *(i.e. a level of a game)*. It's also the generator of `$list.random()`, `$list.shuffle()` and `$list.shuffled()`"
 group = "Functions"
+
+[[modules.items]]
+kind = "class"
+name = "Random"
+code = "class Random"
+text = "A generator of its own, for a stream of numbers that nothing else in the script moves forward, like Python's `random.Random(seed)` and Java's `new Random(seed)` *(i.e. the levels of a game from their seed, while the rest of the game uses the shared one)*. `random::Random(42)` starts it from a seed, and `random::Random()` from the system, like a script without `seed()`.\n\n```\nconst $level = random::Random(7);\noutln($level.between(1, 6));           // the same on every run, whatever else uses random\nconst $saved = $level.state();\n```\n\n\n- It has no `uuid()`: the bits of a UUID never come from a generator *(see `uuid()`)*, so it would be the same as `random::uuid()`.\n- `$list.random()`, `$list.shuffle()` and `$list.shuffled()` keep using the shared generator."
+
+[[modules.items.members]]
+kind = "method"
+name = "number"
+code = "number number()"
+text = "Like `random::number()`, from this generator"
+
+[[modules.items.members]]
+kind = "method"
+name = "between"
+code = "number between(number $min, number $max)"
+text = "Like `random::between()`, from this generator"
+
+[[modules.items.members]]
+kind = "method"
+name = "bool"
+code = "bool bool()"
+text = "Like `random::bool()`, from this generator"
+
+[[modules.items.members]]
+kind = "method"
+name = "seed"
+code = "void seed(number $seed)"
+text = "Starts it again from a whole number, like `random::seed()`"
+
+[[modules.items.members]]
+kind = "method"
+name = "state"
+code = "string state()"
+text = "Its state, like `random::state()`"
+
+[[modules.items.members]]
+kind = "method"
+name = "restore"
+code = "void restore(string $state)"
+text = "Puts back a state, like `random::restore()`. A state of one generator can go into another, and into the shared one"
 
 [[modules]]
 short = "http"
@@ -2968,7 +3151,7 @@ short = "format/json"
 path = "std/format/json"
 title = "std/format/json"
 text = "Reading and writing JSON. `use std/format/json;`, then `json::parse($text)`.\n\n```\nuse std/format/json;\n\nconst $data = json::parse('{\"name\": \"Daniel\", \"tags\": [\"a\", \"b\"]}');\nconst $name = $data['name'].as(string);\noutln(json::stringify($data, indent: 2));\n```"
-notes = "## Reading\n\nWithout a type, the values become the built-in types, and the result is `any`. Scripts use `.as()` to get typed values out of it, or give a type *(see [Into types](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/format/#into-types))*.\n\n| JSON | Lakescript |\n|------|------------|\n| object | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |\n| `true`, `false` | `bool` |\n| `null` | `null` |\n\n- Only strict JSON is accepted: no comments and no trailing commas, so a file Lakescript reads is also valid for other tools.\n- Invalid JSON throws a `ValueError` with the line and column.\n\n## Into types\n\n`json::parse($text, User)` reads the JSON into that type, like Rust's serde or Java's Jackson: objects of classes, with their fields filled in, and the result has that type for the checker. The type is written as an argument, a class like `User` or a built-in type like `list<User>` or `map<string, User>`.\n\n```\nclass Tag {\n    pub string @name;\n}\nclass User {\n    pub string @name;\n    pub ?string @email;\n    pub list<Tag> @tags = [];\n    pub Role @role = Role::USER;\n}\nenum Role { USER, ADMIN }\n\nconst $users = json::parse($text, list<User>);   // list<User>\noutln($users[0]!.tags.map(($t) -> $t.name));\nconst $me = http::get($url).json(User);         // User\n```\n\n- **Classes**: a JSON object, by the names of the fields. Their values are read into the types of the fields, so nested classes are filled in too. A field that isn't in the object gets its default, or `null` if it's nullable, and one without either throws. Keys the class doesn't have are ignored, since APIs add fields. A class with its own `new` gets the keys as named arguments of it.\n- **Enums**: the name of a value, as a string *(i.e. `\"ADMIN\"`)*.\n- **Built-in types**: `string`, `number`, `bool`, `any`, `list<T>`, `map<string, T>`, and `?T` for `null` or a `T`.\n- A value of the wrong type throws a `TypeError` that says where it is *(i.e. `` `$[2].age` is a string, not a number ``, `` `$.user` has no `name`, which `User` needs ``)*.\n- A type given as an argument is a value of the type `type<T>` *(see Types as values in [type_checking](https://github.com/Folgue02/lakescript/blob/master/ideas/language/type_checking.md))*.\n\n## Writing\n\n| Lakescript | JSON |\n|------------|------|\n| `map` | object. Number keys become strings, since JSON keys can only be strings |\n| `list` | array |\n| `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |\n| `string`, `number`, `bool`, `null` | the same |\n\n- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.\n- `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented."
+notes = "## Reading\n\nWithout a type, the values become the built-in types, and the result is `any`. Scripts use `.as()` to get typed values out of it, or give a type *(see [Into types](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/format/#into-types))*.\n\n| JSON | Lakescript |\n|------|------------|\n| object | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| number | `number`. Very big integers become floats, like in JavaScript *(i.e. `12345678901234567890` is `1.2345678901234567e19`)*, and whole floats print without the decimal point *(`189.0` is written back as `189`)*. jq 1.7 keeps the original literal, but Lakescript doesn't, since `number` doesn't remember how it was written |\n| `true`, `false` | `bool` |\n| `null` | `null` |\n\n- Only strict JSON is accepted: no comments and no trailing commas, so a file Lakescript reads is also valid for other tools.\n- Invalid JSON throws a `ValueError` with the line and column.\n\n## Into types\n\n`json::parse($text, User)` reads the JSON into that type, like Rust's serde or Java's Jackson: objects of classes, with their fields filled in, and the result has that type for the checker. The type is written as an argument, a class like `User` or a built-in type like `list<User>` or `map<string, User>`.\n\n```\nclass Tag {\n    pub string @name;\n}\nclass User {\n    pub string @name;\n    pub ?string @email;\n    pub list<Tag> @tags = [];\n    pub Role @role = Role::USER;\n}\nenum Role { USER, ADMIN }\n\nconst $users = json::parse($text, list<User>);   // list<User>\noutln($users[0]!.tags.map(($t) -> $t.name));\nconst $me = http::get($url).json(User);         // User\n```\n\n- **Classes**: a JSON object, by the names of the fields. Their values are read into the types of the fields, so nested classes are filled in too. A field that isn't in the object gets its default, or `null` if it's nullable, and one without either throws. Keys the class doesn't have are ignored, since APIs add fields. A class with its own `new` gets the keys as named arguments of it.\n- **Enums**: the name of a value, as a string *(i.e. `\"ADMIN\"`)*.\n- **Built-in types**: `string`, `number`, `bool`, `any`, `list<T>`, `map<string, T>`, and `?T` for `null` or a `T`.\n- A value of the wrong type throws a `TypeError` that says where it is *(i.e. `` `$[2].age` is a string, not a number ``, `` `$.user` has no `name`, which `User` needs ``)*.\n- A type given as an argument is a value of the type `type<T>` *(see Types as values in [type_checking](https://github.com/Folgue02/lakescript/blob/master/ideas/language/type_checking.md))*.\n\n## Writing\n\n| Lakescript | JSON |\n|------------|------|\n| `map` | object. Number keys become strings, since JSON keys can only be strings |\n| `list` | array |\n| `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |\n| `string`, `number`, `bool`, `null` | the same |\n| an object of a class | object with every field, by its name, in the order they're declared, the superclass's first. Private fields too, so that reading it back with `json::parse($text, User)` gives the same object |\n| a value of an enum | its name *(i.e. `\"ADMIN\"`)*, the way it's read |\n\n- Objects of classes are the other way of [Into types](https://github.com/Folgue02/lakescript/blob/master/ideas/stdlib/format/#into-types): `json::parse(json::stringify($user), User)` is equal to `$user`. Nested objects and lists of objects are written the same way, and a field that's `null` is written as `null`.\n- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent, and a field that holds one of them or Rust data of the standard library *(i.e. the page of an `html::Element`)*. The error says where it is *(i.e. `` `$.onKey` is a function, which JSON can't have ``)*.\n- `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented."
 
 [[modules.groups]]
 name = "Functions"
@@ -3103,6 +3286,10 @@ name = "The terminal"
 text = "- A person is at a terminal when stdin and stderr are terminals, and the script isn't run by a program that captures what it writes *(i.e. the tests of the engine)*."
 
 [[modules.groups]]
+name = "Full screen"
+text = "For programs that take the whole terminal, like games, editors and dashboards, and give it back as it was when they end *(like `vim`, `less` and `htop`)*.\n\n```\nuse std/terminal;\n\nterminal::fullScreen(() {\n    let $x = 0;\n    while (true) {\n        terminal::moveTo($x, 0);\n        out('@');\n        terminal::clearLine();\n        const $key = terminal::readKey(timeout: 0.1);\n        if ($key == 'q') break;\n        if ($key == 'right') $x++;\n    }\n});\n```\n\n\n- What's written with `out()` goes where the cursor is. Writing a whole frame and then reading a key draws it at once, since `readKey()` writes out what's waiting first.\n- Inside it, what's typed isn't shown on the screen while the program does other things, only what it draws.\n- `fullScreen()` inside another one only runs `$body`.\n- With `crossterm`, which also works on the consoles of Windows. Programs that wrote the escape codes themselves *(i.e. cinder's `ui/ansi.lks`)* can use these instead."
+
+[[modules.groups]]
 name = "Progress bars"
 text = "```\nconst $bar = terminal::progress($files.length(), 'Copying');\nfor ($f in $files) {\n    copy($f);\n    $bar.advance();\n}\n$bar.finish();\n\n// Without a total, it's a spinner that turns with each `advance()`\nconst $pages = terminal::progress(null, 'Reading pages');\nwhile ($next != null) {\n    $next = scrape($next);\n    $pages.advance();\n}\n$pages.finish();\n```"
 
@@ -3189,8 +3376,8 @@ group = "The terminal"
 [[modules.items]]
 kind = "function"
 name = "readKey"
-code = "string readKey()"
-text = "One key, without waiting for enter *(i.e. `'a'`, `'enter'`, `'up'`, `'space'`, `'escape'`, `'ctrl+d'`, `'f1'`)*. Ctrl+C throws an `Interrupted`, and without a terminal it throws an `IOError`"
+code = "?string readKey(?number $timeout = null)"
+text = "One key, without waiting for enter *(i.e. `'a'`, `'enter'`, `'up'`, `'space'`, `'escape'`, `'ctrl+d'`, `'f1'`)*. With `$timeout`, in seconds, it waits that long at most, and gives `null` when no key came, for programs that move on their own *(i.e. `terminal::readKey(timeout: 0.1)`)*. Without it, it waits for a key, and is never `null`. Inside `fullScreen()`, resizing the terminal gives `'resize'`. Ctrl+C throws an `Interrupted`, and without a terminal it throws an `IOError`"
 group = "The terminal"
 
 [[modules.items]]
@@ -3199,6 +3386,27 @@ name = "clear"
 code = "void clear()"
 text = "Clears the screen"
 group = "The terminal"
+
+[[modules.items]]
+kind = "function"
+name = "fullScreen"
+code = "void fullScreen(() -> void $body)"
+text = "Runs `$body` on a screen of its own: it switches to the terminal's alternate screen, hides the cursor and clears it. When `$body` ends, also by an exception or Ctrl+C, it always shows the cursor again and goes back to what the terminal had before. Without a terminal, it only runs `$body`"
+group = "Full screen"
+
+[[modules.items]]
+kind = "function"
+name = "moveTo"
+code = "void moveTo(number $x, number $y)"
+text = "Moves the cursor to a column and a row, both from 0: `moveTo(0, 0)` is the top-left corner, and the last row is `height() - 1`. What's written next starts there"
+group = "Full screen"
+
+[[modules.items]]
+kind = "function"
+name = "clearLine"
+code = "void clearLine()"
+text = "Clears from the cursor to the end of its line, to write a row over an old one. `moveTo(0, $y)` first clears the whole row"
+group = "Full screen"
 
 [[modules.items]]
 kind = "function"

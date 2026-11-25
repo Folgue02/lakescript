@@ -71,10 +71,13 @@ const $me = http::get($url).json(User);         // User
 | `list` | array |
 | `range` | array of its numbers *(i.e. `1..4` is `[1, 2, 3]`)* |
 | `string`, `number`, `bool`, `null` | the same |
+| an object of a class | object with every field, by its name, in the order they're declared, the superclass's first. Private fields too, so that reading it back with `json::parse($text, User)` gives the same object |
+| a value of an enum | its name *(i.e. `"ADMIN"`)*, the way it's read |
 
-- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent.
+- Objects of classes are the other way of [Into types](#into-types): `json::parse(json::stringify($user), User)` is equal to `$user`. Nested objects and lists of objects are written the same way, and a field that's `null` is written as `null`.
+- Functions, regexes, commands, exceptions and results can't be written: they throw a `TypeError`. So do `NaN` and `Infinity`, which JSON can't represent, and a field that holds one of them or Rust data of the standard library *(i.e. the page of an `html::Element`)*. The error says where it is *(i.e. `` `$.onKey` is a function, which JSON can't have ``)*.
 - `json::stringify($value)` writes compact JSON, and `json::stringify($value, indent: 2)` writes it indented.
 
 ## Backlog
 
-- Writing objects of classes, by their `pub` fields, the other way of reading them.
+- Nothing for now. Writing objects of classes was decided after cinder: with every field, not only the `pub` ones, so that writing and reading back give the same object.

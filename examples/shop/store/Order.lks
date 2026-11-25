@@ -1,6 +1,4 @@
-use store/Customer;
-use store/Status;
-
+// `Customer` and `Status` are in this folder, so they need no `use`
 pub class Order {
     pub string @item;
     pub number @cents;

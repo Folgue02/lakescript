@@ -1,0 +1,93 @@
+//! The folders where a tool keeps its things, on every system, and the
+//! folders of the user *(see ideas/stdlib/dirs.md)*. Its Rust part,
+//! `std/dirs/native`, finds them.
+
+use std/dirs/native;
+use std/fs;
+
+/// The folders of a tool *(i.e. `dirs::App('myapp')`)*. Each method gives the
+/// path, and creates the folder with `create: true`.
+pub class App {
+    /// The name of the tool.
+    pub const string @name;
+
+    /// The folders of the tool with that name. Throws a `ValueError` if the
+    /// name is empty or has `/` or `\`.
+    pub new(@name) {
+        if (@name.blank?()) {
+            throw ValueError("`dirs::App` needs the name of the tool, and got an empty one");
+        }
+        if (@name.contains('/') || @name.contains('\\')) {
+            throw ValueError(f"'{@name}' can't be the name of a tool: it would be a folder inside another, so it can't have `/` or `\\`");
+        }
+    }
+
+    /// Its configuration: `~/.config/<name>` on Linux and macOS,
+    /// `%APPDATA%\<name>` on Windows.
+    pub string config(bool $create = false) = @folder('config', $create);
+
+    /// Its data: `~/.local/share/<name>` on Linux and macOS,
+    /// `%LOCALAPPDATA%\<name>\data` on Windows.
+    pub string data(bool $create = false) = @folder('data', $create);
+
+    /// Its cache, which can be deleted: `~/.cache/<name>` on Linux and macOS,
+    /// `%LOCALAPPDATA%\<name>\cache` on Windows.
+    pub string cache(bool $create = false) = @folder('cache', $create);
+
+    /// Its state, like history and logs: `~/.local/state/<name>` on Linux and
+    /// macOS, `%LOCALAPPDATA%\<name>\state` on Windows.
+    pub string state(bool $create = false) = @folder('state', $create);
+
+    string folder(string $kind, bool $create) {
+        const $path = native::app($kind, @name);
+        if ($create) fs::makeDir($path);
+        return $path;
+    }
+}
+
+/// The folders of a tool with that name, like `App($name)` *(i.e.
+/// `dirs::app('myapp').config()`)*. Throws a `ValueError` if the name is empty
+/// or has `/` or `\`.
+pub App app(string $name) = App($name);
+
+/// The folder for configuration: `$XDG_CONFIG_HOME` or `~/.config` on Linux
+/// and macOS, `%APPDATA%` on Windows.
+pub string config() = native::base('config')!;
+
+/// The folder for data: `$XDG_DATA_HOME` or `~/.local/share` on Linux and
+/// macOS, `%LOCALAPPDATA%` on Windows.
+pub string data() = native::base('data')!;
+
+/// The folder for caches: `$XDG_CACHE_HOME` or `~/.cache` on Linux and macOS,
+/// `%LOCALAPPDATA%` on Windows.
+pub string cache() = native::base('cache')!;
+
+/// The folder for state: `$XDG_STATE_HOME` or `~/.local/state` on Linux and
+/// macOS, `%LOCALAPPDATA%` on Windows.
+pub string state() = native::base('state')!;
+
+/// The folder for temporary files: `$TMPDIR` or `/tmp` on Linux and macOS,
+/// `%TEMP%` on Windows.
+pub string temp() = native::base('temp')!;
+
+/// The folder for sockets and lock files, `$XDG_RUNTIME_DIR`, or `null` when
+/// it isn't set, as on macOS and Windows.
+pub ?string runtime() = native::base('runtime');
+
+/// The desktop, or `null` if the user has none.
+pub ?string desktop() = native::user('desktop');
+
+/// The documents, or `null` if the user has none.
+pub ?string documents() = native::user('documents');
+
+/// The downloads, or `null` if the user has none.
+pub ?string downloads() = native::user('downloads');
+
+/// The music, or `null` if the user has none.
+pub ?string music() = native::user('music');
+
+/// The pictures, or `null` if the user has none.
+pub ?string pictures() = native::user('pictures');
+
+/// The videos *(`~/Movies` on macOS)*, or `null` if the user has none.
+pub ?string videos() = native::user('videos');

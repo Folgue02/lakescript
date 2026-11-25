@@ -61,6 +61,25 @@ Like `java.lang` in Java, a few things can always be used without `use`:
 
 Everything else in the standard library needs a `use` *(see [stdlib/README.md](../stdlib/README.md))*.
 
+### Types in the same folder
+
+Like the classes of a package in Java, a type whose module is in the same folder can be used without `use`. In `src/folgue02/shop/Order.lks`, `Customer` is `folgue02/shop/Customer`, the `Customer.lks` next to it:
+
+```
+// src/folgue02/shop/Order.lks, without `use folgue02/shop/Customer;`
+pub class Order {
+    pub Customer @customer;
+    pub list<Item> @items = [];      // folgue02/shop/Item
+}
+```
+
+- **Only type modules**, the ones named in PascalCase *(see Importing a type in [classes.md](classes.md))*. Lowercase modules still need their `use`, so `name::` always says where it comes from.
+- **The folder is the one of the module's own path**, looked for through the module path like any `use`. A standalone script's folder is a root, so the types next to it can be used without `use` too.
+- **It's the last place a name is looked for.** A type declared in the file, a type parameter, a `use` *(also of another type with the same name)* and the built-in types *(i.e. `ValueError`)* all come first. So adding a file to a folder never changes what code that already worked means, and a `use` wins, like a single-type import in Java.
+- A `use` of a type in the same folder still works, it just isn't needed.
+- **It costs nothing to code that doesn't need it.** The folder is only looked in for a type name that nothing else gives, once per name, when the file is checked or loaded. The module is loaded the first time it's used, like with a `use`.
+- Editors don't write a `use` for them when completing *(see Importing types from completion in [tooling/lsp.md](../tooling/lsp.md))*.
+
 ## Importing a module
 
 `use` followed by the path of the module. Its contents are then reached with `::` and the last part of the path:

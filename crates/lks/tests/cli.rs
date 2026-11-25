@@ -110,3 +110,25 @@ fn errors_have_colors_when_asked() {
     assert!(stdout(&lks(&["--color", "always", "--help"])).contains("\x1b[1;32mOptions:"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn the_usage_line_says_what_was_typed() {
+    let dir = std::env::temp_dir().join(format!("lks-usage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("cinder.lks");
+    std::fs::write(&script, "command Cinder {\n    /// The seed\n    flag number @seed = 1;\n}\nCinder::parse();\n").unwrap();
+    let usage = |args: &[&str]| stdout(&lks(args)).lines().next().unwrap_or_default().to_string();
+    let path = script.display().to_string();
+    assert!(usage(&[&path, "--help"]).starts_with("Usage: cinder.lks"));
+    assert!(usage(&["--name", "cinder", &path, "--help"]).starts_with("Usage: cinder "), "{}", usage(&["--name", "cinder", &path, "--help"]));
+    // Through a link, its name, not the real file's
+    #[cfg(unix)]
+    {
+        let link = dir.join("deploy");
+        std::os::unix::fs::symlink(&script, &link).unwrap();
+        assert!(usage(&[&link.display().to_string(), "--help"]).starts_with("Usage: deploy "));
+    }
+    assert!(stderr(&lks(&["--name"])).contains("`--name` needs the name"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

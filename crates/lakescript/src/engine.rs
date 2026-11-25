@@ -249,7 +249,8 @@ impl Engine {
     /// Runs a script given as text. Variables and functions it declares are
     /// kept, so the next `run` can use them.
     pub fn run(&mut self, source: &str) -> Result<Outcome, Diagnostic> {
-        let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
+        let path = self.host.state.script_path.clone();
+        let (program, _) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), false)?;
         if self.check_types {
             self.check(&program).map_err(|d| self.locate(d))?;
         }
@@ -307,12 +308,13 @@ impl Engine {
         if self.record_names {
             self.checked_source = source.to_string();
         }
+        let path = self.host.state.script_path.clone();
         if !self.editing() {
-            let program = crate::parse_budgeted(source, 0, self.stack_budget)?;
+            let (program, _) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), false)?;
             return self.check(&program).map_err(|d| self.locate(d));
         }
         // For an editor, the code is checked also after a syntax error, for its names
-        let (program, errors) = crate::parser::parse_recovering(crate::lexer::tokenize_file(source, 0)?, self.stack_budget);
+        let (program, errors) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), true)?;
         let result = self.check(&program).map_err(|d| self.locate(d));
         match errors.into_iter().next() {
             Some(error) => Err(error),
@@ -392,6 +394,14 @@ impl Engine {
         }
         self.host.loader.files[0] = path.display().to_string();
         self.host.state.script_path = Some(real);
+        self.host.state.script_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+    }
+
+    /// The name of the command the script is run as, for the `Usage:` line
+    /// of `--help` *(i.e. `cinder`, for `ferry run cinder`)*. Without it,
+    /// it's the name of the script's path as it was given.
+    pub fn set_command_name(&mut self, name: &str) {
+        self.host.state.command_name = Some(name.to_string());
     }
 
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {

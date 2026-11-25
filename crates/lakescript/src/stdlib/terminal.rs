@@ -30,6 +30,21 @@ pub fn register(m: &mut Exports) {
         Ok(Value::list(size))
     });
     m.function("readKey", read_key);
+    m.function("enterFullScreen", enter_full_screen);
+    m.function("leaveFullScreen", leave_full_screen);
+    m.function("moveTo", |ctx, values| {
+        let a = Args::new("terminal::moveTo", values, 2, 2)?;
+        let (x, y) = (a.whole(0)?, a.whole(1)?);
+        if x < 0 || y < 0 || x > u16::MAX as i64 || y > u16::MAX as i64 {
+            return Err(NativeError::new(VALUE_ERROR, format!("`terminal::moveTo` counts columns and rows from 0, and got {x} and {y}")));
+        }
+        crossterm::queue!(&mut ctx.output, crossterm::cursor::MoveTo(x as u16, y as u16)).map_err(write_failed)?;
+        Ok(Value::Null)
+    });
+    m.function("clearLine", |ctx, _| {
+        crossterm::queue!(&mut ctx.output, crossterm::terminal::Clear(crossterm::terminal::ClearType::UntilNewLine)).map_err(write_failed)?;
+        Ok(Value::Null)
+    });
     m.function("clear", |ctx, _| {
         write!(ctx.output, "\x1b[2J\x1b[H").and_then(|_| ctx.output.flush()).map_err(write_failed)?;
         Ok(Value::Null)
@@ -165,22 +180,94 @@ fn width_of(text: &str) -> usize {
 
 // ---- The terminal ----
 
-fn read_key(ctx: &mut NativeContext, _: Vec<Value>) -> Result<Value, NativeError> {
-    use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, read};
+thread_local! {
+    /// Whether the script is inside `terminal::fullScreen()`.
+    static FULL_SCREEN: Cell<bool> = const { Cell::new(false) };
+    /// The settings of the terminal before `fullScreen()` stopped showing what's typed.
+    #[cfg(unix)]
+    static SAVED: Cell<Option<libc::termios>> = const { Cell::new(None) };
+}
+
+/// Switches to the alternate screen, cleared and without the cursor, and
+/// stops showing what's typed. `false` without a terminal, or inside
+/// `fullScreen()` already, when there's nothing to do.
+fn enter_full_screen(ctx: &mut NativeContext, _: Vec<Value>) -> Result<Value, NativeError> {
+    use crossterm::{cursor, terminal};
+    if FULL_SCREEN.get() || !interactive(ctx) || !std::io::stdout().is_terminal() {
+        return Ok(Value::Bool(false));
+    }
+    crossterm::execute!(std::io::stdout(), terminal::EnterAlternateScreen, cursor::Hide, terminal::Clear(terminal::ClearType::All), cursor::MoveTo(0, 0))
+        .map_err(write_failed)?;
+    // Keys typed while the program draws would be shown where the cursor is
+    #[cfg(unix)]
+    unsafe {
+        let mut settings: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(libc::STDIN_FILENO, &mut settings) == 0 {
+            SAVED.set(Some(settings));
+            settings.c_lflag &= !libc::ECHO;
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &settings);
+        }
+    }
+    FULL_SCREEN.set(true);
+    Ok(Value::Bool(true))
+}
+
+/// Puts the terminal back as it was before `enter_full_screen`.
+fn leave_full_screen(ctx: &mut NativeContext, _: Vec<Value>) -> Result<Value, NativeError> {
+    use crossterm::{cursor, terminal};
+    let _ = ctx.output.flush();
+    #[cfg(unix)]
+    if let Some(settings) = SAVED.take() {
+        unsafe {
+            libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &settings);
+        }
+    }
+    FULL_SCREEN.set(false);
+    crossterm::execute!(std::io::stdout(), cursor::Show, terminal::LeaveAlternateScreen).map_err(write_failed)?;
+    Ok(Value::Null)
+}
+
+fn read_key(ctx: &mut NativeContext, values: Vec<Value>) -> Result<Value, NativeError> {
+    use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers, poll, read};
+    let a = Args::new("terminal::readKey", values, 0, 1)?;
+    let timeout = match a.value(0) {
+        Value::Null => None,
+        _ => {
+            let seconds = a.num(0)?;
+            if !(seconds >= 0.0 && seconds.is_finite()) {
+                return Err(NativeError::new(VALUE_ERROR, format!("`terminal::readKey` needs a timeout of 0 seconds or more, not {seconds}")));
+            }
+            Some(Instant::now() + Duration::from_secs_f64(seconds))
+        }
+    };
     if !interactive(ctx) {
         return Err(NativeError::new("IOError", "there's no terminal to read a key from"));
     }
     let raw = |on: bool| if on { crossterm::terminal::enable_raw_mode() } else { crossterm::terminal::disable_raw_mode() };
     raw(true).map_err(|e| NativeError::new("IOError", format!("can't read a key: {e}")))?;
+    let full_screen = FULL_SCREEN.get();
+    // A key, `None` when none came in time, or `'resize'` inside `fullScreen()`
     let key = loop {
+        if let Some(deadline) = timeout {
+            match poll(deadline.saturating_duration_since(Instant::now())) {
+                Ok(true) => {}
+                Ok(false) => break Ok(None),
+                Err(e) => break Err(e),
+            }
+        }
         match read() {
-            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => break Ok(k),
+            Ok(Event::Key(k)) if k.kind == KeyEventKind::Press => break Ok(Some(Ok(k))),
+            Ok(Event::Resize(..)) if full_screen => break Ok(Some(Err("resize"))),
             Ok(_) => continue,
             Err(e) => break Err(e),
         }
     };
     let _ = raw(false);
-    let key = key.map_err(|e| NativeError::new("IOError", format!("can't read a key: {e}")))?;
+    let key = match key.map_err(|e| NativeError::new("IOError", format!("can't read a key: {e}")))? {
+        None => return Ok(Value::Null),
+        Some(Err(event)) => return Ok(Value::string(event)),
+        Some(Ok(key)) => key,
+    };
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     if ctrl && key.code == KeyCode::Char('c') {
         return Err(interrupted());

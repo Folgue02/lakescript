@@ -48,3 +48,28 @@ fn wrong_arguments() {
     assert!(error("random::between(1.5, 3);").contains("whole number"));
     assert!(error("random::seed('x');").contains("number"));
 }
+
+#[test]
+fn the_state_can_be_saved_and_restored() {
+    // The numbers after `restore()` are the ones after `state()`, also for shuffling
+    let code = "random::seed(42);\nconst $s = random::state();\nconst $a = [random::between(1, 100), random::number(), [1, 2, 3, 4].shuffled()];\nrandom::restore($s);\nconst $b = [random::between(1, 100), random::number(), [1, 2, 3, 4].shuffled()];\noutln($a.equals($b));";
+    assert_eq!(run(code), "true\n");
+    // A string, which JSON can hold
+    assert_eq!(run("use std/format/json;\nconst $s = random::state();\nconst $n = random::number();\nrandom::restore(json::parse(json::stringify($s)));\noutln(random::number() == $n);"), "true\n");
+    assert!(error("random::restore('nope');").contains("isn't a state of a generator"));
+    assert!(error("random::restore('0000000000000000');").contains("isn't a state"));
+}
+
+#[test]
+fn a_random_of_its_own() {
+    // The same seed gives the same numbers, whatever else uses the shared generator
+    let code = "const $a = random::Random(7);\nconst $first = [$a.between(1, 1000), $a.between(1, 1000)];\nrandom::seed(1);\nrandom::number();\nconst $b = random::Random(7);\noutln($first.equals([$b.between(1, 1000), $b.between(1, 1000)]));";
+    assert_eq!(run(code), "true\n");
+    // It doesn't move the shared one forward
+    assert_eq!(run("random::seed(3);\nconst $n = random::number();\nrandom::seed(3);\nrandom::Random(9).number();\noutln(random::number() == $n);"), "true\n");
+    let code = "const $r = random::Random(5);\nconst $s = $r.state();\nconst $x = $r.number();\n$r.restore($s);\nconst $y = $r.number();\n$r.seed(5);\noutln([$x == $y, $r.number() == $x, $r.bool() == true || true, random::Random().state() != random::Random().state()]);";
+    assert_eq!(run(code), "[true, true, true, true]\n");
+    // A state of one goes into another, and into the shared one
+    assert_eq!(run("const $r = random::Random(5);\nrandom::restore($r.state());\noutln(random::number() == $r.number());"), "true\n");
+    assert_eq!(run("outln(random::Random(1));"), "Random()\n");
+}

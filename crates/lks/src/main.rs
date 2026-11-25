@@ -24,6 +24,8 @@ Options:
                    separated by `:`
   --color <when>   When to use colors: auto (on a terminal, the default),
                    always or never. NO_COLOR also turns them off
+  --name <name>    The name of the command in the Usage: line of the
+                   script's --help, instead of the name of its file
   --no-type-check  Run the script without checking its types first,
                    for scripts that were already checked
   --test           Run the tests of the script, its functions named test...,
@@ -59,6 +61,8 @@ struct Options {
     show_ast: bool,
     show_bytecode: bool,
     module_path: Vec<std::path::PathBuf>,
+    /// `--name`: what the script is run as, for its `Usage:` line.
+    name: Option<String>,
     color: When,
 }
 
@@ -97,6 +101,10 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
             "--module-path" => match args.next() {
                 Some(folders) => options.module_path.extend(std::env::split_paths(&folders)),
                 None => return Err("`--module-path` needs the folders after it".into()),
+            },
+            "--name" => match args.next() {
+                Some(name) => options.name = Some(name),
+                None => return Err("`--name` needs the name of the command after it".into()),
             },
             "-h" | "--help" => return Ok(Request::Help(options.color)),
             "-V" | "--version" => return Ok(Request::Version),
@@ -149,6 +157,9 @@ fn run() -> ExitCode {
     engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
     engine.set_args(args.clone());
     engine.set_type_check(!options.no_type_check);
+    if let Some(name) = &options.name {
+        engine.set_command_name(name);
+    }
     for folder in options.module_path.drain(..) {
         engine.add_module_root(folder);
     }

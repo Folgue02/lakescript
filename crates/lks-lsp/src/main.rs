@@ -539,17 +539,30 @@ impl Server {
                 let typed: String = chars[start..cursor].iter().collect();
                 if typed.starts_with(|c: char| c.is_ascii_uppercase()) {
                     let in_scope: HashSet<&str> = found.scope.iter().map(|i| i.label.as_str()).collect();
-                    for t in self.index.types(&self.module_roots(&path), &self.documents, &path) {
+                    let roots = self.module_roots(&path);
+                    // The folder of the file's module: its types need no `use`
+                    let folder: Option<String> = roots.iter().find_map(|root| path.strip_prefix(root).ok()).map(|relative| {
+                        let parent = relative.parent().unwrap_or(Path::new(""));
+                        parent.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
+                    });
+                    for t in self.index.types(&roots, &self.documents, &path) {
                         if in_scope.contains(t.name.as_str()) {
                             continue;
                         }
-                        let Some(edit) = imports::use_edit(&original, &t) else { continue };
+                        let module_folder = t.module.rsplit_once('/').map_or("", |(folder, _)| folder);
+                        let same_folder = t.type_module && folder.as_deref() == Some(module_folder);
+                        let edits = if same_folder {
+                            None
+                        } else {
+                            let Some(edit) = imports::use_edit(&original, &t) else { continue };
+                            let range = Range { start: position(&original, edit.start), end: position(&original, edit.end) };
+                            Some(vec![TextEdit { range, new_text: edit.text }])
+                        };
                         let kind = match t.kind {
                             lakescript::docs::ItemKind::Interface => CompletionItemKind::INTERFACE,
                             lakescript::docs::ItemKind::Enum => CompletionItemKind::ENUM,
                             _ => CompletionItemKind::CLASS,
                         };
-                        let edit = TextEdit { range: Range { start: position(&original, edit.start), end: position(&original, edit.end) }, new_text: edit.text };
                         items.push(CompletionItem {
                             label: t.name.clone(),
                             kind: Some(kind),
@@ -558,7 +571,7 @@ impl Server {
                             // After the names already in scope
                             sort_text: Some(format!("~{}", t.name)),
                             text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: range(start), new_text: t.name.clone() })),
-                            additional_text_edits: Some(vec![edit]),
+                            additional_text_edits: edits,
                             ..Default::default()
                         });
                     }

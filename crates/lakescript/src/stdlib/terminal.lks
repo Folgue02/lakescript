@@ -32,11 +32,39 @@ pub number width() = native::size()[0] ?? 80;
 pub number height() = native::size()[1] ?? 24;
 
 /// One key, without waiting for enter *(i.e. `'a'`, `'enter'`, `'up'`)*.
-/// Throws an `IOError` without a terminal.
-pub string readKey() = native::readKey();
+/// With `$timeout`, in seconds, it waits that long at most, and gives `null`
+/// when no key came *(i.e. `terminal::readKey(timeout: 0.1)`)*. Inside
+/// `fullScreen()`, resizing the terminal gives `'resize'`. Throws an
+/// `IOError` without a terminal.
+pub ?string readKey(?number $timeout = null) = native::readKey($timeout);
 
 /// Clears the screen.
 pub void clear() = native::clear();
+
+// ---- Full screen ----
+
+/// Runs `$body` on a screen of its own: the terminal's alternate screen,
+/// cleared, with the cursor hidden. When it ends, also by an exception or
+/// Ctrl+C, the cursor is shown again and the terminal goes back to what it
+/// had before. Without a terminal, it only runs `$body`.
+pub void fullScreen(() -> void $body) {
+    if (!native::enterFullScreen()) {
+        $body();
+        return;
+    }
+    try {
+        $body();
+    } finally {
+        native::leaveFullScreen();
+    }
+}
+
+/// Moves the cursor to a column and a row, both from 0 *(i.e. `moveTo(0, 0)`
+/// is the top-left corner)*. What's written next starts there.
+pub void moveTo(number $x, number $y) = native::moveTo($x, $y);
+
+/// Clears from the cursor to the end of its line.
+pub void clearLine() = native::clearLine();
 
 // ---- Prompts ----
 

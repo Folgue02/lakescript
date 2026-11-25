@@ -42,5 +42,9 @@ zip = { version = "9.8.2", default-features = false, features = ["deflate-flate2
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+# The Known Folders of Windows, for the user's folders of std/dirs
+[target.'cfg(windows)'.dependencies]
+dirs = "6.0.0"
+
 [dev-dependencies]
 zip = { version = "9.8.2", default-features = false, features = ["deflate-flate2"] }

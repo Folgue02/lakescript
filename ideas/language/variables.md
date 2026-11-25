@@ -39,6 +39,13 @@ any $value = 5;                     // can hold anything, not only numbers
 const list<any> $mixed = [];
 ```
 
+- `let` can go before the type too, like `const` does, for the ones that read better with it *(i.e. `let ?Point $best = null;`)*. It's the same as without it: the variable can be reassigned, and only holds values of that type.
+
+```
+let ?Point $best = null;            // the same as `?Point $best = null;`
+let number $total = 0;
+```
+
 - A statement that starts with a type followed by a `$name` is a declaration. A type followed by a name without `$` is a function definition *(i.e. `string $name = ...` vs `string greet(...)`)*.
 
 - `const` only freezes the variable, not the value inside it:

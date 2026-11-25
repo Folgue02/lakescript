@@ -19,6 +19,7 @@ let $ages = {};
 $ages['Daniel'] = 24;       // $ages is a map<string, number>
 ```
 - A list or map with values of different types is a `list<any>` or a `map<K, any>` *(i.e. `[1, 'a']` is a `list<any>`)*.
+- **When a type is expected for a list or a map literal**, like for the branches of an `if` *(a declared variable, a return type, an argument, a field, the right side of `=`)*, each element must fit its element type, and each key and value of a map its key and value types. One that doesn't is an error where it is *(i.e. `const list<number> $x = [1, 'a'];` is `this is a string, but a number is expected here`, at the `'a'`)*. The same for the elements of a `...` spread, for literals inside literals *(i.e. `[[1], ['a']]` as a `list<list<number>>`)*, and for `<number>[...]`. Without a type expected, nothing changes: `[1, 'a']` is a `list<any>`. Decided after cinder.
 - The checker doesn't check `any`: it can hold any value, including `null`, and it can be assigned to any typed variable.
 - `any` isn't meant for normal use. It's for values whose type really can't be known, like JSON read without a schema, and they should be turned into a specific type with `.as()` as soon as possible. Types should be as specific as possible: generics instead of `any`, and a proper type instead of a map used as an object *(see the philosophy in [stdlib/README.md](../stdlib/README.md))*.
 - Generic types use `<>`: `list<string>`, `map<string, number>`, `result<string, Exception>`. When generics are nested, the lexer splits `>>` into two `>` *(i.e. `list<map<string, any>>`)*.

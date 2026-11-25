@@ -57,6 +57,12 @@ outln(f"{$first} then {$rest}");
 for ([$name, $age] in [['Ana', 30], ['Bo', 25]])
     outln(f"{$name} is {$age}");
 
+// With the index, or the key of a map, and the element destructured
+for ($i, [$name, $age] in [['Ana', 30], ['Bo', 25]])
+    outln(f"{$i + 1}. {$name}, {$age}");
+for ($city => [$lat, $lon] in {'Lima' => [-12, -77], 'Oslo' => [60, 11]})
+    outln(f"{$city} is at {$lat}, {$lon}");
+
 // while, break and continue
 let $n = 0;
 while (true) {

@@ -716,8 +716,19 @@ impl<'a> Interpreter<'a> {
                 Op::Binary(op) => {
                     let r = self.pop();
                     let l = self.pop();
-                    let object = matches!(&l, Value::Object(_)) || matches!((&r, op), (Value::Object(_), BinaryOp::In | BinaryOp::NotIn));
-                    let v = if object {
+                    // For `-in`, the right side is the container, and it alone decides
+                    let object = match op {
+                        BinaryOp::In | BinaryOp::NotIn => matches!(&r, Value::Object(_)),
+                        _ => matches!(&l, Value::Object(_)),
+                    };
+                    let in_list = matches!(op, BinaryOp::In | BinaryOp::NotIn) && matches!(&r, Value::List(_)) && matches!(&l, Value::Object(_) | Value::List(_) | Value::Map(_));
+                    let v = if in_list {
+                        self.frames[fi].ip = ip;
+                        let Value::List(list) = &r else { unreachable!() };
+                        let items = list.borrow().clone();
+                        let found = self.position_of(&items, &l, false, span!())?.is_some();
+                        Value::Bool(if op == BinaryOp::In { found } else { !found })
+                    } else if object {
                         self.frames[fi].ip = ip;
                         self.operator(op, l, r, span!())?
                     } else {
@@ -862,6 +873,12 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::List(n) => {
                     let items = self.stack.split_off(self.stack.len() - n as usize);
+                    self.stack.push(Value::list(items));
+                }
+                Op::ListSpread(c) => {
+                    self.frames[fi].ip = ip;
+                    let kinds = &proto.calls[c as usize];
+                    let (items, _) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
                     self.stack.push(Value::list(items));
                 }
                 Op::Map(n) => {
@@ -1528,7 +1545,7 @@ impl<'a> Interpreter<'a> {
         let source = self.host.loader.read(&path).map_err(|e| flow_error_as("IOError", format!("can't read the module '{shown}': {e}"), span))?;
         let file = self.host.loader.files.len() as u32;
         self.host.loader.files.push(shown.clone());
-        let program = crate::parse_budgeted(&source, file, self.stack_budget).map_err(|d| flow_error(d.message, d.span))?;
+        let (program, _) = crate::parse_in(&source, file, self.stack_budget, &self.host.loader, Some(&path), false).map_err(|d| flow_error(d.message, d.span))?;
         let globals = Rc::new(Globals::default());
         let (proto, public) = Compiler::new(&globals, &self.host.builtin_names, self.stack_budget)
             .module(&program, &shown)
@@ -1856,6 +1873,82 @@ impl Interpreter<'_> {
     /// `==` on two objects: `equals?` when their class implements `IEquals`,
     /// and otherwise, whether they're the same object. Objects of unrelated
     /// classes are never equal.
+    /// `.equals()`, `-in` and the methods that look for a value *(i.e.
+    /// `contains`)*: like `Value::equals`, but objects are compared like `==`
+    /// compares them, through their `equals?` *(see `IEquals`)*, also inside
+    /// lists and maps.
+    pub(crate) fn values_equal(&mut self, a: &Value, b: &Value, span: Span) -> Exec<bool> {
+        match (a, b) {
+            (Value::Object(_), Value::Object(_)) => self.objects_equal(a.clone(), b.clone(), span),
+            (Value::List(x), Value::List(y)) => {
+                if Rc::ptr_eq(x, y) {
+                    return Ok(true);
+                }
+                // A pair that's already being compared is inside itself: equal as far as it goes
+                let Some(_comparing) = crate::value::Visiting::comparing(Rc::as_ptr(x) as usize, Rc::as_ptr(y) as usize) else { return Ok(true) };
+                // Copied, since `equals?` can change them
+                let (xs, ys) = (x.borrow().clone(), y.borrow().clone());
+                if xs.len() != ys.len() {
+                    return Ok(false);
+                }
+                for (p, q) in xs.iter().zip(&ys) {
+                    if !self.values_equal(p, q, span)? {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+            (Value::Map(x), Value::Map(y)) => {
+                if Rc::ptr_eq(x, y) {
+                    return Ok(true);
+                }
+                let Some(_comparing) = crate::value::Visiting::comparing(Rc::as_ptr(x) as usize, Rc::as_ptr(y) as usize) else { return Ok(true) };
+                let (xs, ys) = (x.borrow().clone(), y.borrow().clone());
+                if xs.len() != ys.len() {
+                    return Ok(false);
+                }
+                for (k, v) in &xs {
+                    match ys.get(k) {
+                        Some(w) if self.values_equal(v, w, span)? => {}
+                        _ => return Ok(false),
+                    }
+                }
+                Ok(true)
+            }
+            _ => Ok(a.same(b)),
+        }
+    }
+
+    /// The positions in `items` of the values equal to `value`, like
+    /// `.equals()` compares them. Values that can't hold an object are
+    /// compared without the VM.
+    pub(crate) fn positions_of(&mut self, items: &[Value], value: &Value, span: Span) -> Exec<Vec<usize>> {
+        if !matches!(value, Value::Object(_) | Value::List(_) | Value::Map(_)) {
+            return Ok(items.iter().enumerate().filter(|(_, v)| v.same(value)).map(|(i, _)| i).collect());
+        }
+        let mut found = Vec::new();
+        for (i, item) in items.iter().enumerate() {
+            if self.values_equal(item, value, span)? {
+                found.push(i);
+            }
+        }
+        Ok(found)
+    }
+
+    /// The first position in `items` of a value equal to `value`, or the
+    /// last one with `from_end`, without comparing the ones after it.
+    pub(crate) fn position_of(&mut self, items: &[Value], value: &Value, from_end: bool, span: Span) -> Exec<Option<usize>> {
+        let vm = matches!(value, Value::Object(_) | Value::List(_) | Value::Map(_));
+        let order: Box<dyn Iterator<Item = usize>> = if from_end { Box::new((0..items.len()).rev()) } else { Box::new(0..items.len()) };
+        for i in order {
+            let equal = if vm { self.values_equal(&items[i], value, span)? } else { items[i].same(value) };
+            if equal {
+                return Ok(Some(i));
+            }
+        }
+        Ok(None)
+    }
+
     fn objects_equal(&mut self, l: Value, r: Value, span: Span) -> Exec<bool> {
         let (Value::Object(a), Value::Object(b)) = (&l, &r) else { return Ok(l.same(&r)) };
         if Rc::ptr_eq(a, b) {

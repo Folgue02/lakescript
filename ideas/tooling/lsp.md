@@ -93,6 +93,7 @@ Built. Like Java's in IntelliJ: completion also gives the types that aren't impo
     - A type module is imported as itself *(i.e. `use people/Person;`)*.
     - A type inside a module is imported by its name, without braces when it's the only one from that module *(i.e. `use folgue02/geo/shapes::Circle;`)*. Braces only when there are several: importing `Square` too turns it into `use folgue02/geo/shapes::{Circle, Square};`.
     - **Their order**: the standard library first, an empty line, then the rest, each group in alphabetical order. Two groups, like Go's `goimports`, not three like Python's *(the standard library, dependencies, the project)*: a project's modules and its dependencies are written alike *(`folgue02/...`, `acme/...`)*, and only `ferry.toml` tells them apart. A new line goes in its place in that order. Lines that are already there aren't moved: that's for a formatter, which will follow the same rule.
+    - **No `use` for a type in the same folder**, which needs none *(see Types in the same folder in [language/modules.md](../language/modules.md))*: choosing it only writes its name.
 - The edit goes with the completion, as `additionalTextEdits`, which farsub already applies.
 - No quick fix that imports an unknown type from its error.
 - They're offered for a name that starts with a capital letter, like types do, so a variable or a function being written doesn't get a list of every type.

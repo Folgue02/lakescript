@@ -7,6 +7,7 @@ mod csv_format;
 #[cfg(feature = "dates")]
 mod dates;
 mod bytes;
+mod dirs;
 mod env;
 mod fs;
 #[cfg(feature = "html")]
@@ -38,6 +39,7 @@ pub const MODULES: &[&str] = &[
     #[cfg(feature = "archive")]
     "std/archive",
     "std/bytes",
+    "std/dirs",
     "std/env",
     #[cfg(feature = "csv")]
     "std/format/csv",
@@ -92,7 +94,9 @@ const NATIVE: &[&str] = &[
     "std/http/native",
     #[cfg(feature = "terminal")]
     "std/terminal/native",
+    "std/dirs/native",
     "std/process/native",
+    "std/random/native",
     "std/time/native",
 ];
 
@@ -103,7 +107,9 @@ const SOURCES: &[(&str, &str)] = &[
     ("std/fs", include_str!("fs.lks")),
     #[cfg(feature = "archive")]
     ("std/archive", include_str!("archive.lks")),
+    ("std/dirs", include_str!("dirs.lks")),
     ("std/process", include_str!("process.lks")),
+    ("std/random", include_str!("random.lks")),
     ("std/process/Platform", include_str!("process/Platform.lks")),
     #[cfg(feature = "html")]
     ("std/html", include_str!("html.lks")),
@@ -193,6 +199,7 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         #[cfg(feature = "archive")]
         "std/archive/native" => archive::register(&mut exports),
         "std/bytes" => bytes::register(&mut exports),
+        "std/dirs/native" => dirs::register(&mut exports),
         "std/env" => env::register(&mut exports),
         #[cfg(not(feature = "dates"))]
         "std/fs" => fs::register(&mut exports),
@@ -210,7 +217,7 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/terminal/native" => terminal::register(&mut exports),
         "std/path" => path::register(&mut exports),
         "std/process/native" => process::register(&mut exports),
-        "std/random" => random::register(&mut exports),
+        "std/random/native" => random::register(&mut exports),
         "std/template" => template::register(&mut exports),
         "std/test" => test::register(&mut exports),
         "std/time/native" => time::register(&mut exports),

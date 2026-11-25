@@ -1,7 +1,6 @@
 // A file named like a type holds that type, and `use store/Customer;`
-// imports it directly. `Customer` and `Order` use each other.
-use store/Order;
-use store/Status;
+// imports it directly. `Customer` and `Order` use each other, and since
+// `Order` and `Status` are in the same folder, they need no `use` here.
 
 pub class Customer {
     pub string @name;
