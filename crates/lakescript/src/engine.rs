@@ -427,7 +427,7 @@ impl Engine {
         self.use_script_path(&script);
         self.host.state.script_path = Some(file.clone());
         self.host.state.script_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-        self.host.state.resources = crate::host::Resources::Files(std::rc::Rc::new(crate::bundle::resources(&opened.files)));
+        self.host.state.resources = crate::host::Resources::Files(std::rc::Rc::new(opened.resources));
         self.run(&source)
     }
 

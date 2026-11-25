@@ -12,6 +12,7 @@
 //! `ferry bundle` writes it, and `lks todo.lkb` runs it, reading the modules
 //! from the zip instead of from folders.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
@@ -77,21 +78,69 @@ fn quoted(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// Whether the file is a bundle: its name ends in `.lkb`, or it's a zip,
+/// maybe after a first line `#!...`. By what's inside too, so a bundle
+/// reached through a link or copied under another name *(i.e.
+/// `/usr/local/bin/todo`)* is still one.
+pub fn is_bundle(path: &Path) -> bool {
+    if path.extension().is_some_and(|e| e == "lkb") {
+        return true;
+    }
+    let mut start = [0u8; 256];
+    let read = std::fs::File::open(path).and_then(|mut f| f.read(&mut start)).unwrap_or(0);
+    let start = &start[..read];
+    let zip = |bytes: &[u8]| bytes.starts_with(b"PK\x03\x04");
+    if zip(start) {
+        return true;
+    }
+    // After the first line, when it's `#!...`
+    start.starts_with(b"#!") && start.iter().position(|b| *b == b'\n').is_some_and(|n| zip(&start[n + 1..]))
+}
+
 /// A bundle read into memory.
 #[derive(Debug)]
 pub(crate) struct Opened {
     pub info: BundleInfo,
-    /// Every file in it but the manifest, by its path inside it.
+    /// Its code, by its path inside it *(i.e. `src/folgue02/todo/list.lks`)*.
     pub files: HashMap<String, Rc<[u8]>>,
+    pub resources: BundleResources,
 }
 
-/// Reads a bundle. The error says what's wrong with it, for the person who
-/// runs it.
+/// The resources of a bundle, decompressed only when they're read, so a big
+/// one costs nothing to a run that doesn't use it.
+pub(crate) struct BundleResources {
+    zip: RefCell<zip::ZipArchive<Cursor<Vec<u8>>>>,
+    names: Vec<String>,
+}
+
+impl std::fmt::Debug for BundleResources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "BundleResources({:?})", self.names)
+    }
+}
+
+impl crate::host::ResourceFiles for BundleResources {
+    fn names(&self) -> &[String] {
+        &self.names
+    }
+
+    fn read(&self, name: &str) -> Option<Rc<[u8]>> {
+        let mut zip = self.zip.borrow_mut();
+        let mut entry = zip.by_name(&format!("resources/{name}")).ok()?;
+        let mut bytes = Vec::new();
+        entry.read_to_end(&mut bytes).ok()?;
+        Some(Rc::from(bytes))
+    }
+}
+
+/// Reads a bundle: its manifest and its code, and the names of its
+/// resources. The error says what's wrong with it, for the person who runs it.
 pub(crate) fn open(path: &Path) -> Result<Opened, String> {
     let shown = path.display();
     let bytes = std::fs::read(path).map_err(|e| format!("can't read {shown}: {e}"))?;
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("{shown} isn't a bundle made by `ferry bundle`: {e}"))?;
     let mut files = HashMap::new();
+    let mut names = Vec::new();
     let mut manifest = None;
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).map_err(|e| format!("{shown} is damaged: {e}"))?;
@@ -99,6 +148,10 @@ pub(crate) fn open(path: &Path) -> Result<Opened, String> {
             continue;
         }
         let name = entry.name().map_err(|e| format!("{shown} is damaged: {e}"))?.to_string();
+        if let Some(resource) = name.strip_prefix("resources/") {
+            names.push(resource.to_string());
+            continue;
+        }
         let mut content = Vec::new();
         entry.read_to_end(&mut content).map_err(|e| format!("{shown} is damaged: {e}"))?;
         if name == MANIFEST {
@@ -115,7 +168,8 @@ pub(crate) fn open(path: &Path) -> Result<Opened, String> {
     if !files.contains_key(&format!("bin/{}.lks", info.command)) {
         return Err(format!("{shown} is damaged: it has no bin/{}.lks for its command", info.command));
     }
-    Ok(Opened { info, files })
+    names.sort();
+    Ok(Opened { info, files, resources: BundleResources { zip: RefCell::new(zip), names } })
 }
 
 /// The lines `key = "value"` of a `bundle.toml`.
@@ -135,11 +189,6 @@ fn parse_manifest(text: &str) -> Result<BundleInfo, String> {
 fn newer(a: &str, b: &str) -> bool {
     let parts = |v: &str| -> Vec<u64> { v.split('.').map(|p| p.parse().unwrap_or(0)).collect() };
     parts(a) > parts(b)
-}
-
-/// The files of a bundle's `resources/`, by their path inside it, for `std/resources`.
-pub(crate) fn resources(files: &HashMap<String, Rc<[u8]>>) -> HashMap<String, Rc<[u8]>> {
-    files.iter().filter_map(|(name, bytes)| Some((name.strip_prefix("resources/")?.to_string(), bytes.clone()))).collect()
 }
 
 #[cfg(test)]
@@ -164,7 +213,27 @@ mod tests {
         let opened = open(&out).unwrap();
         assert_eq!(opened.info, BundleInfo { command: "todo".into(), project: "folgue02/todo".into(), version: "1.2.0".into(), lks: VERSION.into() });
         assert_eq!(&*opened.files["bin/todo.lks"], b"outln('hi');");
-        assert_eq!(&*resources(&opened.files)["a/b.txt"], b"text");
+        use crate::host::ResourceFiles;
+        assert_eq!(opened.resources.names(), ["a/b.txt"]);
+        assert_eq!(&*opened.resources.read("a/b.txt").unwrap(), b"text");
+        assert!(opened.resources.read("nope").is_none() && !opened.files.contains_key("resources/a/b.txt"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn found_by_what_is_inside() {
+        let dir = temp("found");
+        let out = dir.join("todo.lkb");
+        write_bundle(&out, "todo", "a/b", "1.0.0", &[("bin/todo.lks".to_string(), b"outln(1);".to_vec())]).unwrap();
+        let renamed = dir.join("todo");
+        std::fs::copy(&out, &renamed).unwrap();
+        assert!(is_bundle(&out) && is_bundle(&renamed));
+        // A plain zip too, and not a script or a file that isn't there
+        let script = dir.join("x.lks");
+        std::fs::write(&script, "#!/usr/bin/env lks\noutln(1);").unwrap();
+        std::fs::write(dir.join("plain"), b"PK\x03\x04rest").unwrap();
+        assert!(is_bundle(&dir.join("plain")));
+        assert!(!is_bundle(&script) && !is_bundle(&dir.join("missing")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

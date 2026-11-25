@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use super::{Args, Exports};
 use crate::exceptions::VALUE_ERROR;
-use crate::host::Resources;
+use crate::host::{ResourceFiles, Resources};
 use crate::value::{NativeContext, NativeError, Value};
 
 const NOT_FOUND: &str = "FileNotFound";
@@ -31,9 +31,13 @@ pub fn register(m: &mut Exports) {
         let a = Args::new("resources::exists?", values, 1, 1)?;
         let name = a.str(0)?;
         let name = checked(&name)?;
+        // `''` is `resources/` itself, not a resource
+        if name.is_empty() {
+            return Ok(Value::Bool(false));
+        }
         Ok(Value::Bool(match where_they_are(ctx)? {
             Place::Folder(folder) => folder.join(&name).exists(),
-            Place::Files(files) => files.contains_key(&name) || files.keys().any(|k| k.starts_with(&format!("{name}/"))),
+            Place::Files(files) => files.names().iter().any(|k| *k == name || k.starts_with(&format!("{name}/"))),
         }))
     });
     m.function_named("list", &["folder"], |ctx, values| {
@@ -46,7 +50,7 @@ pub fn register(m: &mut Exports) {
 /// Where they are for this script.
 enum Place {
     Folder(PathBuf),
-    Files(Rc<std::collections::HashMap<String, Rc<[u8]>>>),
+    Files(Rc<dyn ResourceFiles>),
 }
 
 fn where_they_are(ctx: &NativeContext) -> Result<Place, NativeError> {
@@ -80,7 +84,7 @@ fn read(ctx: &NativeContext, name: &str) -> Result<Rc<[u8]>, NativeError> {
             }
             std::fs::read(&path).map(Rc::from).map_err(|e| NativeError::new("IOError", format!("can't read the resource '{name}': {e}")))
         }
-        Place::Files(files) => files.get(&clean).cloned().ok_or_else(|| missing("the bundle")),
+        Place::Files(files) => files.read(&clean).ok_or_else(|| missing("the bundle")),
     }
 }
 
@@ -90,13 +94,18 @@ fn list(ctx: &NativeContext, folder: &str) -> Result<Vec<String>, NativeError> {
     let mut names = match where_they_are(ctx)? {
         Place::Folder(root) => {
             let dir = root.join(&clean);
+            // Without resources/, there are none, like in a bundle without them
+            if clean.is_empty() && !dir.exists() {
+                return Ok(Vec::new());
+            }
             let entries = std::fs::read_dir(&dir).map_err(|_| NativeError::new(NOT_FOUND, format!("there's no folder '{folder}' in {}", root.display())))?;
             entries.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>()
         }
         Place::Files(files) => {
             let prefix = if clean.is_empty() { String::new() } else { format!("{clean}/") };
             let mut names: Vec<String> = files
-                .keys()
+                .names()
+                .iter()
                 .filter_map(|k| k.strip_prefix(&prefix))
                 .map(|rest| rest.split('/').next().unwrap_or(rest).to_string())
                 .collect();

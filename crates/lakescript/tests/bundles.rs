@@ -112,3 +112,33 @@ fn errors_inside_a_bundle_say_where() {
     std::fs::write(dir.0.join("fake.lkb"), "outln(1);").unwrap();
     assert!(run_bundle(&dir.0.join("fake.lkb")).unwrap_err().contains("isn't a bundle made by `ferry bundle`"));
 }
+
+#[test]
+fn a_folder_and_a_bundle_say_the_same() {
+    // A project without resources/ has none, in a folder and in a bundle
+    let dir = TempDir::new("same");
+    let code = "use std/resources;\noutln([resources::list(), resources::exists?(''), resources::exists?('x')]);";
+    let script = dir.file("t.lks", code);
+    let in_folder = run_file(&script, |_| {}).unwrap();
+    let out = dir.0.join("t.lkb");
+    write_bundle(&out, "t", "a/b", "1.0.0", &[("bin/t.lks".to_string(), code.as_bytes().to_vec())]).unwrap();
+    assert_eq!(in_folder, "[[], false, false]\n");
+    assert_eq!(run_bundle(&out).unwrap(), in_folder);
+    // And with some
+    dir.file("resources/a/b.txt", "x");
+    let files = vec![("bin/t.lks".to_string(), code.as_bytes().to_vec()), ("resources/a/b.txt".to_string(), b"x".to_vec())];
+    write_bundle(&out, "t", "a/b", "1.0.0", &files).unwrap();
+    assert_eq!(run_file(&script, |_| {}).unwrap(), "[['a'], false, false]\n");
+    assert_eq!(run_bundle(&out).unwrap(), "[['a'], false, false]\n");
+}
+
+#[test]
+fn a_bundle_under_another_name() {
+    let dir = TempDir::new("renamed");
+    let out = dir.0.join("tool.lkb");
+    write_bundle(&out, "tool", "a/b", "1.0.0", &[("bin/tool.lks".to_string(), b"outln('ran');".to_vec())]).unwrap();
+    let copy = dir.0.join("tool");
+    std::fs::copy(&out, &copy).unwrap();
+    assert!(lakescript::is_bundle(&copy));
+    assert_eq!(run_bundle(&copy).unwrap(), "ran\n");
+}

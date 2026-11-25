@@ -160,3 +160,24 @@ fn bundles_and_resources() {
     assert!(stderr(&out).contains("is a bundle"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn bundles_through_links_and_their_errors() {
+    let dir = std::env::temp_dir().join(format!("lks-cli-links-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let bundle = dir.join("tool.lkb");
+    lakescript::write_bundle(&bundle, "tool", "me/tool", "1.0.0", &[("bin/tool.lks".to_string(), b"outln('ran');".to_vec())]).unwrap();
+    // Through a link with another name, like an installed command
+    #[cfg(unix)]
+    {
+        let link = dir.join("tool");
+        std::os::unix::fs::symlink(&bundle, &link).unwrap();
+        assert_eq!(stdout(&lks(&[&link.display().to_string()])), "ran\n");
+    }
+    // What can't be run says why, without a place in the code
+    std::fs::write(dir.join("broken.lkb"), "not a zip").unwrap();
+    let out = lks(&[&dir.join("broken.lkb").display().to_string()]);
+    assert!(stderr(&out).starts_with("error: ") && stderr(&out).contains("isn't a bundle made by `ferry bundle`"), "{}", stderr(&out));
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -48,7 +48,7 @@ pub use interrupt::on_ctrl_c;
 pub use paths::{canonical, without_verbatim};
 pub use small_alloc::SmallAlloc;
 #[cfg(feature = "bundle")]
-pub use bundle::{BundleInfo, write_bundle};
+pub use bundle::{BundleInfo, is_bundle, write_bundle};
 pub use testing::{TestResult, render_result, render_summary, test_names};
 pub use token::Span;
 pub use value::{Key, NativeContext, NativeError, NativeResult, Value};

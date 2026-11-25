@@ -74,9 +74,18 @@ pub enum Resources {
     /// A folder given by the program that runs the script: a project's
     /// `resources/`, or `lks --resources`.
     Folder(PathBuf),
-    /// Inside a bundle, by their path in `resources/`.
+    /// Inside a bundle.
     #[cfg_attr(not(feature = "bundle"), allow(dead_code))]
-    Files(std::rc::Rc<HashMap<String, std::rc::Rc<[u8]>>>),
+    Files(std::rc::Rc<dyn ResourceFiles>),
+}
+
+/// Resources that aren't in a folder *(i.e. inside a bundle)*: their names,
+/// and their bytes, read when they're asked for.
+pub trait ResourceFiles {
+    /// Every name, a path inside `resources/` with `/`, sorted.
+    fn names(&self) -> &[String];
+    /// The bytes of one, or `None` when there's none with that name.
+    fn read(&self, name: &str) -> Option<std::rc::Rc<[u8]>>;
 }
 
 /// The part of the outside world a script can change. Changes stay in here:

@@ -23,9 +23,12 @@
     - `src/`: every module of the project and of its dependencies, in one tree. Each package's modules are under its own `author/name/`, so they never clash.
     - `resources/`: the project's resources. A dependency's aren't in it *(see [resources.md](../stdlib/resources.md))*.
 - **`ferry bundle [command]`** type checks the project like `ferry check`, makes nothing if there are errors, and writes the bundles in `dist/`, which `ferry new` puts in the `.gitignore`. A bundle is the same every time for the same project, since the files go in in order.
-- **`lks todo.lkb`** reads the whole file into memory, and its modules are read from there at paths inside it *(i.e. `todo.lkb/src/folgue02/todo/list.lks`)*, which errors show, so `use` finds them the same way as on disk. The module path is the bundle's `bin/`, then its `src/`, then the usual ones.
+- **A bundle is found by what's inside it**: a zip, maybe after a first line `#!...`, as well as by its name ending in `.lkb`. So one reached through a link, or copied under another name *(i.e. `/usr/local/bin/todo`)*, still runs. Found when it was tried in a real project.
+- **`lks todo.lkb`** reads the file into memory: its manifest and its code at once, and its resources only when `std/resources` reads one, so a big one costs nothing to a run that doesn't use it. Its modules are read at paths inside it *(i.e. `todo.lkb/src/folgue02/todo/list.lks`)*, which errors show, so `use` finds them the same way as on disk. The module path is the bundle's `bin/`, then its `src/`, then the usual ones.
     - It runs without checking the types again, like the commands of `ferry install`: `ferry bundle` did it, and types never change what the code does. A newer `lks` with a stricter checker still runs a bundle made before.
     - `lks --test` on a bundle is an error: a project's tests run with `ferry test`.
+    - A file that can't be run says why, without a place in the code *(i.e. `error: todo.lkb needs lks 0.12.0 or newer, and this is lks 0.11.2`)*. A bundle zipped again by another tool still runs.
+- **Tried on a real project** *(a recipe book with a dependency, JSON and templates in `resources/`, a binary file, a 2 MB one and names with accents and spaces)*: run from its folder, from its bundle somewhere else after deleting the project and what was downloaded, through a link, as `./recipes.lkb`, and installed. A bundle starts as fast as the project from its folders *(2 ms)*.
 - The bundle code is in `crates/lakescript/src/bundle.rs`, behind the feature `bundle` of the crate *(the `zip` crate)*, on by default. `lakescript::write_bundle` writes one and `Engine::run_bundle` runs one.
 
 ## Still open

@@ -185,7 +185,7 @@ fn run() -> ExitCode {
         }
     }
     // A bundle made by `ferry bundle`, which checked its types already
-    let bundle = Path::new(&script).extension().is_some_and(|e| e == "lkb");
+    let bundle = lakescript::is_bundle(Path::new(&script));
     if options.test {
         if bundle {
             eprintln!("{} `lks --test` runs the tests of a script, and {script} is a bundle: its project's tests run with `ferry test`", paint().error("lks:"));
@@ -252,7 +252,11 @@ fn on_ctrl_c(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
 fn show(diagnostic: &lakescript::Diagnostic, script: &str) -> String {
     let file = diagnostic.file.as_deref().unwrap_or(script);
     // A bundle is a zip: its code isn't shown from it
-    let bundle = Path::new(file).extension().is_some_and(|e| e == "lkb");
+    let bundle = lakescript::is_bundle(Path::new(file));
+    // What isn't at a place in the code *(i.e. a bundle that can't be read)*: only the message
+    if diagnostic.span.line == 0 && diagnostic.trace.is_empty() {
+        return format!("{} {}", paint().error("error:"), diagnostic.message);
+    }
     match std::fs::read_to_string(file).ok().filter(|_| !bundle) {
         Some(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(script, &source, paint()),
         _ => diagnostic.render_painted(script, paint()),
