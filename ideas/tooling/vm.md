@@ -76,6 +76,46 @@ What's left, and why:
 - **Data that refers to itself is never freed** while a script runs *(i.e. two objects that point at each other)*: values are reference counted, and only a garbage collector would free them. For scripts that end, it doesn't matter.
 - **The VM keeps checking types while it runs**, also after the checker passed: types never change what the code does, and the check can be turned off.
 
+## The review after phase 11
+
+On the branch `optimize-interpreter`. The benchmarks are in `tools/bench`, with the same programs in Python *(`python3 tools/bench/run.py`, and `--python`)*. The same release build before and after, on an Apple M5, with Python 3.14 *(ms)*:
+
+| | Before | After | Python |
+|---|---|---|---|
+| `fib(32)` | 197 | 202 | 126 |
+| A loop with a `%` test, 3 million times | 49 | 47 | 118 |
+| 2 million calls of a method | 98 | 71 | 76 |
+| 3 million reads of a field | 63 | 59 | 103 |
+| `.map()` and `.filter()` with lambdas, 1 million items | 102 | 72 | 75 |
+| Building and splitting 300,000 strings | 102 | 47 | 73 |
+| A map with string keys, 300,000 updates | 45 | 34 | 48 |
+| 1 million small objects, made and compared with `==` | 496 | 203 | 232 |
+| 2 million pushes to a list, and reading them by index | 145 | 117 | 158 |
+| 2 million calls of a closure | 67 | 68 | 98 |
+| Collatz in `while` loops, 6 million steps | 354 | 197 | 222 |
+| A grid of 100 by 100 in a class, 200 passes | 298 | 202 | 191 |
+| cinder's bot, 5 games *(turns a second)* | 669 | 868 | |
+
+Wall times move by a few percent with the load of the machine, so changes were judged by CPU cycles and instructions too, which `run.py` shows.
+
+What changed:
+
+- **A small allocator, `lakescript::SmallAlloc`**, for `lks` and `ferry`. On macOS every `free()` of the system's allocator reads the clock, which was a fifth of the time of the strings benchmark. It keeps up to 1,024 freed blocks of each size up to 256 bytes, for each thread, like Python's allocator for small objects, and gives the rest to the system. It's pure Rust, without a dependency, so the reason the notes gave for not doing one *(a C library)* doesn't hold. It's opt-in: the library never uses it by itself, and a program that embeds Lakescript can with `#[global_allocator]`. A thread that ends keeps its blocks, 2 MB at the most, since a cache with a destructor could allocate while being used. Code that doesn't allocate got 2 to 3% slower from how the dispatch loop is compiled, for 30 to 55% on code that does.
+- **An exact division stays a whole number** *(i.e. `6 / 3`)*, so `%` on what comes from it needs no `fmod`, which was 29% of the `while` benchmark. Scripts can't tell: `number` is one type, and `0 / -5` stays `-0`. `%` of whole floats is done as integers too.
+- **`==` and the other operators on objects** find their method in a table of the class, made once when the class is made, instead of looking up `IEquals` and `equals?` by name every time, and the object is put before the argument without moving it.
+- **The constructor that takes every field**, given all of them in order and nothing to compute first, uses the arguments as the fields: two allocations instead of four.
+- **A variable gets a cell only when a closure can use it.** A nested function's own parameters no longer count, so a loop variable `$x` isn't a cell because a method has a parameter `$x`. Its other variables still do, since a body can use the one around it before declaring its own, which is an error only when it gets there.
+- **Fields of a local object** *(`@x`, `$p.x`)* are read where the object is, and `@x = ...` set there, without copying the object onto the stack and dropping it again *(`GetLocalField`, `SetLocalField`)*.
+- **`&&` and `||` in conditions are jumps**: no bool is made and checked, and the comparisons on their sides compare and jump in one instruction. A side that isn't a bool gives the same error, at the same place.
+- **A loop's element goes straight into its variable**, from `ForNext` *(the kind `STORE`)*.
+- **Calls and returns borrow the code** of the running function instead of cloning two shared pointers, a call takes the function from its place on the stack, and a frame's slots are made and dropped without a call for each number. Numbers are copied without a call where lists, cells, fields and constants are read.
+
+What's left, and why:
+
+- **`fib` is still 1.6 times Python's**, and calls in general cost the most: a frame, the function's reference count, and the `RefCell` of the globals. The instructions it runs went down 10%, but the time didn't follow: the dispatch loop already runs about 6 instructions a cycle, and what's left is work that waits on itself. Closing it needs a register VM or a bigger change to how calls work.
+- **The dispatch loop is sensitive to its own size**: a new instruction, or a bigger arm of the `match`, can make the compiler lay out the rest worse *(i.e. a separate instruction for the loop's element made `while` loops 6% slower, so it became a kind of `ForNext`)*. Changes there are measured on cinder before they're kept.
+- **A built-in method's arguments are a `Vec`**, one allocation for each call with arguments *(i.e. `$list.push($x)`)*. `SmallAlloc` makes it cheap, so it was left.
+
 ## Where it lives
 
 - `crates/lakescript/src/bytecode.rs`: the instructions and `Proto`, a compiled function.
