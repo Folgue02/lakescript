@@ -343,11 +343,12 @@ impl<'a> Interpreter<'a> {
         }
         // Taken out of its place below the frame, which nothing reads, instead of cloned
         let Value::Function(function) = std::mem::replace(&mut self.stack[callee], Value::Null) else { unreachable!("checked above") };
-        if let Function::User(user) = &*function {
-            if user.proto.simple && argc == user.proto.params.len() {
-                self.push_frame(function, callee + 1, u64::MAX, span)?;
-                return Ok(true);
-            }
+        if let Function::User(user) = &*function
+            && user.proto.simple
+            && argc == user.proto.params.len()
+        {
+            self.push_frame(function, callee + 1, u64::MAX, span)?;
+            return Ok(true);
         }
         let args = self.stack.split_off(callee + 1);
         self.stack.pop();
@@ -959,7 +960,7 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::TypeValue(t) => {
                     let ty = proto.types[t as usize].clone();
-                    self.stack.push(Value::Type(Rc::new((ty, Rc::downgrade(&globals)))));
+                    self.stack.push(Value::Type(Rc::new((ty, Rc::downgrade(globals)))));
                 }
                 Op::Regex(r) => {
                     // Compiled the first time this place runs
@@ -1099,7 +1100,7 @@ impl<'a> Interpreter<'a> {
 
                 // ---- Classes ----
                 Op::Class(i) => {
-                    let class = self.make_class(&proto, i as usize, span!())?;
+                    let class = self.make_class(proto, i as usize, span!())?;
                     self.stack.push(Value::Class(class));
                 }
                 Op::GetField(n) => {
@@ -1367,11 +1368,11 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::UseItems(i) => {
                     self.frames[fi].ip = ip;
-                    self.use_items(&proto, i as usize, &globals, span!())?;
+                    self.use_items(proto, i as usize, globals, span!())?;
                 }
                 Op::ModuleMember { module, name, constant } => {
                     self.frames[fi].ip = ip;
-                    let v = self.module_member(&globals, module as usize, &proto.names[name as usize], constant, span!())?;
+                    let v = self.module_member(globals, module as usize, &proto.names[name as usize], constant, span!())?;
                     self.stack.push(v);
                 }
 
