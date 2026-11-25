@@ -754,50 +754,20 @@ impl<'a> Interpreter<'a> {
                 Op::LtEq => compare_op!(BinaryOp::LtEq, <=),
                 Op::GtEq => compare_op!(BinaryOp::GtEq, >=),
                 Op::Binary(op) => {
-                    let r = self.pop();
-                    let l = self.pop();
-                    // For `-in`, the right side is the container, and it alone decides
-                    let object = match op {
-                        BinaryOp::In | BinaryOp::NotIn => matches!(&r, Value::Object(_)),
-                        _ => matches!(&l, Value::Object(_)),
-                    };
-                    let in_list = matches!(op, BinaryOp::In | BinaryOp::NotIn) && matches!(&r, Value::List(_)) && matches!(&l, Value::Object(_) | Value::List(_) | Value::Map(_));
-                    let v = if in_list {
-                        self.frames[fi].ip = ip;
-                        let Value::List(list) = &r else { unreachable!() };
-                        let items = list.borrow().clone();
-                        let found = self.position_of(&items, &l, false, span!())?.is_some();
-                        Value::Bool(if op == BinaryOp::In { found } else { !found })
-                    } else if object {
-                        self.frames[fi].ip = ip;
-                        self.operator(op, l, r, span!())?
-                    } else {
-                        binary(op, l, r).map_err(|m| op_error(m, span!()))?
-                    };
-                    self.stack.push(v);
+                    self.frames[fi].ip = ip;
+                    self.op_binary(op, span!())?
                 }
                 Op::Unary(op) => {
-                    let v = self.pop();
-                    let v = if let (Value::Object(_), UnaryOp::Neg) = (&v, op) {
-                        self.frames[fi].ip = ip;
-                        self.call_operator_method(&v, "neg", "INeg", "-", Vec::new(), span!())?
-                    } else {
-                        unary(op, v, span!())?
-                    };
-                    self.stack.push(v);
+                    self.frames[fi].ip = ip;
+                    self.op_unary(op, span!())?
                 }
                 Op::Pattern(op) => {
-                    let r = self.pop();
-                    let l = self.pop();
-                    let v = self.pattern(op, l, r, span!())?;
-                    self.stack.push(v);
+                    self.frames[fi].ip = ip;
+                    self.op_pattern(op, span!())?
                 }
                 Op::PathTest(op) => {
-                    let v = match self.pop() {
-                        Value::Str(p) => Value::Bool(patterns::path_test(op, &self.host.state.resolve(&p).display().to_string())),
-                        other => return error(format!("`{}` needs a path string, not a {}", op.symbol(), other.type_name()), span!()),
-                    };
-                    self.stack.push(v);
+                    self.frames[fi].ip = ip;
+                    self.op_path_test(op, span!())?
                 }
                 Op::CheckNumber => {
                     let v = self.top();
@@ -918,63 +888,20 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::ListSpread(c) => {
                     self.frames[fi].ip = ip;
-                    let kinds = &proto.calls[c as usize];
-                    let (items, _) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
-                    self.stack.push(Value::list(items));
+                    self.op_list_spread(proto, c)?
                 }
                 Op::Map(n) => {
-                    let items = self.stack.split_off(self.stack.len() - 2 * n as usize);
-                    let mut map = IndexMap::with_capacity(n as usize);
-                    let mut items = items.into_iter();
-                    while let (Some(k), Some(v)) = (items.next(), items.next()) {
-                        map.insert(Key::from_value(&k).expect("checked by CheckKey"), v);
-                    }
-                    self.stack.push(Value::Map(Rc::new(RefCell::new(map))));
+                    self.frames[fi].ip = ip;
+                    self.op_map(n)?
                 }
-                Op::Interpolate(n) => {
-                    let parts = self.stack.split_off(self.stack.len() - n as usize);
-                    let mut text = String::new();
-                    for part in parts {
-                        match part {
-                            Value::Str(s) => text.push_str(&s),
-                            Value::Int(n) => {
-                                let _ = write!(text, "{n}");
-                            }
-                            other => {
-                                let _ = write!(text, "{other}");
-                            }
-                        }
-                    }
-                    self.stack.push(Value::string(&text));
-                }
-                Op::QuoteArgument => {
-                    // A value of `{...}` in a command: always whole arguments, never split
-                    let v = self.pop();
-                    let args = command_arguments(&v).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, span!()))?;
-                    self.stack.push(Value::list(args.into_iter().map(|a| Value::string(&a)).collect()));
-                }
-                Op::Command(n) => {
-                    let parts = self.stack.split_off(self.stack.len() - n as usize);
-                    let (program, args) = split_command(&parts).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span!()))?;
-                    self.stack.push(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Direct { program, args })))));
-                }
+                Op::Interpolate(n) => self.op_interpolate(n),
+                Op::QuoteArgument => self.op_quote_argument(span!())?,
+                Op::Command(n) => self.op_command(n, span!())?,
                 Op::TypeValue(t) => {
                     let ty = proto.types[t as usize].clone();
                     self.stack.push(Value::Type(Rc::new((ty, Rc::downgrade(globals)))));
                 }
-                Op::Regex(r) => {
-                    // Compiled the first time this place runs
-                    let regex = match proto.regex_cache[r as usize].0.get() {
-                        Some(regex) => regex.clone(),
-                        None => {
-                            let (pattern, flags) = &proto.regexes[r as usize];
-                            let regex = self.regex(pattern, flags).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span!()))?;
-                            let _ = proto.regex_cache[r as usize].0.set(regex.clone());
-                            regex
-                        }
-                    };
-                    self.stack.push(Value::Regex(regex));
-                }
+                Op::Regex(r) => self.op_regex(proto, r, span!())?,
                 Op::RangeBound => {
                     let v = self.top();
                     match v.as_whole() {
@@ -1008,19 +935,7 @@ impl<'a> Interpreter<'a> {
                     };
                     self.stack.push(v);
                 }
-                Op::SliceFrom => {
-                    let start = self.pop().as_whole().unwrap_or(0);
-                    let container = self.pop();
-                    let len = match &container {
-                        Value::List(l) => l.borrow().len(),
-                        Value::Str(s) => self.host.strings.len(s),
-                        Value::Bytes(b) => b.len(),
-                        other => return error(format!("a {} can't be sliced", other.type_name()), span!()),
-                    };
-                    let range = Range { start, end: len as i64, inclusive: false, step: 1 };
-                    let v = slice(&mut self.host.strings, &container, range, len).map_err(|m| index_error(m, span!()))?;
-                    self.stack.push(v);
-                }
+                Op::SliceFrom => self.op_slice_from(span!())?,
                 Op::SetIndex => {
                     let value = self.pop();
                     let index = self.pop();
@@ -1035,32 +950,8 @@ impl<'a> Interpreter<'a> {
                     self.stack.push(value);
                 }
                 Op::UpdateIndex { op, mode } => {
-                    let rhs = self.pop();
-                    let index = self.pop();
-                    let container = self.pop();
-                    let object = matches!(container, Value::Object(_));
-                    if object {
-                        self.frames[fi].ip = ip;
-                    }
-                    let old = if object {
-                        self.call_operator_method(&container, "get", "IIndex", "[]", vec![index.clone()], span!())?
-                    } else {
-                        index_value(&mut self.host.strings, container.clone(), index.clone(), span!())?
-                    };
-                    if mode > 0 && old.as_f64().is_none() {
-                        return error(format!("`++` and `--` only work on numbers, and this is a {}", old.type_name()), span!());
-                    }
-                    let new = if matches!(old, Value::Object(_)) {
-                        self.operator(op, old.clone(), rhs, span!())?
-                    } else {
-                        binary(op, old.clone(), rhs).map_err(|m| op_error(m, span!()))?
-                    };
-                    if object {
-                        self.call_operator_method(&container, "set", "ISetIndex", "[] =", vec![index, new.clone()], span!())?;
-                    } else {
-                        set_index(&container, index, new.clone(), span!())?;
-                    }
-                    self.stack.push(if mode == 2 { old } else { new });
+                    self.frames[fi].ip = ip;
+                    self.op_update_index(op, mode, span!())?
                 }
                 Op::Destructure { names, rest } => {
                     let v = self.pop();
@@ -1068,16 +959,7 @@ impl<'a> Interpreter<'a> {
                 }
 
                 // ---- Types ----
-                Op::Is { ty, catch, classes } => {
-                    let ty = &proto.types[ty as usize];
-                    let found = self.stack.split_off(self.stack.len() - classes as usize);
-                    let v = self.pop();
-                    let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
-                    let ok = types::matches(&v, ty, &pairs).map_err(|m| {
-                        if catch { flow_error_as(exceptions::TYPE_ERROR, m, span!()) } else { flow_error(m, span!()) }
-                    })?;
-                    self.stack.push(Value::Bool(ok));
-                }
+                Op::Is { ty, catch, classes } => self.op_is(proto, ty, catch, classes, span!())?,
                 Op::NonNull(c) => {
                     if matches!(self.top(), Value::Null) {
                         let message = match &proto.consts[c as usize] {
@@ -1087,16 +969,7 @@ impl<'a> Interpreter<'a> {
                         return error_as(exceptions::NULL_ERROR, message, span!());
                     }
                 }
-                Op::As { ty, classes } => {
-                    let ty = &proto.types[ty as usize];
-                    let found = self.stack.split_off(self.stack.len() - classes as usize);
-                    let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
-                    let v = self.top();
-                    if !types::matches(v, ty, &pairs).map_err(|m| flow_error(m, span!()))? {
-                        let message = format!("`.as({ty})` failed: the value is {}", describe(v));
-                        return error_as(exceptions::TYPE_ERROR, message, span!());
-                    }
-                }
+                Op::As { ty, classes } => self.op_as(proto, ty, classes, span!())?,
 
                 // ---- Classes ----
                 Op::Class(i) => {
@@ -1168,27 +1041,8 @@ impl<'a> Interpreter<'a> {
                     }
                 }
                 Op::SetField(n) => {
-                    let value = self.pop();
-                    let object = self.pop();
-                    let set = match &object {
-                        Value::Object(o) => match proto.field_cache[n as usize].get(&o.class) {
-                            Some(slot) if !o.class.fields[slot].constant || o.building.get() => {
-                                o.fields.borrow_mut()[slot] = value.clone();
-                                true
-                            }
-                            _ => false,
-                        },
-                        _ => false,
-                    };
-                    if !set {
-                        set_field(&object, &proto.names[n as usize], value.clone(), span!())?;
-                        if let Value::Object(o) = &object
-                            && let Some(slot) = o.class.field(&proto.names[n as usize])
-                        {
-                            proto.field_cache[n as usize].remember(&o.class, slot);
-                        }
-                    }
-                    self.stack.push(value);
+                    self.frames[fi].ip = ip;
+                    self.op_set_field(proto, n, span!())?
                 }
                 Op::Static { name, variable } => {
                     let class = self.pop();
@@ -1236,33 +1090,11 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::SuperMethod { name, argc } => {
                     self.frames[fi].ip = ip;
-                    let mut args = self.stack.split_off(self.stack.len() - argc as usize);
-                    let this = self.pop();
-                    let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the class") };
-                    let name = &proto.names[name as usize];
-                    let method = class.parent.as_ref().and_then(|p| p.methods.get(&**name).cloned());
-                    let Some(method) = method else {
-                        return error(format!("the superclass of `{}` has no method `{name}`", class.name), span!());
-                    };
-                    args.insert(0, this);
-                    let v = self.call(&method, args, Vec::new(), span!())?;
-                    self.stack.push(v);
+                    self.op_super_method(proto, name, argc, span!())?
                 }
 
                 // ---- Functions ----
-                Op::Closure(p) => {
-                    let inner = proto.protos[p as usize].clone();
-                    let upvalues = inner
-                        .captures
-                        .iter()
-                        .map(|c| match c {
-                            Capture::Cell(i) => self.frames[fi].cells[*i as usize].clone(),
-                            Capture::Upvalue(i) => self.upvalue(fi, *i).clone(),
-                        })
-                        .collect();
-                    let function = UserFunction { proto: inner, upvalues, globals: self.globals_of(fi) };
-                    self.stack.push(Value::Function(Rc::new(Function::User(function))));
-                }
+                Op::Closure(p) => self.op_closure(proto, fi, p),
                 Op::Call(argc) => {
                     self.frames[fi].ip = ip;
                     if self.call_op(argc as usize, span!())? {
@@ -1321,28 +1153,9 @@ impl<'a> Interpreter<'a> {
                 }
                 Op::CallMethodComplex { name, call } => {
                     self.frames[fi].ip = ip;
-                    let kinds = &proto.calls[call as usize];
-                    let (mut args, named) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
-                    let receiver = self.pop();
-                    let class = match &receiver {
-                        Value::Object(o) => Some(o.class.clone()),
-                        Value::Exception(e) => e.object.as_ref().map(|o| o.class.clone()),
-                        _ => None,
-                    };
-                    if let Some(class) = class {
-                        if let Some(method) = class.methods.get(&*proto.names[name as usize]).cloned() {
-                            args.insert(0, receiver);
-                            if self.enter(method, args, named, span!())? {
-                                reload!();
-                            }
-                            continue;
-                        }
+                    if self.op_call_method_complex(proto, name, call, span!())? {
+                        reload!();
                     }
-                    if let Some((_, _, at)) = named.first() {
-                        return error(format!("the methods of a {} don't take named arguments", receiver.type_name()), *at);
-                    }
-                    let v = methods::call(self, receiver, &proto.names[name as usize], args, span!())?;
-                    self.stack.push(v);
                 }
                 Op::Return => {
                     let value = self.pop();
@@ -1377,27 +1190,7 @@ impl<'a> Interpreter<'a> {
                 }
 
                 // ---- Exceptions ----
-                Op::Throw => {
-                    let v = self.pop();
-                    let Value::Exception(exception) = v else {
-                        let message = format!("only exceptions can be thrown, not a {} *(i.e. `throw ValueError('...')`)*", v.type_name());
-                        return error_as(exceptions::TYPE_ERROR, message, span!());
-                    };
-                    // A new exception gets the place where it's thrown; a caught one keeps its own
-                    let exception = if exception.span == Span::default() {
-                        Rc::new(ExceptionValue {
-                            kind: exception.kind.clone(),
-                            base: exception.base.clone(),
-                            object: exception.object.clone(),
-                            message: exception.message.clone(),
-                            span: span!(),
-                            trace: Default::default(),
-                        })
-                    } else {
-                        exception
-                    };
-                    return Err(Flow::Throw(exception));
-                }
+                Op::Throw => return Err(self.op_throw(span!())),
                 Op::Rethrow => match self.pop() {
                     Value::Exception(e) => return Err(Flow::Throw(e)),
                     _ => unreachable!("only exceptions are caught"),
@@ -1479,6 +1272,309 @@ impl<'a> Interpreter<'a> {
                 }
             }
         }
+    }
+
+    // ---- Instructions that are rare in hot code, out of `dispatch`: a smaller
+    // loop lets the compiler keep the common instructions fast ----
+
+    #[inline(never)]
+    fn op_interpolate(&mut self, n: u32) {
+        let parts = self.stack.split_off(self.stack.len() - n as usize);
+        let mut text = String::new();
+        for part in parts {
+            match part {
+                Value::Str(s) => text.push_str(&s),
+                Value::Int(n) => {
+                    let _ = write!(text, "{n}");
+                }
+                other => {
+                    let _ = write!(text, "{other}");
+                }
+            }
+        }
+        self.stack.push(Value::string(&text));
+    }
+
+    #[inline(never)]
+    fn op_quote_argument(&mut self, span: Span) -> Exec<()> {
+        // A value of `{...}` in a command: always whole arguments, never split
+        let v = self.pop();
+        let args = command_arguments(&v).map_err(|m| flow_error_as(exceptions::TYPE_ERROR, m, span))?;
+        self.stack.push(Value::list(args.into_iter().map(|a| Value::string(&a)).collect()));
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_command(&mut self, n: u32, span: Span) -> Exec<()> {
+        let parts = self.stack.split_off(self.stack.len() - n as usize);
+        let (program, args) = split_command(&parts).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span))?;
+        self.stack.push(Value::Command(Rc::new(RefCell::new(CommandValue::new(CommandKind::Direct { program, args })))));
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_regex(&mut self, proto: &Proto, r: u32, span: Span) -> Exec<()> {
+        // Compiled the first time this place runs
+        let regex = match proto.regex_cache[r as usize].0.get() {
+            Some(regex) => regex.clone(),
+            None => {
+                let (pattern, flags) = &proto.regexes[r as usize];
+                let regex = self.regex(pattern, flags).map_err(|m| flow_error_as(exceptions::VALUE_ERROR, m, span))?;
+                let _ = proto.regex_cache[r as usize].0.set(regex.clone());
+                regex
+            }
+        };
+        self.stack.push(Value::Regex(regex));
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_is(&mut self, proto: &Proto, ty: u32, catch: bool, classes: u8, span: Span) -> Exec<()> {
+        let ty = &proto.types[ty as usize];
+        let found = self.stack.split_off(self.stack.len() - classes as usize);
+        let v = self.pop();
+        let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
+        let ok = types::matches(&v, ty, &pairs).map_err(|m| {
+            if catch { flow_error_as(exceptions::TYPE_ERROR, m, span) } else { flow_error(m, span) }
+        })?;
+        self.stack.push(Value::Bool(ok));
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_as(&mut self, proto: &Proto, ty: u32, classes: u8, span: Span) -> Exec<()> {
+        let ty = &proto.types[ty as usize];
+        let found = self.stack.split_off(self.stack.len() - classes as usize);
+        let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
+        let v = self.top();
+        if !types::matches(v, ty, &pairs).map_err(|m| flow_error(m, span))? {
+            let message = format!("`.as({ty})` failed: the value is {}", describe(v));
+            return error_as(exceptions::TYPE_ERROR, message, span);
+        }
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_slice_from(&mut self, span: Span) -> Exec<()> {
+        let start = self.pop().as_whole().unwrap_or(0);
+        let container = self.pop();
+        let len = match &container {
+            Value::List(l) => l.borrow().len(),
+            Value::Str(s) => self.host.strings.len(s),
+            Value::Bytes(b) => b.len(),
+            other => return error(format!("a {} can't be sliced", other.type_name()), span),
+        };
+        let range = Range { start, end: len as i64, inclusive: false, step: 1 };
+        let v = slice(&mut self.host.strings, &container, range, len).map_err(|m| index_error(m, span))?;
+        self.stack.push(v);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_update_index(&mut self, op: BinaryOp, mode: u8, span: Span) -> Exec<()> {
+        let rhs = self.pop();
+        let index = self.pop();
+        let container = self.pop();
+        let object = matches!(container, Value::Object(_));
+        let old = if object {
+            self.call_operator_method(&container, "get", "IIndex", "[]", vec![index.clone()], span)?
+        } else {
+            index_value(&mut self.host.strings, container.clone(), index.clone(), span)?
+        };
+        if mode > 0 && old.as_f64().is_none() {
+            return error(format!("`++` and `--` only work on numbers, and this is a {}", old.type_name()), span);
+        }
+        let new = if matches!(old, Value::Object(_)) {
+            self.operator(op, old.clone(), rhs, span)?
+        } else {
+            binary(op, old.clone(), rhs).map_err(|m| op_error(m, span))?
+        };
+        if object {
+            self.call_operator_method(&container, "set", "ISetIndex", "[] =", vec![index, new.clone()], span)?;
+        } else {
+            set_index(&container, index, new.clone(), span)?;
+        }
+        self.stack.push(if mode == 2 { old } else { new });
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_super_method(&mut self, proto: &Proto, name: u32, argc: u32, span: Span) -> Exec<()> {
+        let mut args = self.stack.split_off(self.stack.len() - argc as usize);
+        let this = self.pop();
+        let Value::Class(class) = self.pop() else { unreachable!("the compiler pushes the class") };
+        let name = &proto.names[name as usize];
+        let method = class.parent.as_ref().and_then(|p| p.methods.get(&**name).cloned());
+        let Some(method) = method else {
+            return error(format!("the superclass of `{}` has no method `{name}`", class.name), span);
+        };
+        args.insert(0, this);
+        let v = self.call(&method, args, Vec::new(), span)?;
+        self.stack.push(v);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_closure(&mut self, proto: &Proto, fi: usize, p: u32) {
+        let inner = proto.protos[p as usize].clone();
+        let upvalues = inner
+            .captures
+            .iter()
+            .map(|c| match c {
+                Capture::Cell(i) => self.frames[fi].cells[*i as usize].clone(),
+                Capture::Upvalue(i) => self.upvalue(fi, *i).clone(),
+            })
+            .collect();
+        let function = UserFunction { proto: inner, upvalues, globals: self.globals_of(fi) };
+        self.stack.push(Value::Function(Rc::new(Function::User(function))));
+    }
+
+    #[inline(never)]
+    fn op_throw(&mut self, span: Span) -> Flow {
+        let v = self.pop();
+        let Value::Exception(exception) = v else {
+            let message = format!("only exceptions can be thrown, not a {} *(i.e. `throw ValueError('...')`)*", v.type_name());
+            return flow_error_as(exceptions::TYPE_ERROR, message, span);
+        };
+        // A new exception gets the place where it's thrown; a caught one keeps its own
+        let exception = if exception.span == Span::default() {
+            Rc::new(ExceptionValue {
+                kind: exception.kind.clone(),
+                base: exception.base.clone(),
+                object: exception.object.clone(),
+                message: exception.message.clone(),
+                span,
+                trace: Default::default(),
+            })
+        } else {
+            exception
+        };
+        Flow::Throw(exception)
+    }
+
+    #[inline(never)]
+    fn op_call_method_complex(&mut self, proto: &Proto, name: u32, call: u32, span: Span) -> Exec<bool> {
+        let kinds = &proto.calls[call as usize];
+        let (mut args, named) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
+        let receiver = self.pop();
+        let class = match &receiver {
+            Value::Object(o) => Some(o.class.clone()),
+            Value::Exception(e) => e.object.as_ref().map(|o| o.class.clone()),
+            _ => None,
+        };
+        if let Some(class) = class {
+            if let Some(method) = class.methods.get(&*proto.names[name as usize]).cloned() {
+                args.insert(0, receiver);
+                return self.enter(method, args, named, span);
+            }
+        }
+        if let Some((_, _, at)) = named.first() {
+            return error(format!("the methods of a {} don't take named arguments", receiver.type_name()), *at);
+        }
+        let v = methods::call(self, receiver, &proto.names[name as usize], args, span)?;
+        self.stack.push(v);
+        Ok(false)
+    }
+
+    #[inline(never)]
+    fn op_binary(&mut self, op: BinaryOp, span: Span) -> Exec<()> {
+        let r = self.pop();
+        let l = self.pop();
+        // For `-in`, the right side is the container, and it alone decides
+        let object = match op {
+            BinaryOp::In | BinaryOp::NotIn => matches!(&r, Value::Object(_)),
+            _ => matches!(&l, Value::Object(_)),
+        };
+        let in_list = matches!(op, BinaryOp::In | BinaryOp::NotIn) && matches!(&r, Value::List(_)) && matches!(&l, Value::Object(_) | Value::List(_) | Value::Map(_));
+        let v = if in_list {
+            let Value::List(list) = &r else { unreachable!() };
+            let items = list.borrow().clone();
+            let found = self.position_of(&items, &l, false, span)?.is_some();
+            Value::Bool(if op == BinaryOp::In { found } else { !found })
+        } else if object {
+            self.operator(op, l, r, span)?
+        } else {
+            binary(op, l, r).map_err(|m| op_error(m, span))?
+        };
+        self.stack.push(v);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_unary(&mut self, op: UnaryOp, span: Span) -> Exec<()> {
+        let v = self.pop();
+        let v = if let (Value::Object(_), UnaryOp::Neg) = (&v, op) {
+            self.call_operator_method(&v, "neg", "INeg", "-", Vec::new(), span)?
+        } else {
+            unary(op, v, span)?
+        };
+        self.stack.push(v);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_set_field(&mut self, proto: &Proto, n: u32, span: Span) -> Exec<()> {
+        let value = self.pop();
+        let object = self.pop();
+        let set = match &object {
+            Value::Object(o) => match proto.field_cache[n as usize].get(&o.class) {
+                Some(slot) if !o.class.fields[slot].constant || o.building.get() => {
+                    o.fields.borrow_mut()[slot] = value.clone();
+                    true
+                }
+                _ => false,
+            },
+            _ => false,
+        };
+        if !set {
+            set_field(&object, &proto.names[n as usize], value.clone(), span)?;
+            if let Value::Object(o) = &object
+                && let Some(slot) = o.class.field(&proto.names[n as usize])
+            {
+                proto.field_cache[n as usize].remember(&o.class, slot);
+            }
+        }
+        self.stack.push(value);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_map(&mut self, n: u32) -> Exec<()> {
+        let items = self.stack.split_off(self.stack.len() - 2 * n as usize);
+        let mut map = IndexMap::with_capacity(n as usize);
+        let mut items = items.into_iter();
+        while let (Some(k), Some(v)) = (items.next(), items.next()) {
+            map.insert(Key::from_value(&k).expect("checked by CheckKey"), v);
+        }
+        self.stack.push(Value::Map(Rc::new(RefCell::new(map))));
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_pattern(&mut self, op: BinaryOp, span: Span) -> Exec<()> {
+        let r = self.pop();
+        let l = self.pop();
+        let v = self.pattern(op, l, r, span)?;
+        self.stack.push(v);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_path_test(&mut self, op: crate::ast::PathTestOp, span: Span) -> Exec<()> {
+        let v = match self.pop() {
+            Value::Str(p) => Value::Bool(patterns::path_test(op, &self.host.state.resolve(&p).display().to_string())),
+            other => return error(format!("`{}` needs a path string, not a {}", op.symbol(), other.type_name()), span),
+        };
+        self.stack.push(v);
+        Ok(())
+    }
+
+    #[inline(never)]
+    fn op_list_spread(&mut self, proto: &Proto, c: u32) -> Exec<()> {
+        let kinds = &proto.calls[c as usize];
+        let (items, _) = self.complex_args(kinds, self.stack.len() - kinds.len())?;
+        self.stack.push(Value::list(items));
+        Ok(())
     }
 
     fn push_handler(&mut self, kind: HandlerKind, target: u32, frame: usize, slot: u32) {
