@@ -1743,6 +1743,12 @@ impl<'a> Compiler<'a> {
                 _ => {}
             }
         }
+        // `!$x.is(T)`, which is always a bool: false when `.is()` is true
+        if let ExprKind::Unary { op: UnaryOp::Not, operand } = &cond.kind
+            && matches!(operand.kind, ExprKind::TypeCheck { check: TypeCheckKind::Is, nullable: false, .. })
+        {
+            return self.condition_true(operand, keyword);
+        }
         self.expr(cond)?;
         Ok(vec![self.emit_at(Op::JumpIfFalse { target: 0, keyword }, cond.span)])
     }

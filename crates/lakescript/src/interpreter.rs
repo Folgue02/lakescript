@@ -11,7 +11,7 @@ use std::rc::Rc;
 
 use indexmap::IndexMap;
 
-use crate::ast::{BinaryOp, UnaryOp};
+use crate::ast::{BinaryOp, TypeExpr, UnaryOp};
 use crate::bytecode::{ArgKind, Capture, Op, Proto, class_names, for_kind};
 use crate::command::{CommandKind, CommandValue, split_command};
 use crate::compiler::Compiler;
@@ -1328,9 +1328,25 @@ impl<'a> Interpreter<'a> {
         Ok(())
     }
 
+    /// The class of `.is()` and `.as()` when the type is only a class by its
+    /// name, which was pushed on top: checked without walking the type.
+    fn only_class(ty: &TypeExpr, classes: u8, top: Option<&Value>) -> Option<Rc<Class>> {
+        match (&ty.kind, top) {
+            (crate::ast::TypeKind::Named { args, .. }, Some(Value::Class(class))) if classes == 1 && args.is_empty() => Some(class.clone()),
+            _ => None,
+        }
+    }
+
     #[inline(never)]
     fn op_is(&mut self, proto: &Proto, ty: u32, catch: bool, classes: u8, span: Span) -> Exec<()> {
         let ty = &proto.types[ty as usize];
+        // One class by its name, the usual *(i.e. the check of a `Self` parameter)*
+        if let Some(class) = Self::only_class(ty, classes, self.stack.last()) {
+            self.stack.pop();
+            let ok = object_of(&self.pop(), &class);
+            self.stack.push(Value::Bool(ok));
+            return Ok(());
+        }
         let found = self.stack.split_off(self.stack.len() - classes as usize);
         let v = self.pop();
         let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
@@ -1344,6 +1360,14 @@ impl<'a> Interpreter<'a> {
     #[inline(never)]
     fn op_as(&mut self, proto: &Proto, ty: u32, classes: u8, span: Span) -> Exec<()> {
         let ty = &proto.types[ty as usize];
+        // One class by its name, when the value is one of it: else the usual way, for its error
+        if let Some(class) = Self::only_class(ty, classes, self.stack.last())
+            && let Some(v) = self.stack.len().checked_sub(2).map(|i| &self.stack[i])
+            && object_of(v, &class)
+        {
+            self.stack.pop();
+            return Ok(());
+        }
         let found = self.stack.split_off(self.stack.len() - classes as usize);
         let pairs: Vec<(&str, &Value)> = class_names(ty).into_iter().zip(found.iter()).collect();
         let v = self.top();
@@ -2475,6 +2499,16 @@ fn not_a_condition(keyword: u8, value: &Value, span: Span) -> Flow {
             let message = format!("the condition of `{keyword}` must be a bool, but this is a {}", value.type_name());
             flow_error_as(exceptions::TYPE_ERROR, message, span)
         }
+    }
+}
+
+/// Whether a value is an object of the class or of a class under it, also a
+/// custom exception, like `types::matches` checks a class.
+fn object_of(value: &Value, class: &Rc<Class>) -> bool {
+    match value {
+        Value::Object(o) => o.class.is_a(class),
+        Value::Exception(e) => e.object.as_ref().is_some_and(|o| o.class.is_a(class)),
+        _ => false,
     }
 }
 

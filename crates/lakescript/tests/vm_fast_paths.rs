@@ -92,3 +92,14 @@ fn plain_field_defaults() {
     // A value that needs code still runs where it's declared, every time
     assert_eq!(run("let $made = 0;\nnumber next() {\n    $made++;\n    return $made;\n}\nclass Q {\n    pub number @id = next();\n    pub list<number> @l = [1];\n}\nQ();\nQ();\noutln([Q().id, $made]);"), "[3, 3]\n");
 }
+
+#[test]
+fn is_and_as_of_one_class() {
+    let classes = "interface IShape {\n    number area();\n}\nclass Sq {\n    pub number @s;\n    implement IShape {\n        number area() = @s * @s;\n    }\n    implement IEquals {\n        bool equals?(Self $o) = @s == $o.s;\n    }\n}\nclass Big extends Sq {}\nclass Oops extends ValueError {}\nconst any $x = Sq(2);\nconst any $b = Big(3);\n";
+    let code = format!("{classes}outln([$x.is(Sq), $x.is(IShape), $b.is(Sq), $x.is(Big), 5.is(Sq), Oops('m').is(Oops), Oops('m').is(ValueError), $x.is(?Sq), null.is(?Sq)]);\noutln([$x.as(Sq).s, $b.as(Sq).s]);\nif (!$x.is(Big)) outln('not big');");
+    assert_eq!(run(&code), "[true, true, true, false, false, true, true, true, true]\n[2, 3]\nnot big\n");
+    assert_eq!(vm_error(&format!("{classes}5.as(Sq);")).0, "TypeError: `.as(Sq)` failed: the value is `5`");
+    // A `Self` parameter called through the interface with another class
+    assert_eq!(vm_error(&format!("{classes}const IEquals $e = Sq(1);\n$e.equals?(Oops('x'));")).0, "TypeError: `Sq.equals?` needs a `Sq` for `$o`, not a Oops");
+    assert_eq!(run(&format!("{classes}outln([Sq(2) == Big(2), Big(2) == Sq(3)]);")), "[true, false]\n");
+}
