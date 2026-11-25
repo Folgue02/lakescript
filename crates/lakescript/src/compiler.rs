@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::ast::*;
-use crate::bytecode::{ArgInfo, ArgKind, ArgType, Capture, ClassInfo, CommandInfo, Import, Op, Param as ParamInfo, Proto, class_names, for_kind};
+use crate::bytecode::{ArgInfo, ArgKind, ArgType, Capture, ClassInfo, CommandInfo, Import, Op, Param as ParamInfo, PlainDefault, Proto, class_names, for_kind};
 use crate::diagnostic::Diagnostic;
 use crate::modules::Globals;
 use crate::stack::position as stack_position;
@@ -1162,6 +1162,7 @@ impl<'a> Compiler<'a> {
             interfaces: 0,
             required: Vec::new(),
             init: false,
+            defaults: Vec::new(),
             constructor: false,
             fields: Vec::new(),
             field_types: Vec::new(),
@@ -1192,7 +1193,26 @@ impl<'a> Compiler<'a> {
             .iter()
             .filter(|m| !m.is_static && matches!(&m.kind, MemberKind::Field { value: Some(_), .. }))
             .collect();
-        if !valued.is_empty() {
+        // Values that need no code are given without `init` *(i.e. `= 0`, `= []`)*
+        let own: Vec<&String> = decl
+            .members
+            .iter()
+            .filter_map(|m| match &m.kind {
+                MemberKind::Field { name, .. } if !m.is_static => Some(name),
+                _ => None,
+            })
+            .collect();
+        let plain: Option<Vec<(usize, PlainDefault)>> = valued
+            .iter()
+            .map(|member| {
+                let MemberKind::Field { name, value: Some(value), .. } = &member.kind else { unreachable!() };
+                let place = own.iter().position(|n| *n == name)?;
+                Some((place, plain_default(value)?))
+            })
+            .collect();
+        if let Some(plain) = plain.filter(|p| !p.is_empty()) {
+            info.defaults = plain;
+        } else if !valued.is_empty() {
             let mut stmts = Vec::new();
             for member in &valued {
                 let MemberKind::Field { name, value: Some(value), .. } = &member.kind else { unreachable!() };
@@ -2150,6 +2170,21 @@ fn binary_op(op: BinaryOp) -> Op {
         BinaryOp::Rem => Op::Rem,
         other => Op::Binary(other),
     }
+}
+
+/// The value of a field's declaration when it needs no code to make: a
+/// number, a string, a bool, `null`, or an empty list or map.
+fn plain_default(value: &Expr) -> Option<PlainDefault> {
+    Some(match &value.kind {
+        ExprKind::Int(n) => PlainDefault::Value(Value::Int(*n)),
+        ExprKind::Float(f) => PlainDefault::Value(Value::Float(*f)),
+        ExprKind::Str(s) => PlainDefault::Value(Value::string(s)),
+        ExprKind::Bool(b) => PlainDefault::Value(Value::Bool(*b)),
+        ExprKind::Null => PlainDefault::Value(Value::Null),
+        ExprKind::List { items, .. } if items.is_empty() => PlainDefault::List,
+        ExprKind::Map { entries, .. } if entries.is_empty() => PlainDefault::Map,
+        _ => return None,
+    })
 }
 
 /// What `JumpIfFalse` and `JumpIfTrue` say a condition that isn't a bool is

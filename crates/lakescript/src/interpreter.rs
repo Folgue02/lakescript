@@ -1826,6 +1826,8 @@ impl Interpreter<'_> {
             None => Vec::new(),
         };
         let home = Rc::downgrade(&self.globals_of(self.frames.len() - 1));
+        // Where the fields of this class start in its objects, after the superclass's
+        let own_start = fields.len();
         for (i, (name, constant, nullable, has_value)) in info.fields.iter().enumerate() {
             if fields.iter().any(|f| f.name == *name) {
                 return error(format!("`{}` declares the field `{name}` again, which its superclass already has", info.name), span);
@@ -1887,6 +1889,7 @@ impl Interpreter<'_> {
             statics: RefCell::new(static_table),
             constructor,
             init,
+            defaults: info.defaults.iter().map(|(i, d)| (own_start + i, d.clone())).collect(),
             command: info.command.clone().map(|c| (c, enums)),
         });
         if info.is_enum {
@@ -1970,6 +1973,14 @@ impl Interpreter<'_> {
     fn init_fields(&mut self, class: &Rc<Class>, object: &Value, span: Span) -> Exec<()> {
         if let Some(parent) = &class.parent {
             self.init_fields(parent, object, span)?;
+        }
+        if !class.defaults.is_empty()
+            && let Value::Object(o) = object
+        {
+            let mut fields = o.fields.borrow_mut();
+            for (i, default) in &class.defaults {
+                fields[*i] = default.make();
+            }
         }
         if let Some(init) = &class.init {
             self.call(init, vec![object.clone()], Vec::new(), span)?;

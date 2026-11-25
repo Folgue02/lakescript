@@ -1,0 +1,14 @@
+// 1 million objects of a class whose fields have values where they're declared
+class Cell {
+    pub number @x;
+    pub number @y;
+    pub string @glyph = '.';
+    pub bool @seen = false;
+    pub list<string> @items = [];
+}
+let $seen = 0;
+for ($i in 0..1_000_000) {
+    const $c = Cell($i, $i);
+    if (!$c.seen) $seen++;
+}
+outln($seen);

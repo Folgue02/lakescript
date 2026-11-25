@@ -73,6 +73,9 @@ pub struct Class {
     pub(crate) constructor: Option<Rc<Function>>,
     /// Gives the fields declared in this class the values written where they're declared.
     pub(crate) init: Option<Rc<Function>>,
+    /// Or, when they need no code to make, those values, by the field's
+    /// place in its objects *(see `bytecode::PlainDefault`)*.
+    pub(crate) defaults: Vec<(usize, crate::bytecode::PlainDefault)>,
     /// For a command: its arguments, and the enums of their types.
     pub(crate) command: Option<(Rc<crate::bytecode::CommandInfo>, Vec<Rc<Class>>)>,
 }

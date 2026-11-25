@@ -262,6 +262,27 @@ pub struct Param {
     pub variadic: bool,
 }
 
+/// A value written where a field is declared that needs no code to make:
+/// the field gets it when the object is made, without running `init`.
+#[derive(Debug, Clone)]
+pub enum PlainDefault {
+    /// A number, a string, a bool or `null`, which can be shared.
+    Value(Value),
+    /// `[]` or `{}`, made again for each object, so two never share one.
+    List,
+    Map,
+}
+
+impl PlainDefault {
+    pub fn make(&self) -> Value {
+        match self {
+            PlainDefault::Value(v) => v.clone(),
+            PlainDefault::List => Value::list(Vec::new()),
+            PlainDefault::Map => Value::Map(Rc::new(std::cell::RefCell::new(indexmap::IndexMap::new()))),
+        }
+    }
+}
+
 /// What `Op::Class` needs to make a class.
 #[derive(Debug, Clone)]
 pub struct ClassInfo {
@@ -274,6 +295,9 @@ pub struct ClassInfo {
     /// For an interface: its methods without a default.
     pub required: Vec<Rc<str>>,
     pub init: bool,
+    /// When every value written where its fields are declared is plain, they
+    /// are here instead of in `init`, by the place of the field in the class.
+    pub defaults: Vec<(usize, PlainDefault)>,
     pub constructor: bool,
     /// The fields declared in the class itself: name, `const`, nullable, has a value.
     pub fields: Vec<(Rc<str>, bool, bool, bool)>,

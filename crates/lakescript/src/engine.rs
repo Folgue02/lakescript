@@ -490,6 +490,7 @@ impl Engine {
                 statics: std::cell::RefCell::new(indexmap::IndexMap::new()),
                 constructor: None,
                 init: None,
+                defaults: Vec::new(),
                 command: None,
             };
             self.add_builtin(name, Value::Class(Rc::new(class)));

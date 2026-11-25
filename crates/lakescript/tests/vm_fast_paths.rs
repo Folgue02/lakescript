@@ -79,3 +79,16 @@ fn objects_and_their_operators() {
     // A class without IEquals is only equal to itself
     assert_eq!(run("class Q {\n    pub number @x;\n}\nconst $q = Q(1);\noutln([$q == $q, Q(1) == Q(1)]);"), "[true, false]\n");
 }
+
+#[test]
+fn plain_field_defaults() {
+    let code = "class Base {\n    pub number @a = 1;\n    pub list<number> @xs = [];\n}\nclass Item extends Base {\n    pub string @name = 'x';\n    pub ?number @maybe = null;\n    pub map<string, number> @m = {};\n    pub bool @on = true;\n}\nconst $i = Item();\nconst $j = Item();\n$i.xs.push(1);\n$i.m['k'] = 1;\noutln([$i, $j]);";
+    // Each object gets a list and a map of its own
+    assert_eq!(run(code), "[Item(a: 1, xs: [1], name: 'x', maybe: null, m: { 'k' => 1 }, on: true), Item(a: 1, xs: [], name: 'x', maybe: null, m: {}, on: true)]\n");
+    // A constructor sees them and can change them, also `const` ones
+    assert_eq!(run("class C {\n    pub number @n = 5;\n    pub const string @s = 'c';\n    pub new() {\n        @n += 1;\n    }\n}\noutln(C());"), "C(n: 6, s: 'c')\n");
+    // Given or not, by position and by name
+    assert_eq!(run("class P {\n    pub number @x;\n    pub number @y = 7;\n}\noutln([P(1), P(1, 2), P(y: 3, x: 4)]);"), "[P(x: 1, y: 7), P(x: 1, y: 2), P(x: 4, y: 3)]\n");
+    // A value that needs code still runs where it's declared, every time
+    assert_eq!(run("let $made = 0;\nnumber next() {\n    $made++;\n    return $made;\n}\nclass Q {\n    pub number @id = next();\n    pub list<number> @l = [1];\n}\nQ();\nQ();\noutln([Q().id, $made]);"), "[3, 3]\n");
+}
