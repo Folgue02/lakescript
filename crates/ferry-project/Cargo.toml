@@ -1,0 +1,10 @@
+[package]
+name = "ferry-project"
+description = "What a ferry project is: reading its ferry.toml and ferry.lock, for ferry and for std/tooling/ferry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+toml = { version = "1.2.1", default-features = false, features = ["parse", "display", "serde", "std"] }

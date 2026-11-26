@@ -249,6 +249,7 @@ fn open_project() -> Result<(Home, Project, Vec<Dependency>), Fail> {
     too_old(&project);
     project.modules()?;
     let (dependencies, lock) = resolve::resolve(&home, &project, &Lock::read(&project.dir)?)?;
+    too_old_dependencies(&dependencies);
     lock.write(&project.dir)?;
     Ok((home, project, dependencies))
 }
@@ -411,10 +412,29 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
 /// its `lks` in `[project]`. It's a warning: an older one may still work.
 fn too_old(project: &Project) {
     let Some(needed) = &project.manifest.project.lks else { return };
-    let this = env!("CARGO_PKG_VERSION");
-    if project::numbers(this) < project::numbers(needed) {
+    let this = project::THIS;
+    if project::newer(needed) {
         let paint = paint();
         eprintln!("{} {} needs Lakescript {needed} or newer, and this is ferry {this}: it may use what this one doesn't have\n", paint.warning("warning:"), project.id);
+    }
+}
+
+/// Warns about each dependency that needs a newer Lakescript, like
+/// `too_old` for the project: one in the lock file can, after a `git pull`.
+fn too_old_dependencies(dependencies: &[Dependency]) {
+    let this = project::THIS;
+    for dependency in dependencies {
+        let Some(needed) = &dependency.project.manifest.project.lks else { continue };
+        if project::newer(needed) {
+            let paint = paint();
+            eprintln!(
+                "{} {} {}, for {}, needs Lakescript {needed} or newer, and this is ferry {this}: it may use what this one doesn't have\n",
+                paint.warning("warning:"),
+                dependency.package,
+                dependency.version,
+                dependency.required_by
+            );
+        }
     }
 }
 
@@ -758,15 +778,26 @@ fn add(spec: &str) -> Result<ExitCode, Fail> {
     // Resolved with the new dependency first, so a clash leaves ferry.toml as it was
     project.dependencies.retain(|(p, _)| *p != package);
     project.dependencies.push((package.clone(), version.clone()));
-    let (_, lock) = resolve::resolve(&home, &project, &Lock::read(&project.dir)?)?;
+    too_old(&project);
+    let (dependencies, lock) = resolve::resolve(&home, &project, &Lock::read(&project.dir)?)?;
+    too_old_dependencies(&dependencies);
     let file = project.dir.join(MANIFEST);
     let text = std::fs::read_to_string(&file).map_err(|e| format!("can't read {}: {e}", file.display()))?;
-    let text = with_dependency(&text, &package.to_string(), &version);
+    let mut text = with_dependency(&text, &package.to_string(), &version);
+    // A range can't be read before 0.13.0, so the project says it needs that one,
+    // and an older ferry says so instead of that the version is wrong
+    let raise = version.starts_with(['^', '~']) && project.manifest.project.lks.as_deref().is_none_or(|lks| project::numbers(lks) < project::numbers(project::RANGES));
+    if raise {
+        text = with_lks(&text, project::RANGES);
+    }
     std::fs::write(&file, &text).map_err(|e| format!("can't write {}: {e}", file.display()))?;
     lock.write(&project.dir)?;
     match before {
         Some(old) => status("Changed", &format!("{package} from {old} to {version}")),
         None => status("Added", &format!("{package} {version}")),
+    }
+    if raise {
+        status("Set", &format!("lks = \"{}\" in {MANIFEST}: version ranges need Lakescript {} or newer", project::RANGES, project::RANGES));
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -784,6 +815,24 @@ fn with_dependency(text: &str, key: &str, version: &str) -> String {
     let existing = (header + 1..end).find(|&i| {
         lines[i].split_once('=').is_some_and(|(k, _)| k.trim().trim_matches('"').trim_matches('\'') == key)
     });
+    match existing {
+        Some(i) => lines[i] = line,
+        None => {
+            let last = (header..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap_or(header);
+            lines.insert(last + 1, line);
+        }
+    }
+    lines.join("\n") + "\n"
+}
+
+/// `ferry.toml` with `lks` in `[project]` set to `version`, keeping the rest
+/// of the file as it is.
+fn with_lks(text: &str, version: &str) -> String {
+    let line = format!("lks = \"{version}\"");
+    let mut lines: Vec<String> = text.lines().map(String::from).collect();
+    let Some(header) = lines.iter().position(|l| l.trim() == "[project]") else { return text.to_string() };
+    let end = lines[header + 1..].iter().position(|l| l.trim_start().starts_with('[')).map_or(lines.len(), |i| header + 1 + i);
+    let existing = (header + 1..end).find(|&i| lines[i].split_once('=').is_some_and(|(k, _)| k.trim().trim_matches('"').trim_matches('\'') == "lks"));
     match existing {
         Some(i) => lines[i] = line,
         None => {
@@ -829,7 +878,9 @@ fn remove(name: &str) -> Result<ExitCode, Fail> {
     let package = dependency_named(&project, name)?;
     project.dependencies.retain(|(p, _)| *p != package);
     let old = Lock::read(&project.dir)?;
-    let (_, lock) = resolve::resolve(&home, &project, &old)?;
+    too_old(&project);
+    let (dependencies, lock) = resolve::resolve(&home, &project, &old)?;
+    too_old_dependencies(&dependencies);
     let file = project.dir.join(MANIFEST);
     let text = std::fs::read_to_string(&file).map_err(|e| format!("can't read {}: {e}", file.display()))?;
     std::fs::write(&file, without_dependency(&text, &package.to_string())).map_err(|e| format!("can't write {}: {e}", file.display()))?;
@@ -851,7 +902,9 @@ fn update(name: Option<&String>) -> Result<ExitCode, Fail> {
         None => resolve::Update::All,
     };
     let old = Lock::read(&project.dir)?;
-    let (_, lock) = resolve::resolve_updating(&home, &project, &old, &which)?;
+    too_old(&project);
+    let (dependencies, lock) = resolve::resolve_updating(&home, &project, &old, &which)?;
+    too_old_dependencies(&dependencies);
     lock.write(&project.dir)?;
     let changes = lock.changes(&old);
     if changes.is_empty() {
@@ -1011,7 +1064,9 @@ fn install_package(spec: &str) -> Result<ExitCode, Fail> {
     }
     application(&project)?;
     project.modules()?;
+    too_old(&project);
     let (dependencies, _) = resolve::resolve(&home, &project, &Lock::read(&dir)?)?;
+    too_old_dependencies(&dependencies);
     if check_project(&project, &dependencies)? > 0 {
         return Err(format!("{package} {version} has errors, so it wasn't installed").into());
     }

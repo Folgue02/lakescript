@@ -273,5 +273,44 @@ fn ferry_project_outside_a_project_and_from_a_folder() {
     assert_eq!(run_file(&script).unwrap(), "['some_one/my_tool', '2.0.0', '0.13.0', [], ['run'], [], true]\n");
     let outside = dir.file("o.lks", "use std/tooling/ferry;\nferry::project('/');");
     let message = run_file(&outside).unwrap_err();
-    assert_eq!(message, "FileNotFound: there's no ferry.toml in / or in the folders above it");
+    assert_eq!(message, "FileNotFound: there's no ferry.toml in / or the folders above it. `ferry new` creates a project");
+}
+
+/// It reads a project with ferry's own code, so a `ferry.toml` that ferry
+/// refuses is refused with ferry's message, and the lock file gives the versions.
+#[test]
+fn ferry_project_reads_like_ferry() {
+    let dir = TempDir::new("tooling-like-ferry");
+    let read = |name: &str, manifest: &str| {
+        dir.file(&format!("{name}/ferry.toml"), manifest);
+        let script = dir.file(&format!("{name}.lks"), &format!("use std/tooling/ferry;
+const $p = ferry::project('{}/{name}');
+outln($p.dependencies);", dir.0.display()));
+        let shown = format!("{}/{name}/ferry.toml", dir.0.display());
+        run_file(&script).map_err(|e| e.replace(&shown, "ferry.toml"))
+    };
+    let project = |rest: &str| format!("[project]\nauthor = \"acme\"\nname = \"tool\"\nversion = \"1.0.0\"\nkind = \"library\"\n{rest}");
+    // What ferry refuses
+    let wrong = read("unknown", &project("colour = \"red\"\n")).unwrap_err();
+    assert!(wrong.starts_with("ValueError: ferry.toml is wrong: unknown field `colour`"), "{wrong}");
+    let wrong = read("kind", &project("").replace("library", "lib")).unwrap_err();
+    assert!(wrong.starts_with("ValueError: ferry.toml is wrong: unknown variant `lib`"), "{wrong}");
+    assert_eq!(
+        read("name", &project("").replace("\"tool\"", "\"1tool\"")).unwrap_err(),
+        "ValueError: ferry.toml: `1tool` can't be the name of a project: it can only have ASCII letters, digits, `_`, `-` and `.`, and can't start with a digit"
+    );
+    assert_eq!(
+        read("range", &project("[dependencies]\n\"github:acme/http\" = \">=1.0.0\"\n")).unwrap_err(),
+        "ValueError: ferry.toml: the version of github:acme/http `>=1.0.0` isn't a version: it's an exact one like `1.4.2`, or a range like `^1.4.2` or `~1.4.2`"
+    );
+    // The versions of the lock file, and `null` for one it doesn't have yet
+    dir.file("locked/ferry.lock", "[[package]]\nname = \"github:acme/http\"\nversion = \"1.5.0\"\ncommit = \"abc\"\n");
+    let dependencies = "[dependencies]\n\"github:acme/http\" = \"^1.4.2\"\n\"github:acme/json\" = \"2.0.0\"\n";
+    assert_eq!(
+        read("locked", &project(dependencies)).unwrap(),
+        "[Dependency(package: 'github:acme/http', wanted: '^1.4.2', version: '1.5.0'), Dependency(package: 'github:acme/json', wanted: '2.0.0', version: null)]\n"
+    );
+    dir.file("badlock/ferry.lock", "[[package]]\nname = 1\n");
+    let wrong = read("badlock", &project("")).unwrap_err();
+    assert!(wrong.contains("ferry.lock is wrong"), "{wrong}");
 }

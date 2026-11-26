@@ -6,6 +6,9 @@ mod archive;
 mod csv_format;
 #[cfg(feature = "toml")]
 mod toml_format;
+#[cfg(feature = "toml")]
+#[path = "tooling/ferry.rs"]
+mod tooling_ferry;
 #[cfg(feature = "crypto")]
 mod crypto;
 #[cfg(feature = "dates")]
@@ -122,6 +125,8 @@ const NATIVE: &[&str] = &[
     "std/process/native",
     "std/random/native",
     "std/time/native",
+    #[cfg(feature = "toml")]
+    "std/tooling/ferry/native",
 ];
 
 /// Modules written in Lakescript, which come with the interpreter.
@@ -258,6 +263,8 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         "std/template" => template::register(&mut exports),
         "std/test" => test::register(&mut exports),
         "std/time/native" => time::register(&mut exports),
+        #[cfg(feature = "toml")]
+        "std/tooling/ferry/native" => tooling_ferry::register(&mut exports),
         _ => return None,
     }
     let globals = Rc::new(Globals::default());

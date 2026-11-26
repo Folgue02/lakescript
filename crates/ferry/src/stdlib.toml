@@ -3924,7 +3924,7 @@ name = "Functions"
 kind = "function"
 name = "project"
 code = "Project project(?string $from = null)"
-text = "The project of the folder `$from`, or of the current one: the first `ferry.toml` in it or in the folders above it. Throws a `FileNotFound` if there's none"
+text = "The project of the folder `$from`, or of the current one: the first `ferry.toml` in it or in the folders above it. Throws a `FileNotFound` if there's none, and a `ValueError` with ferry's message if its `ferry.toml` or `ferry.lock` is wrong"
 group = "Functions"
 
 [[modules.items]]

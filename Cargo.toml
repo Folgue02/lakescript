@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/lakescript", "crates/lks", "crates/ferry", "crates/lks-lsp"]
+members = ["crates/lakescript", "crates/lks", "crates/ferry", "crates/ferry-project", "crates/lks-lsp"]
 
 [workspace.package]
 version = "0.12.2"
@@ -9,6 +9,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 lakescript = { path = "crates/lakescript" }
+ferry-project = { path = "crates/ferry-project" }
 
 # The interpreter walks the syntax tree with Rust's stack. Unoptimized
 # builds use several times more stack per nested expression, so the

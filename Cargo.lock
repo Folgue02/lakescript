@@ -420,8 +420,17 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 name = "ferry"
 version = "0.12.2"
 dependencies = [
+ "ferry-project",
  "lakescript",
  "pulldown-cmark",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "ferry-project"
+version = "0.12.2"
+dependencies = [
  "serde",
  "toml",
 ]
@@ -659,6 +668,7 @@ dependencies = [
  "csv",
  "dirs",
  "ego-tree",
+ "ferry-project",
  "flate2",
  "getrandom 0.4.3",
  "hmac",

@@ -2,13 +2,12 @@
 //! every clash between them, before anything runs.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 use crate::Fail;
 use crate::home::Home;
-use crate::project::{LOCK, Package, Project, satisfies};
+pub use crate::project::Lock;
+use crate::project::{self, LOCK, Locked, Package, Project, satisfies};
 
 /// A package the project needs, directly or through another one.
 pub struct Dependency {
@@ -21,71 +20,6 @@ pub struct Dependency {
     pub project: Project,
     /// Who asked for it: the project, or another package and its version.
     pub required_by: String,
-}
-
-#[derive(Default, PartialEq, Serialize, Deserialize)]
-pub struct Lock {
-    #[serde(default, rename = "package")]
-    packages: Vec<Locked>,
-}
-
-#[derive(PartialEq, Serialize, Deserialize)]
-struct Locked {
-    name: String,
-    version: String,
-    commit: String,
-}
-
-impl Lock {
-    pub fn read(dir: &Path) -> Result<Lock, Fail> {
-        let file = dir.join(LOCK);
-        match std::fs::read_to_string(&file) {
-            Ok(text) => toml::from_str(&text).map_err(|e| format!("{} is wrong: {}", file.display(), e.message()).into()),
-            Err(_) => Ok(Lock::default()),
-        }
-    }
-
-    /// Writes the lock file, only when something changed.
-    pub fn write(&self, dir: &Path) -> Result<(), Fail> {
-        let file = dir.join(LOCK);
-        let unchanged = if file.is_file() { Lock::read(dir).is_ok_and(|old| old == *self) } else { self.packages.is_empty() };
-        if unchanged {
-            return Ok(());
-        }
-        let body = toml::to_string(self).map_err(|e| format!("can't write {LOCK}: {e}"))?;
-        let text = format!("# Written by ferry. Commit it, and don't edit it.\n\n{body}");
-        std::fs::write(&file, text).map_err(|e| format!("can't write {}: {e}", file.display()).into())
-    }
-
-    fn commit(&self, package: &Package, version: &str) -> Option<&str> {
-        let name = package.to_string();
-        self.packages.iter().find(|l| l.name == name && l.version == version).map(|l| l.commit.as_str())
-    }
-
-    /// The version of a package in the lock file.
-    fn version(&self, package: &Package) -> Option<&str> {
-        let name = package.to_string();
-        self.packages.iter().find(|l| l.name == name).map(|l| l.version.as_str())
-    }
-
-    /// What changed from `old` to this one, a line for each package
-    /// *(i.e. `github:acme/http from 1.4.2 to 1.5.0`)*.
-    pub fn changes(&self, old: &Lock) -> Vec<(String, String)> {
-        let mut out = Vec::new();
-        for new in &self.packages {
-            match old.packages.iter().find(|l| l.name == new.name) {
-                Some(was) if was.version != new.version => out.push(("Updated".to_string(), format!("{} from {} to {}", new.name, was.version, new.version))),
-                Some(_) => {}
-                None => out.push(("Added".to_string(), format!("{} {}", new.name, new.version))),
-            }
-        }
-        for was in &old.packages {
-            if !self.packages.iter().any(|l| l.name == was.name) {
-                out.push(("Removed".to_string(), format!("{} {}", was.name, was.version)));
-            }
-        }
-        out
-    }
 }
 
 /// Which packages can get a newer version than the lock file's: none, for
@@ -188,7 +122,7 @@ pub fn resolve_updating(home: &Home, project: &Project, lock: &Lock, update: &Up
         .values()
         .map(|d| Locked { name: d.package.to_string(), version: d.version.clone(), commit: d.commit.clone() })
         .collect();
-    Ok((found.into_values().collect(), Lock { packages }))
+    Ok((found.into_values().collect(), Lock { version: project::LOCK_FORMAT, packages }))
 }
 
 /// The module path of a project: its `src/`, then the `src/` of each dependency.

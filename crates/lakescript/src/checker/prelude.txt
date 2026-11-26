@@ -466,6 +466,9 @@ void format(string $path);
 void check(string $path);
 void write(string $path, list<list<any>> $added);
 
+module std/tooling/ferry/native
+list<any> project(string $from);
+
 module std/dirs/native
 ?string base(string $kind);
 string app(string $kind, string $name);

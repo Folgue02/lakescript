@@ -219,7 +219,7 @@ impl Server {
             Ok(project) => project,
             // A `ferry.toml` that can't be read: its error, instead of checking the file as if there were no project
             Err(e) if folder.ancestors().any(|d| d.join(ferry::project::MANIFEST).is_file()) => {
-                return (Err(Diagnostic::new(e.0, Default::default())), false);
+                return (Err(Diagnostic::new(e, Default::default())), false);
             }
             Err(_) => {
                 if let Some(offset) = complete {

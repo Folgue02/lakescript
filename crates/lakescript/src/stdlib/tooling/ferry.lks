@@ -1,11 +1,12 @@
 //! The project a script is in, read from its `ferry.toml` and `ferry.lock`
 //! *(see ideas/stdlib/tooling/ferry.md)*, for the project's own scripts that
-//! `ferry task` runs.
+//! `ferry task` runs. Its Rust part, `std/tooling/ferry/native`, reads them
+//! with the same code as ferry.
 
-use std/format/toml;
 use std/fs;
 use std/path;
 use std/process;
+use std/tooling/ferry/native;
 
 /// A dependency of a project, as its `ferry.toml` asks for it.
 pub class Dependency {
@@ -57,59 +58,31 @@ pub class Project {
 
 /// The project of the folder `$from`, or of the current one: the first
 /// `ferry.toml` in it or in the folders above it. Throws a `FileNotFound` if
-/// there's none.
+/// there's none, and a `ValueError` with ferry's message if its `ferry.toml`
+/// or `ferry.lock` is wrong.
 pub Project project(?string $from = null) {
-    let $dir = path::absolute($from ?? process::cwd());
-    const $start = $dir;
-    while (!fs::file?(path::join($dir, 'ferry.toml'))) {
-        // The root has no folder above it
-        const $up = path::parent($dir) ?? $dir;
-        if ($up == $dir) {
-            throw FileNotFound(f"there's no ferry.toml in {$start} or in the folders above it");
-        }
-        $dir = $up;
-    }
-    return read($dir);
-}
-
-Project read(string $dir) {
-    const $manifest = toml::read(path::join($dir, 'ferry.toml')).as(map<string, any>);
-    const $info = $manifest['project']!.as(map<string, any>);
-    const $author = $info['author']!.as(string);
-    const $name = $info['name']!.as(string);
-    // What the lock file chose, by package
-    const $locked = <string, string>{};
-    const $lockFile = path::join($dir, 'ferry.lock');
-    if (fs::file?($lockFile)) {
-        const $lock = toml::read($lockFile).as(map<string, any>);
-        for ($package in ($lock['package'] ?? []).as(list<any>)) {
-            const $p = $package.as(map<string, any>);
-            $locked[$p['name']!.as(string)] = $p['version']!.as(string);
-        }
-    }
+    const $p = native::project(path::absolute($from ?? process::cwd()));
     const $dependencies = <Dependency>[];
-    for ($package => $wanted in ($manifest['dependencies'] ?? <string, any>{}).as(map<string, any>)) {
-        $dependencies.push(Dependency($package, $wanted.as(string), $locked[$package]));
+    for ($d in $p[7].as(list<list<any>>)) {
+        $dependencies.push(Dependency($d[0].as(string), $d[1].as(string), $d[2]?.as(string)));
     }
     return Project(
-        id: f"{idPart($author)}/{idPart($name)}",
-        author: $author,
-        name: $name,
-        version: $info['version']!.as(string),
-        kind: $info['kind']!.as(string),
-        lks: $info['lks']?.as(string),
-        dir: $dir,
+        id: $p[0].as(string),
+        author: $p[1].as(string),
+        name: $p[2].as(string),
+        version: $p[3].as(string),
+        kind: $p[4].as(string),
+        lks: $p[5]?.as(string),
+        dir: $p[6].as(string),
         dependencies: $dependencies,
     );
 }
 
-// `-` and `.` become `_` in an ID, like ferry does *(i.e. `my.tool` is `my_tool`)*
-string idPart(string $part) = $part.replace('-', '_').replace('.', '_');
-
+// Like ferry, the `.lks` files of a folder, without the hidden ones
 list<string> scriptsIn(string $folder) {
     if (!fs::dir?($folder)) return [];
     return fs::list($folder)
-        .filter(($name) -> $name.endsWith('.lks') && !$name.startsWith('.'))
+        .filter(($name) -> $name.endsWith('.lks') && !$name.startsWith('.') && fs::file?(path::join($folder, $name)))
         .map(($name) -> $name.removeSuffix('.lks'))
         .sorted();
 }

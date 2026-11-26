@@ -715,8 +715,12 @@ fn ranges_update_remove_and_uninstall() {
     }
     let dir = w.project("app", &app(""), &[("bin/app.lks", "use acme/lib/m;\noutln(m::v());")]);
     // A range takes the newest version that fits, and the lock keeps it
-    w.ok(&dir, &["add", "local:acme/lib@^1.0.0"]);
-    assert!(std::fs::read_to_string(dir.join("ferry.toml")).unwrap().contains("\"local:acme/lib\" = \"^1.0.0\""));
+    let said = stderr(&w.ferry(&dir, &["--color", "never", "add", "local:acme/lib@^1.0.0"]));
+    let manifest = std::fs::read_to_string(dir.join("ferry.toml")).unwrap();
+    assert!(manifest.contains("\"local:acme/lib\" = \"^1.0.0\""), "{manifest}");
+    // A range needs 0.13.0 to be read, so ferry says the project needs it
+    assert!(manifest.contains("kind = \"application\"\nlks = \"0.13.0\"\n"), "{manifest}");
+    assert!(said.contains("Set lks = \"0.13.0\" in ferry.toml: version ranges need Lakescript 0.13.0 or newer"), "{said}");
     assert_eq!(w.ok(&dir, &["run"]), "1.2.3\n");
     w.publish("acme", "lib", "1.3.0", "", &[("src/acme/lib/m.lks", "pub string v() = '1.3.0';")]);
     assert_eq!(w.ok(&dir, &["run"]), "1.2.3\n", "the lock file keeps the version");
@@ -779,6 +783,36 @@ fn a_project_can_need_a_newer_lakescript_and_its_docs() {
     assert!(!said.contains("warning"), "{said}");
     write(&dir.join("ferry.toml"), "[project]\nauthor = \"me\"\nname = \"lib\"\nversion = \"1.0.0\"\nkind = \"library\"\nlks = \"^1.0\"\n");
     assert!(w.fails(&dir, &["check"]).contains("the version of Lakescript it needs, `lks`, `^1.0` must be an exact version"));
+    // A file this one can't read, from a newer one, says which it needs before what's wrong
+    write(&dir.join("ferry.toml"), "[project]\nauthor = \"me\"\nname = \"lib\"\nversion = \"1.0.0\"\nkind = \"library\"\nlks = \"99.0.0\"\n\n[build]\nfast = true\n");
+    let said = w.fails(&dir, &["check"]);
+    assert!(said.contains(&format!("ferry.toml needs Lakescript 99.0.0 or newer, and this is {}, which can't read it: ", env!("CARGO_PKG_VERSION"))), "{said}");
+    assert!(said.contains("unknown field `build`"), "{said}");
+}
+
+#[test]
+fn a_dependency_can_need_a_newer_lakescript() {
+    let w = World::new();
+    // `lks` in its [project], after `kind`
+    w.publish_kind("library\"\nlks = \"99.0.0", "acme", "new", "1.0.0", "", &[("src/acme/new/m.lks", "pub string v() = 'new';")]);
+    w.publish("acme", "mid", "1.0.0", "\"local:acme/new\" = \"1.0.0\"\n", &[("src/acme/mid/m.lks", "use acme/new/m as n;\npub string v() = n::v();")]);
+    let dir = w.project("app", &app(""), &[("bin/app.lks", "use acme/mid/m;\noutln(m::v());")]);
+    let warning = format!(
+        "warning: local:acme/new 1.0.0, for local:acme/mid 1.0.0, needs Lakescript 99.0.0 or newer, and this is ferry {}: it may use what this one doesn't have",
+        env!("CARGO_PKG_VERSION")
+    );
+    // When it's added, and every command after
+    let said = stderr(&w.ferry(&dir, &["--color", "never", "add", "local:acme/mid@1.0.0"]));
+    assert!(said.contains(&warning), "{said}");
+    let run = w.ferry(&dir, &["--color", "never", "run"]);
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "new\n");
+    assert!(stderr(&run).contains(&warning), "{}", stderr(&run));
+    for args in [&["--color", "never", "check"][..], &["--color", "never", "update"][..]] {
+        let said = stderr(&w.ferry(&dir, args));
+        assert!(said.contains(&warning), "{args:?}: {said}");
+    }
+    // Only the one that needs it
+    assert!(!stderr(&w.ferry(&dir, &["--color", "never", "check"])).contains("acme/mid 1.0.0, for"));
 }
 
 #[test]

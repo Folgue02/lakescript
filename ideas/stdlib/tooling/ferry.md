@@ -19,7 +19,7 @@ for ($dependency in $project.dependencies) {
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `project(?string $from = null)` | `Project` | The project of the folder `$from`, or of the current one: the first `ferry.toml` in it or in the folders above it. Throws a `FileNotFound` if there's none |
+| `project(?string $from = null)` | `Project` | The project of the folder `$from`, or of the current one: the first `ferry.toml` in it or in the folders above it. Throws a `FileNotFound` if there's none, and a `ValueError` with ferry's message if its `ferry.toml` or `ferry.lock` is wrong |
 
 ## Project
 
@@ -62,4 +62,5 @@ A dependency of a project, as its `ferry.toml` asks for it.
 
 ## How it's made
 
-- `tooling/ferry.lks`, in Lakescript, on `std/format/toml`, so it's there when the `toml` feature is.
+- `tooling/ferry.lks` has the classes, over `std/tooling/ferry/native` *(`tooling/ferry.rs`)*, which reads the project with the crate `ferry-project`. ferry reads projects with the same crate, so there's one reader of `ferry.toml` and `ferry.lock`: a file ferry refuses is refused here with the same message, and a change to the files is made in one place. It's there when the `toml` feature is.
+- It used to read the files itself, in Lakescript on `std/format/toml`. That was a second reader to keep in step by hand: it took files ferry refuses *(i.e. an unknown key, `kind = "lib"`, a name like `1tool`)*, copied ferry's rule for IDs, and a new form of a key in `ferry.toml` would have broken it.

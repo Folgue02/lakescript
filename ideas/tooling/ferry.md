@@ -52,6 +52,11 @@ docs = true                 # a warning for each `pub` item without a `///` comm
 ```
 
 - `lks` is the oldest Lakescript the project needs. An older `ferry` warns before what it does, since the project may use what it doesn't have. The version manager of phase 15 will read it too *(see [roadmap.md](../roadmap.md))*.
+    - **The dependencies' too.** Each command that reads the project warns, after finding the dependencies, about each one whose `lks` is newer, with who needs it *(i.e. `warning: github:acme/new 1.0.0, for github:acme/mid 1.0.0, needs Lakescript 99.0.0 or newer, ...`)*. It's on every command, like the project's own, and not only `ferry check` and `ferry add`, since one can come in with a `ferry.lock` from a `git pull` and fail on `ferry run` with an error that doesn't say why. `ferry add`, `remove`, `update` and `install` warn too.
+    - **It's read before the rest.** `ferry.toml` is read strictly, so a key or a form this version doesn't know is an error. When `lks` asks for a newer version, that error starts by saying so *(i.e. `ferry.toml needs Lakescript 0.16.0 or newer, and this is 0.13.0, which can't read it: unknown field ...`)*, since the file was likely written for that one. The same goes for a `ferry.lock` it can't read. A file it can read is only the warning. `ferry-project` does this, so `std/tooling/ferry` says the same.
+    - **ferry raises it when it writes a form older versions can't read.** Version ranges are read from 0.13.0, so `ferry add` with `^` or `~` sets `lks = "0.13.0"` when the project has no `lks` or an older one, and says so. A form added later raises it to its own version the same way.
+    - **There's only a minimum, no maximum.** Nobody knows the maximum when they write it, and a cap would stop the project on every release, also the ones it would run fine on *(Python's `requires-python` caps are regretted for that; Cargo only has `rust-version`, a minimum)*. A project for an older version is covered otherwise: a newer ferry always reads the older forms, and before 1.0 the version manager of phase 15 runs the version the project asks for.
+    - A ferry older than 0.13.0 doesn't know `lks` itself, so it can only say the key is unknown.
 - `[check]` asks `ferry check` for more: with `docs = true`, a warning for each `pub` item and `pub` member without a `///` comment, but not for the values of an enum, whose names often say enough.
 
 - A dependency is written `repository:author/name`, and its version.
@@ -158,6 +163,9 @@ The author and name of a project are its real ones, as the repository has them *
 
 - Dependencies are resolved before anything runs: every one of them is downloaded if it's not in the local repository yet, and every clash is found then.
 - `ferry.lock` is written by `ferry` and should be committed. It has the commit of every package, and a package whose tag now points to another commit is an error.
+    - It starts with its format, `version = 1`, like Cargo.lock's `version`. A change to the format raises it, so an older ferry says the file was written by a newer one *(i.e. `ferry.lock is of format 2, and this is 0.13.0, which reads up to format 1: it was written by a newer ferry`)*, instead of a key it doesn't know. When the project's `lks` asks for a newer Lakescript, that's said first, like for `ferry.toml`.
+    - A newer ferry reads every older format. Lock files from 0.12.x, which have no `version`, are format 1, and aren't written again only to add it. 0.12.x reads a lock file with `version`, since it ignores keys it doesn't know there.
+    - Added in 0.13.0, before any lock file had to keep being read, since that's when it's cheapest.
 
 ## Scripts of a project
 
@@ -166,7 +174,7 @@ The author and name of a project are its real ones, as the repository has them *
 - **A project's own scripts**, to automate what's done on it *(i.e. a release, generated code, a deploy)*, like `cargo xtask` or the scripts of `npm run`, but in Lakescript. They're in `scripts/` *(i.e. `scripts/release.lks`)*.
 - **`ferry task <name> [arguments...]`** runs one, with the project's module path, like `ferry run` *(i.e. `ferry task release 1.2.0`)*.
 - They're apart from the commands of `bin/`: they're never installed, never bundled, and don't get docs pages. A name can be in both. `ferry check` checks them, like the tests.
-- **`std/tooling/ferry`** gives them the project: its ID, version, kind, dependencies and folders, read from its `ferry.toml` *(on `std/format/toml`)*. Later it could also run ferry's steps *(i.e. check, test, bundle)*. See [stdlib/tooling/ferry.md](../stdlib/tooling/ferry.md).
+- **`std/tooling/ferry`** gives them the project: its ID, version, kind, dependencies and folders, read from its `ferry.toml` and `ferry.lock` with ferry's own code, the crate `ferry-project`, so a script sees a project exactly as ferry does. Later it could also run ferry's steps *(i.e. check, test, bundle)*. See [stdlib/tooling/ferry.md](../stdlib/tooling/ferry.md).
 
 ## Later
 
