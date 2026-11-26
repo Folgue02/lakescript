@@ -90,6 +90,12 @@ What's coming next is in [planned.md](planned.md).
 | [http.md](http.md) | `std/http`: requests to web servers |
 | [format/json.md](format/json.md) | `std/format/json`: reading and writing JSON |
 | [format/csv.md](format/csv.md) | `std/format/csv`: reading and writing CSV |
+| [format/toml.md](format/toml.md) | `std/format/toml`: reading and writing TOML, also into classes |
+| [crypto/hash.md](crypto/hash.md) | `std/crypto/hash`: SHA-256, SHA-512, SHA-1, MD5, CRC-32 and HMAC |
+| [crypto/random.md](crypto/random.md) | `std/crypto/random`: tokens, keys and numbers for secrets, from the system |
+| [crypto/seal.md](crypto/seal.md) | `std/crypto/seal`: data sealed with a key, so only who has it reads it |
+| [crypto/password.md](crypto/password.md) | `std/crypto/password`: passwords kept hashed with Argon2, and checked |
+| [tooling/ferry.md](tooling/ferry.md) | `std/tooling/ferry`: the project a script is in, for its tasks |
 | [test.md](test.md) | `std/test`: what tests need besides `assert` *(see [testing.md](../tooling/testing.md))* |
 | [template.md](template.md) | `std/template`: templates with `{{ }}` tags, like Ruby's ERB |
 | [terminal.md](terminal.md) | `std/terminal`: prompts, styles, progress and ready-made interactive pieces |

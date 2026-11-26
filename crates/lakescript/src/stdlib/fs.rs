@@ -109,7 +109,7 @@ fn copy_dir(from: &Path, to: &Path, shown: &str) -> Result<(), NativeError> {
     Ok(())
 }
 
-fn temp_name(extension: &str) -> String {
+pub(super) fn temp_name(extension: &str) -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);

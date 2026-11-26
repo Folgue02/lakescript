@@ -41,15 +41,22 @@ author = "folgue02"
 name = "backup"
 version = "0.1.0"
 kind = "application"        # or "library"
+lks = "0.13.0"              # the oldest Lakescript it needs, optional
 
 [dependencies]
 "github:acme/http" = "1.4.2"
-"github:folgue02/strings" = "0.3.0"
+"github:folgue02/strings" = "^0.3.0"
+
+[check]                     # optional
+docs = true                 # a warning for each `pub` item without a `///` comment
 ```
 
+- `lks` is the oldest Lakescript the project needs. An older `ferry` warns before what it does, since the project may use what it doesn't have. The version manager of phase 15 will read it too *(see [roadmap.md](../roadmap.md))*.
+- `[check]` asks `ferry check` for more: with `docs = true`, a warning for each `pub` item and `pub` member without a `///` comment, but not for the values of an enum, whose names often say enough.
+
 - A dependency is written `repository:author/name`, and its version.
-- Versions follow [semver](https://semver.org), and for now a dependency asks for an **exact version**. Ranges *(i.e. `^1.4`)* can come later.
-- Since versions are exact, two dependencies that need different versions of the same package are an error that names both of them and both versions.
+- Versions follow [semver](https://semver.org). A dependency asks for an **exact version** *(i.e. `"1.4.2"`)*, or a **range**, like Cargo's: `^1.4.2` is that or newer below `2.0.0` *(below `0.5.0` for `^0.4.2`)*, and `~1.4.2` below `1.5.0`. A bare version stays exact, so ranges are asked for. Built in phase 13.
+- A range gets the newest version that fits, from the tags of its repository, and the lock file keeps it until `ferry update`. Every package has one version for the whole project: the one chosen first has to fit what the others ask for, or it's an error that names both. ferry doesn't look for another version that fits them all.
 
 ## Repositories
 
@@ -80,13 +87,17 @@ Like Maven's `~/.m2`, everything `ferry` downloads or installs goes into one fol
 
 | Command | Meaning |
 |---------|---------|
-| `ferry new <author/name>` | Creates a project in a new folder, with only what every project needs: `ferry.toml`, `.gitignore`, the empty `src/<author>/<name>/` and, for an application, an empty command in `bin/<name>.lks`. `--lib` makes a library, without `bin/`. `--example` adds a module, `greeting.lks`, and a command that uses it, to try ferry out |
+| `ferry new <author/name>` | Creates a project in a new folder named like the project *(i.e. `ferry new acme/http` makes `http/`)*, with only what every project needs: `ferry.toml`, `.gitignore`, the empty `src/<author>/<name>/` and, for an application, an empty command in `bin/<name>.lks`. `--lib` makes a library, without `bin/`, and with an empty `tests/` and a `module.md` to fill in, the front page of its docs. `--example` adds a module, `greeting.lks`, and a command that uses it, to try ferry out |
 | `ferry run [command] [arguments...]` | Runs one of the project's commands from `bin/`, with its dependencies on the module path. The name can be left out when there's only one |
+| `ferry task <name> [arguments...]` | Runs one of the project's own scripts, in `scripts/`, like a command *(see [Scripts of a project](#scripts-of-a-project))* |
 | `ferry check` | Type checks the whole project without running it, its tests too. It also warns about comments that don't match the code *(i.e. a `$name:` for a parameter that was renamed)*, which never make it fail. Every module, command and file of tests is checked on its own, so each one shows its first error, and the count is the errors shown. A file whose first error is in a module it uses gets a note that it's checked once that one is fixed. Paths are the ones from the project's folder *(i.e. `src/me/app/math.lks`, `tests/math.lks`)* |
 | `ferry doc [package\|std\|name] [--open]` | Makes the docs of the project, of a package or of the standard library, and opens them with `--open`. With a name *(i.e. `units::bytes`)*, writes its docs in the terminal *(see [docs.md](docs.md))* |
-| `ferry test [filter]` | Runs the tests in `tests/`, or only the ones whose name has `filter` *(see [testing.md](testing.md))*. A filter that no test's name has gets a note that says so |
+| `ferry test [filter] [--jobs <n>]` | Runs the tests in `tests/`, or only the ones whose name has `filter` *(see [testing.md](testing.md))*. Its files run at once, each in its own thread, and their results are printed whole, in order. `--jobs 1` runs them one at a time. A filter that no test's name has gets a note that says so |
 | `ferry add <repository:author/name@version>` | Adds a dependency to `ferry.toml` and downloads it *(i.e. `ferry add github:acme/http@1.4.2`)*. A dependency that's already there at that version gets a note, and another version of it says `Changed ... from 1.0.0 to 1.1.0`. A version that isn't there lists the ones that are, from the tags. A repository that isn't there, or that's private, says so instead of git's text: git never waits for a password, and a private one can be reached through ssh with a repository of its own in `~/.ferry/config.toml`. An ID in another case than the project's says how it's written *(i.e. `github:folgue02/text` for `github:Folgue02/text`)* |
+| `ferry remove <package>` | Takes a dependency out of `ferry.toml` and the lock file, by its package or its ID *(i.e. `ferry remove acme/http`)*, and the packages only it needed |
+| `ferry update [package]` | Moves each dependency, or one, to the newest version its range takes, in the lock file. `ferry.toml` doesn't change, and an exact version never moves |
 | `ferry bundle [command]` | Makes a bundle in `dist/` for each command of `bin/`, or only for one: the program in one file, `dist/todo.lkb`, with every module it needs and the project's `resources/`, run with `lks todo.lkb` or `./todo.lkb` *(see [bundles.md](bundles.md))*. It checks the project first, and makes nothing if it has errors |
+| `ferry uninstall [author/name]` | Removes the commands a project installed in `~/.ferry/bin`, and its copy: the project in the current folder, or the one named. Another project's commands stay |
 | `ferry install [repository:author/name@version]` | Installs the commands of an application into `~/.ferry/bin`: the project in the current folder, or one downloaded from a repository |
 
 ## What ferry says
@@ -150,17 +161,15 @@ The author and name of a project are its real ones, as the repository has them *
 
 ## Scripts of a project
 
-*Decided, for phase 13 in the plan of [roadmap.md](../roadmap.md). Not built yet.*
+*Built in phase 13 (see [roadmap.md](../roadmap.md)).*
 
 - **A project's own scripts**, to automate what's done on it *(i.e. a release, generated code, a deploy)*, like `cargo xtask` or the scripts of `npm run`, but in Lakescript. They're in `scripts/` *(i.e. `scripts/release.lks`)*.
 - **`ferry task <name> [arguments...]`** runs one, with the project's module path, like `ferry run` *(i.e. `ferry task release 1.2.0`)*.
-- They're apart from the commands of `bin/`: they're never installed, never bundled, and don't get docs pages. A name can be in both.
-- **`std/tooling/ferry`** gives them the project: its ID, version, kind, dependencies and folders, read from its `ferry.toml` *(on `std/format/toml`)*. Later it could also run ferry's steps *(i.e. check, test, bundle)*. Its functions aren't decided yet.
+- They're apart from the commands of `bin/`: they're never installed, never bundled, and don't get docs pages. A name can be in both. `ferry check` checks them, like the tests.
+- **`std/tooling/ferry`** gives them the project: its ID, version, kind, dependencies and folders, read from its `ferry.toml` *(on `std/format/toml`)*. Later it could also run ferry's steps *(i.e. check, test, bundle)*. See [stdlib/tooling/ferry.md](../stdlib/tooling/ferry.md).
 
 ## Later
 
 - Data files in packages *(i.e. the levels of a game)*: being discussed with the bundles, as their `resources/` *(see [bundles.md](bundles.md))*. Raised again by cinder.
-- Version ranges *(i.e. `^1.4`)*. Decided, for phase 13, with `ferry update`.
-- `ferry uninstall`, `ferry remove` and `ferry update`. Decided, for phase 13 in the plan of [roadmap.md](../roadmap.md), with version ranges.
 - **Dependencies on a folder**, a project somewhere on disk instead of a repository *(i.e. a library next to the program that uses it, worked on at the same time, like Cargo's `path = "../text"`)*. Decided, it should be supported: found when trying dependencies with `folgue02/text` and `folgue02/table`. How it's written in `ferry.toml`, and what the lock file keeps for it, aren't decided yet. Not in a phase of the plan yet.
 - **Maybe, later: projects with several projects in them**, like Cargo's workspaces *(i.e. a library and the tools that use it, in one repository)*. Not decided.

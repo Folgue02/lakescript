@@ -202,7 +202,8 @@ fn testing() {
     let out = run_ok(&["--test", "examples/testing.lks"]);
     assert!(out.starts_with("          ok testSlug\n"), "{out}");
     assert!(out.contains("          ok testAssertNarrows\n"), "{out}");
-    assert!(out.contains("Finished 6 passed, 0 failed in "), "{out}");
+    assert!(out.contains("ok testSlugWithoutAccents\n") && out.contains("ok testNotesInATemporaryFolder\n"), "{out}");
+    assert!(out.contains("Finished 8 passed, 0 failed in "), "{out}");
     let out = run_ok(&["--test", "examples/testing.lks", "Average"]);
     assert!(out.contains("ok testAverage\n") && out.contains("ok testAverageOfNothing\n") && out.contains("2 passed, 0 failed"), "{out}");
 
@@ -285,6 +286,24 @@ fn dirs() {
     let out = run_ok(&["examples/dirs.lks"]);
     let downloads = if out.ends_with("Downloads: found\n") { "found" } else { "none" };
     assert_eq!(out, format!("Settings in notes/settings.json, there yet: false\nRun 1: light\nRun 2: dark\nRun 3: dark\nDownloads: {downloads}\n"));
+}
+
+#[test]
+fn toml() {
+    let out = run_ok(&["examples/toml.lks"]);
+    assert_eq!(out, "My site\n8080\nMy site on localhost:8080, tagged ['blog', 'notes']\ntitle = \"My site\"\ntags = [\"blog\", \"notes\"]\n\n[server]\nhost = \"localhost\"\nport = 9090\n9090\n`$.server.host` is `null`, which TOML can't have\n");
+}
+
+#[test]
+fn crypto() {
+    let out = run_ok(&["examples/crypto.lks"]);
+    assert_eq!(out, "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\n16\ntrue\n[true, false]\n[43, 16, false]\nthe plans\nthese bytes can't be opened: the key is another one, or they were changed after they were sealed\n[true, true, false]\n");
+}
+
+#[test]
+fn dotenv() {
+    let out = run_ok(&["examples/dotenv.lks"]);
+    assert_eq!(out, "https://example.com/api\nAna López\nHello\nthere\nvim\n['API_URL', 'NAME', 'GREETING', 'EDITOR']\n");
 }
 
 #[test]

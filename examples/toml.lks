@@ -1,0 +1,49 @@
+#!/usr/bin/lks
+// Reading and writing TOML, the format of configuration files.
+
+use std/format/toml;
+use std/fs;
+use std/path;
+
+const $text = """
+    title = "My site"
+    tags = ["blog", "notes"]
+
+    [server]
+    port = 8080
+    started = 2026-11-26T09:00:00Z
+    """;
+
+// Without a type, a table is a map
+const $data = toml::parse($text);
+outln($data['title']);
+outln($data['server']['port']);
+
+// Into classes, with the defaults of what isn't there
+class Server {
+    pub string @host = 'localhost';
+    pub number @port = 80;
+}
+
+class Site {
+    pub string @title;
+    pub list<string> @tags = [];
+    pub Server @server = Server();
+}
+
+const $site = toml::parse($text, Site);
+outln(f"{$site.title} on {$site.server.host}:{$site.server.port}, tagged {$site.tags}");
+
+// Written back: tables inside tables are their own sections
+const $file = path::join(fs::tempDir(), 'site.toml');
+$site.server.port = 9090;
+toml::write($file, $site);
+out(fs::read($file));
+outln(toml::read($file, Site).server.port);
+
+// TOML has no `null`, so writing one says where it is
+try {
+    toml::stringify({'server' => {'host' => null}});
+} catch (TypeError $e) {
+    outln($e.message());
+}

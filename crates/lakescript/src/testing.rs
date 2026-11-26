@@ -65,7 +65,19 @@ impl Engine {
             let output = std::mem::replace(&mut self.host.output, Box::new(captured.clone()));
             let error = std::mem::replace(&mut self.host.error, Box::new(captured.clone()));
             let start = Instant::now();
-            let result = Interpreter::new(&mut self.host, self.stack_budget).call(&function, Vec::new(), Vec::new(), Default::default());
+            // `beforeEach`, the test if it went well, and `afterEach` whatever happened
+            let hook = |engine: &mut Engine, name: &str| match engine.globals.get(name) {
+                Some(Value::Function(f)) => Interpreter::new(&mut engine.host, engine.stack_budget).call(&f, Vec::new(), Vec::new(), Default::default()).map(|_| ()),
+                _ => Ok(()),
+            };
+            let mut result = hook(self, "beforeEach").and_then(|_| {
+                Interpreter::new(&mut self.host, self.stack_budget).call(&function, Vec::new(), Vec::new(), Default::default()).map(|_| ())
+            });
+            let after = hook(self, "afterEach");
+            if result.is_ok() {
+                result = after;
+            }
+            self.host.state.remove_test_dirs();
             let seconds = start.elapsed().as_secs_f64();
             self.host.output = output;
             self.host.error = error;

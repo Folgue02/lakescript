@@ -66,6 +66,7 @@ string insert(number $index, string $text);
 string repeat(number $times);
 string reverse();
 string collapseWhitespace();
+string withoutAccents();
 string indent(number $spaces = 4);
 string dedent();
 string wrap(number $width);
@@ -311,6 +312,8 @@ bool has(string $name);
 void set(string $name, string $value);
 void remove(string $name);
 map<string, string> all();
+void load(string $path = '.env');
+map<string, string> parse(string $text);
 
 module std/io
 ?string readLine();
@@ -340,12 +343,44 @@ list<list<string>> read(string $path, string $separator = ',');
 list<map<string, string>> readMaps(string $path, string $separator = ',');
 void write(string $path, list<any> $rows, string $separator = ',');
 
+module std/format/toml
+T parse<T>(string $text, ?type<T> $type = null);
+string stringify(any $value);
+T read<T>(string $path, ?type<T> $type = null);
+void write(string $path, any $value);
+
+module std/crypto/hash
+string sha256(any $data);
+string sha512(any $data);
+string sha1(any $data);
+string md5(any $data);
+string crc32(any $data);
+string file(string $path, string $algorithm = 'sha256');
+string hmac(any $key, any $data, string $algorithm = 'sha256');
+bool verifyHmac(any $key, any $data, string $signature, string $algorithm = 'sha256');
+
+module std/crypto/random
+string token(number $bytes = 32);
+string hex(number $bytes = 16);
+bytes bytes(number $length);
+number between(number $min, number $max);
+
+module std/crypto/seal
+bytes key();
+bytes seal(any $data, bytes $key);
+bytes open(bytes $sealed, bytes $key);
+
+module std/crypto/password
+string hash(string $password);
+bool verify(string $password, string $hash);
+
 module std/template
 string render(string $text, map<string, any> $values = {}, bool $html = false);
 string renderFile(string $path, map<string, any> $values = {}, ?bool $html = null);
 
 module std/test
 exception throws(() -> any $code);
+string tempDir();
 
 module std/fs
 string read(string $path);

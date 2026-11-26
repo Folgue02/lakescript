@@ -4,6 +4,10 @@
 mod archive;
 #[cfg(feature = "csv")]
 mod csv_format;
+#[cfg(feature = "toml")]
+mod toml_format;
+#[cfg(feature = "crypto")]
+mod crypto;
 #[cfg(feature = "dates")]
 mod dates;
 mod bytes;
@@ -44,7 +48,17 @@ pub const MODULES: &[&str] = &[
     "std/env",
     #[cfg(feature = "csv")]
     "std/format/csv",
+    #[cfg(feature = "crypto")]
+    "std/crypto/hash",
+    #[cfg(feature = "crypto")]
+    "std/crypto/password",
+    #[cfg(feature = "crypto")]
+    "std/crypto/random",
+    #[cfg(feature = "crypto")]
+    "std/crypto/seal",
     "std/format/json",
+    #[cfg(feature = "toml")]
+    "std/format/toml",
     "std/fs",
     #[cfg(feature = "html")]
     "std/html",
@@ -65,6 +79,8 @@ pub const MODULES: &[&str] = &[
     "std/time/zone",
     "std/test",
     "std/time",
+    #[cfg(feature = "toml")]
+    "std/tooling/ferry",
 ];
 
 /// The modules that are features of the crate, with their feature, to say
@@ -72,6 +88,12 @@ pub const MODULES: &[&str] = &[
 const FEATURES: &[(&str, &str)] = &[
     ("std/archive", "archive"),
     ("std/format/csv", "csv"),
+    ("std/format/toml", "toml"),
+    ("std/tooling/ferry", "toml"),
+    ("std/crypto/hash", "crypto"),
+    ("std/crypto/password", "crypto"),
+    ("std/crypto/random", "crypto"),
+    ("std/crypto/seal", "crypto"),
     ("std/html", "html"),
     ("std/http", "http"),
     ("std/terminal", "terminal"),
@@ -110,6 +132,8 @@ const SOURCES: &[(&str, &str)] = &[
     #[cfg(feature = "archive")]
     ("std/archive", include_str!("archive.lks")),
     ("std/dirs", include_str!("dirs.lks")),
+    #[cfg(feature = "toml")]
+    ("std/tooling/ferry", include_str!("tooling/ferry.lks")),
     ("std/process", include_str!("process.lks")),
     ("std/random", include_str!("random.lks")),
     ("std/process/Platform", include_str!("process/Platform.lks")),
@@ -201,6 +225,14 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         #[cfg(feature = "archive")]
         "std/archive/native" => archive::register(&mut exports),
         "std/bytes" => bytes::register(&mut exports),
+        #[cfg(feature = "crypto")]
+        "std/crypto/hash" => crypto::register_hash(&mut exports),
+        #[cfg(feature = "crypto")]
+        "std/crypto/password" => crypto::register_password(&mut exports),
+        #[cfg(feature = "crypto")]
+        "std/crypto/random" => crypto::register_random(&mut exports),
+        #[cfg(feature = "crypto")]
+        "std/crypto/seal" => crypto::register_seal(&mut exports),
         "std/dirs/native" => dirs::register(&mut exports),
         "std/env" => env::register(&mut exports),
         #[cfg(not(feature = "dates"))]
@@ -211,6 +243,8 @@ pub fn build(name: &str) -> Option<Rc<Module>> {
         #[cfg(feature = "csv")]
         "std/format/csv" => csv_format::register(&mut exports),
         "std/format/json" => json::register(&mut exports),
+        #[cfg(feature = "toml")]
+        "std/format/toml" => toml_format::register(&mut exports),
         #[cfg(feature = "html")]
         "std/html/native" => html::register(&mut exports),
         #[cfg(feature = "http")]

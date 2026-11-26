@@ -17,3 +17,4 @@ void testInvalidSizes() {
 | Function | Returns | Description |
 |----------|---------|-------------|
 | `throws(() -> any $code)` | `exception` | Runs `$code` and returns the exception it threw, to check its type and message. If it throws nothing, it throws an `AssertionError`, so the test fails |
+| `tempDir()` | `string` | A new empty folder, removed with what's in it when the test ends, also when it fails *(i.e. `const $dir = test::tempDir();`)*. Outside a test, it's removed when the script ends. Its path is a real one, without links |

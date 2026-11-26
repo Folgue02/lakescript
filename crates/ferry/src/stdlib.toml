@@ -551,6 +551,13 @@ group = "Changing"
 
 [[modules.items.members]]
 kind = "method"
+name = "withoutAccents"
+code = "string withoutAccents()"
+text = "A copy without accents *(i.e. `'Árbol Ñandú'.withoutAccents()` is `'Arbol Nandu'`)*, for slugs and searches. Letters with a stroke lose it too *(i.e. `ø`, `ł`)*, and letters that aren't accented stay *(i.e. `ß`, `æ`)*"
+group = "Changing"
+
+[[modules.items.members]]
+kind = "method"
 name = "indent"
 code = "string indent(number $spaces = 4)"
 text = "Adds `$spaces` spaces at the start of every line that isn't empty"
@@ -2184,6 +2191,165 @@ text = "Bytes written in base64, standard or for URLs *(with `-` and `_`)*, with
 group = "Functions"
 
 [[modules]]
+short = "crypto/hash"
+path = "std/crypto/hash"
+title = "std/crypto/hash"
+text = "Hashes and HMAC. `use std/crypto/hash;`, then `hash::sha256($text)`.\n\n*Built in phase 13 (see [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)). All of `std/crypto` is in pure Rust, on the RustCrypto crates, and is the `crypto` feature of the crate.*\n\n```\nuse std/crypto/hash;\n\noutln(hash::sha256('hello'));               // 2cf24dba5fb0a30e26e83b2ac5b9e29e...\noutln(hash::file('release.tar.gz') == $expected);\n\n// A webhook: the sender signs the body with a secret both know\nif (!hash::verifyHmac($secret, $body, $headers['X-Signature'])) exit(1);\n```"
+
+[[modules.groups]]
+name = "Functions"
+text = "- A hash is text, to print and to compare with the one given with a file. It's never `bytes`, since the type of what a function gives can't depend on an argument *(the `raw: true` that was the idea)*: `bytes::fromHex($hash)` gives them."
+
+[[modules.items]]
+kind = "function"
+name = "sha256"
+code = "string sha256(any $data)"
+text = "The SHA-256 of a string *(as UTF-8)* or of `bytes`, in lowercase hexadecimal *(i.e. `hash::sha256('')` is `'e3b0c442...'`)*. `bytes::fromHex()` gives its bytes"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "sha512"
+code = "string sha512(any $data)"
+text = "The SHA-512, in hexadecimal"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "sha1"
+code = "string sha1(any $data)"
+text = "The SHA-1, in hexadecimal. Only to check what's already given with it *(i.e. git's commits)*: it isn't safe against someone who makes two things with the same one"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "md5"
+code = "string md5(any $data)"
+text = "The MD5, in hexadecimal. Like SHA-1, only to check what's already given with it"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "crc32"
+code = "string crc32(any $data)"
+text = "The CRC-32, 8 hexadecimal digits *(i.e. `'cbf43926'` for `'123456789'`)*. A checksum, not a hash for security"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "file"
+code = "string file(string $path, string $algorithm = 'sha256')"
+text = "The hash of a file, read in pieces so a big one never has to fit in memory. `$algorithm` is `'sha256'`, `'sha512'`, `'sha1'`, `'md5'` or `'crc32'`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "hmac"
+code = "string hmac(any $key, any $data, string $algorithm = 'sha256')"
+text = "The HMAC of `$data` with `$key`, in hexadecimal, with `'sha256'` or `'sha512'`, to sign requests and webhooks"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "verifyHmac"
+code = "bool verifyHmac(any $key, any $data, string $signature, string $algorithm = 'sha256')"
+text = "Whether `$signature` is the HMAC of `$data` with `$key`. It takes it in hexadecimal, in any case, and with a `sha256=` before it, the way GitHub sends it. It's compared in the same time whatever matches, so the time it takes says nothing about the right one"
+group = "Functions"
+
+[[modules]]
+short = "crypto/password"
+path = "std/crypto/password"
+title = "std/crypto/password"
+text = "Keeping passwords so they can be checked, but never read back. `use std/crypto/password;`, then `password::hash($password)`.\n\n*Built in phase 13 (see [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)).*\n\n```\nuse std/crypto/password;\n\nconst $stored = password::hash('correct horse');   // '$argon2id$v=19$m=19456,t=2,p=1$...'\noutln(password::verify('correct horse', $stored));  // true\n```"
+
+[[modules.groups]]
+name = "Functions"
+text = "- Argon2id with the settings that RFC 9106 and OWASP recommend, which take some milliseconds on purpose, so trying many passwords is slow."
+
+[[modules.items]]
+kind = "function"
+name = "hash"
+code = "string hash(string $password)"
+text = "The password hashed with Argon2id and a new random salt, as one string that also says how it was made, to keep in a file or a database. The same password gives a different string each time"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "verify"
+code = "bool verify(string $password, string $hash)"
+text = "Whether the password is the one of a string from `hash()`. Throws a `ValueError` if `$hash` isn't one"
+group = "Functions"
+
+[[modules]]
+short = "crypto/random"
+path = "std/crypto/random"
+title = "std/crypto/random"
+text = "Random values for secrets: tokens, keys, passwords. They come from the system's own secure source, unlike `std/random`, whose numbers can be predicted and repeated with a seed. `use std/crypto/random;`, then `random::token()`.\n\n*Built in phase 13 (see [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)).*\n\n```\nuse std/crypto/random;\n\nconst $token = random::token();         // 'kE3x...', for a URL or a header\nconst $code = random::between(100000, 999999);\n```"
+
+[[modules.groups]]
+name = "Functions"
+text = "- `std/crypto/random` and `std/random` are both `random` after `use`, so a script that needs both gives one another name *(i.e. `use std/crypto/random as secure;`)*."
+
+[[modules.items]]
+kind = "function"
+name = "token"
+code = "string token(number $bytes = 32)"
+text = "That many random bytes in base64 for URLs, without `=` *(i.e. 43 characters for 32 bytes)*, so it can go in a URL, a header or a file as it is"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "hex"
+code = "string hex(number $bytes = 16)"
+text = "That many random bytes in hexadecimal *(i.e. 32 digits for 16 bytes)*"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "bytes"
+code = "bytes bytes(number $length)"
+text = "That many random bytes, from 1 to 1024"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "between"
+code = "number between(number $min, number $max)"
+text = "A whole number from `$min` to `$max`, both included, all of them as likely"
+group = "Functions"
+
+[[modules]]
+short = "crypto/seal"
+path = "std/crypto/seal"
+title = "std/crypto/seal"
+text = "Encrypting data with a key, so only who has the key can read it, and nobody can change it without it being noticed. `use std/crypto/seal;`, then `seal::seal($data, $key)`.\n\n*Built in phase 13 (see [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)).*\n\n```\nuse std/crypto/seal;\nuse std/fs;\n\nconst $key = seal::key();                       // 32 random bytes, kept secret\nfs::writeBytes('notes.sealed', seal::seal('my notes', $key));\noutln(seal::open(fs::readBytes('notes.sealed'), $key).text());\n```"
+
+[[modules.groups]]
+name = "Functions"
+text = "- **Nothing to choose, so nothing to get wrong**: the cipher is XChaCha20-Poly1305, and its nonce is a new random one each time, kept in what `seal()` gives. Scripts never pick a cipher, a mode or a nonce, which is where mistakes are made, like libsodium's secretbox.\n- What `seal()` gives starts with a byte for the version of the format, then the nonce, then the sealed data, so the format can change later and still open what's sealed now.\n- A key is always 32 bytes. Turning a password into a key isn't here yet."
+
+[[modules.items]]
+kind = "function"
+name = "key"
+code = "bytes key()"
+text = "A new key: 32 random bytes from the system's secure source. Keep it like a password *(i.e. `$key.base64()` in a variable of the environment)*"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "seal"
+code = "bytes seal(any $data, bytes $key)"
+text = "A string *(as UTF-8)* or `bytes`, sealed with the key. Sealing the same data twice gives different bytes"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "open"
+code = "bytes open(bytes $sealed, bytes $key)"
+text = "The data again, as `bytes` *(i.e. `.text()` for a string)*. Throws a `ValueError` if the key is another one, or the bytes were changed after they were sealed"
+group = "Functions"
+
+[[modules]]
 short = "dirs"
 path = "std/dirs"
 title = "std/dirs"
@@ -2648,6 +2814,7 @@ short = "env"
 path = "std/env"
 title = "std/env"
 text = "Environment variables. `use std/env;`, then `env::get('HOME')`.\n\nChanges only affect the script and the commands it runs, never the shell that started it."
+notes = "## .env files\n\n`env::load()` and `env::parse()` read the usual format *(decided for phase 13, see [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md))*:\n\n```\n# A comment\nexport API_URL=https://example.com\nNAME = Ana López        # after a space, `#` starts a comment\nGREETING=\"Hello\\nthere\"  # in \"...\", \\n, \\t, \\\" and \\\\ work\nRAW='$HOME stays as it is'\n```\n\n- A line is `NAME=value`, with spaces around them left out, and maybe `export` before it.\n- Values in `'...'` are as they're written. There's no `$VAR` in values: a variable is never made from another."
 
 [[modules.items]]
 kind = "function"
@@ -2684,6 +2851,18 @@ kind = "function"
 name = "all"
 code = "map<string, string> all()"
 text = "Every variable, sorted by name"
+
+[[modules.items]]
+kind = "function"
+name = "load"
+code = "void load(string $path = '.env')"
+text = "Sets the variables of a `.env` file, but never one that's already set, like dotenv: the file only gives defaults *(i.e. `env::load();` at the start of a script)*. Throws a `FileNotFound` if it isn't there, and a `ValueError` for a line that isn't `NAME=value`"
+
+[[modules.items]]
+kind = "function"
+name = "parse"
+code = "map<string, string> parse(string $text)"
+text = "The variables of the text of a `.env` file, in order, without setting them"
 
 [[modules]]
 short = "io"
@@ -3275,6 +3454,44 @@ text = "Writes the rows to a file, like `fs::write($path, csv::stringify($rows))
 group = "Functions"
 
 [[modules]]
+short = "format/toml"
+path = "std/format/toml"
+title = "std/format/toml"
+text = "Reading and writing TOML, the format of configuration files like `ferry.toml`. `use std/format/toml;`, then `toml::read('config.toml')`.\n\n*Built in phase 13 (see [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)).*\n\n```\nuse std/format/toml;\n\nclass Server {\n    pub string @host = 'localhost';\n    pub number @port = 8080;\n}\n\nclass Config {\n    pub string @name;\n    pub Server @server = Server();\n}\n\nconst $config = toml::parse(\"name = 'site'\\n\\n[server]\\nport = 3000\\n\", Config);\noutln($config.server.port);   // 3000\noutln(toml::stringify($config));\n```"
+notes = "## Reading\n\n| TOML | Lakescript |\n|------|------------|\n| table | `map<string, any>`, keeping the order of the keys |\n| array | `list<any>` |\n| string | `string` |\n| integer, float | `number` |\n| boolean | `bool` |\n| date and time | `string`, as TOML writes it *(i.e. `'1979-05-27T07:32:00Z'`)*, which `std/time` can read |\n\n- Reading into a type works like JSON's: a class gets its fields from the keys of a table, a missing key leaves the default of its field, and a value of the wrong type is a `TypeError` that says where *(i.e. `` `$.server.port` is a string, not a number ``)*.\n\n## Writing\n\n| Lakescript | TOML |\n|------------|------|\n| `map`, object | table. An object gets every field, and a value of an enum its name |\n| `list`, `range` | array |\n| `string`, `number`, `bool` | the same |\n\n- TOML has no `null`, so a `null` is a `TypeError` that says where it is *(i.e. `` `$.server.host` is `null`, which TOML can't have ``)*. A field that can be `null` is left out by giving the map without it.\n- Tables inside tables are written as their own sections *(i.e. `[server]`)*."
+
+[[modules.groups]]
+name = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "parse"
+code = "T parse<T>(string $text, ?type<T> $type = null)"
+text = "The table the TOML text holds, as a `map<string, any>`. Throws a `ValueError` with the line and column if it isn't valid. With a type, the value read into it, like `json::parse()` *(see Into types in [`std/format/json`](format.json.html))*"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "stringify"
+code = "string stringify(any $value)"
+text = "The value as TOML text. It must be a table: a map, or an object, whose fields are written like `json::stringify()` writes them"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "read"
+code = "T read<T>(string $path, ?type<T> $type = null)"
+text = "Reads and parses a file, like `toml::parse(fs::read($path), $type)`"
+group = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "write"
+code = "void write(string $path, any $value)"
+text = "Writes the value to a file, like `toml::stringify()`"
+group = "Functions"
+
+[[modules]]
 short = "template"
 path = "std/template"
 title = "std/template"
@@ -3526,6 +3743,13 @@ code = "exception throws(() -> any $code)"
 text = "Runs `$code` and returns the exception it threw, to check its type and message. If it throws nothing, it throws an `AssertionError`, so the test fails"
 group = "Functions"
 
+[[modules.items]]
+kind = "function"
+name = "tempDir"
+code = "string tempDir()"
+text = "A new empty folder, removed with what's in it when the test ends, also when it fails *(i.e. `const $dir = test::tempDir();`)*. Outside a test, it's removed when the script ends. Its path is a real one, without links"
+group = "Functions"
+
 [[modules]]
 short = "time"
 path = "std/time"
@@ -3686,3 +3910,139 @@ kind = "field"
 name = "name"
 code = "string @name"
 text = "Its IANA name *(i.e. `Europe/Madrid`)*, `UTC`, or an offset *(i.e. `+01:00`)*"
+
+[[modules]]
+short = "tooling/ferry"
+path = "std/tooling/ferry"
+title = "std/tooling/ferry"
+text = "The project a script is in, read from its `ferry.toml` and `ferry.lock`, for the project's own scripts that `ferry task` runs *(see Scripts of a project in [`std/tooling/ferry`](tooling.ferry.html))*. `use std/tooling/ferry;`, then `ferry::project()`.\n\n*Built in phase 13 (see [roadmap](https://github.com/Folgue02/lakescript/blob/master/ideas/roadmap.md)).*\n\n```\n// scripts/release.lks, run with `ferry task release`\nuse std/tooling/ferry;\n\nconst $project = ferry::project();\noutln(f\"Releasing {$project.id} {$project.version}\");\nfor ($dependency in $project.dependencies) {\n    outln(f\"  {$dependency.package} {$dependency.version ?? $dependency.wanted}\");\n}\n```"
+
+[[modules.groups]]
+name = "Functions"
+
+[[modules.items]]
+kind = "function"
+name = "project"
+code = "Project project(?string $from = null)"
+text = "The project of the folder `$from`, or of the current one: the first `ferry.toml` in it or in the folders above it. Throws a `FileNotFound` if there's none"
+group = "Functions"
+
+[[modules.items]]
+kind = "class"
+name = "Project"
+code = "class Project"
+text = "A ferry project: what its `ferry.toml` says, and where its folders are."
+
+[[modules.items.members]]
+kind = "field"
+name = "id"
+code = "string @id"
+text = "Its ID, the one its modules are written with *(i.e. `folgue02/backup`)*"
+
+[[modules.items.members]]
+kind = "field"
+name = "author"
+code = "string @author"
+text = "Its author, as `ferry.toml` has it"
+
+[[modules.items.members]]
+kind = "field"
+name = "name"
+code = "string @name"
+text = "Its name, as `ferry.toml` has it"
+
+[[modules.items.members]]
+kind = "field"
+name = "version"
+code = "string @version"
+text = "Its version"
+
+[[modules.items.members]]
+kind = "field"
+name = "kind"
+code = "string @kind"
+text = "`'application'` or `'library'`"
+
+[[modules.items.members]]
+kind = "field"
+name = "lks"
+code = "?string @lks"
+text = "The oldest Lakescript it needs, or `null` if it doesn't say"
+
+[[modules.items.members]]
+kind = "field"
+name = "dir"
+code = "string @dir"
+text = "Its folder, the one with `ferry.toml`"
+
+[[modules.items.members]]
+kind = "field"
+name = "dependencies"
+code = "list<Dependency> @dependencies"
+text = "Its dependencies, in the order of `ferry.toml`"
+
+[[modules.items.members]]
+kind = "method"
+name = "src"
+code = "string src()"
+text = "Its `src/` folder"
+
+[[modules.items.members]]
+kind = "method"
+name = "bin"
+code = "string bin()"
+text = "Its `bin/` folder, with its commands"
+
+[[modules.items.members]]
+kind = "method"
+name = "tests"
+code = "string tests()"
+text = "Its `tests/` folder"
+
+[[modules.items.members]]
+kind = "method"
+name = "scripts"
+code = "string scripts()"
+text = "Its `scripts/` folder, with its tasks"
+
+[[modules.items.members]]
+kind = "method"
+name = "resources"
+code = "string resources()"
+text = "Its `resources/` folder"
+
+[[modules.items.members]]
+kind = "method"
+name = "commands"
+code = "list<string> commands()"
+text = "The names of its commands, the scripts of `bin/`, sorted"
+
+[[modules.items.members]]
+kind = "method"
+name = "tasks"
+code = "list<string> tasks()"
+text = "The names of its tasks, the scripts of `scripts/`, sorted"
+
+[[modules.items]]
+kind = "class"
+name = "Dependency"
+code = "class Dependency"
+text = "A dependency of a project, as its `ferry.toml` asks for it."
+
+[[modules.items.members]]
+kind = "field"
+name = "package"
+code = "string @package"
+text = "Its package *(i.e. `github:acme/http`)*"
+
+[[modules.items.members]]
+kind = "field"
+name = "wanted"
+code = "string @wanted"
+text = "What `ferry.toml` asks for: a version, or a range *(i.e. `^1.4.2`)*"
+
+[[modules.items.members]]
+kind = "field"
+name = "version"
+code = "?string @version"
+text = "The version `ferry.lock` has, or `null` before ferry chose one"

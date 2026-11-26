@@ -48,12 +48,15 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 | [dirs.lks](dirs.lks) | `std/dirs`: a tool's settings kept in its configuration folder, read with defaults when they aren't there, and the folder created only to write them | |
 | [files.lks](files.lks) | `std/fs` and `std/path`, in a temporary folder | |
 | [json.lks](json.lks) | `std/format/json`: parsing, JSON Lines with `parseAll`, writing, typed values with `.as()`, reading into classes with `json::parse($text, list<Package>)`, and writing an object back | |
+| [toml.lks](toml.lks) | `std/format/toml`: a configuration read as maps and into classes with defaults, written back with its sections, and the `null` TOML can't have | |
+| [crypto.lks](crypto.lks) | `std/crypto`: SHA-256 and MD5, a file's hash, a webhook signed and checked with HMAC, secure tokens, data sealed with a key, and a password hashed with Argon2 | |
+| [dotenv.lks](dotenv.lks) | `.env` files with `env::load()`, which never override a variable already set, and `env::parse()` | |
 | [csv.lks](csv.lks) | `std/format/csv`: rows as lists or as maps by the names of the columns, quotes, other separators | |
 | [html.lks](html.lks) | `std/html`: a page, CSS selectors, text and attributes, repaired HTML, the JSON in a `<script>` | |
 | [terminal.lks](terminal.lks) | `std/terminal`: styles with `Style`, `ask` with a check, `choose`, `confirm`, a progress bar and a table; answers from a pipe without a terminal | `printf 'Ann\\n\\ntea\\ny\\n' \| lks examples/terminal.lks` |
 | [http.lks](http.lks) | `std/http`: a request, its status and headers, JSON answers, `NetworkError` and downloading | `lks examples/http.lks https://api.github.com/repos/rust-lang/rust` |
 | [templates/templates.lks](templates/templates.lks) | `std/template`: `{{ }}` tags, `for` and `if` blocks, a text template and an HTML template, `page.html.elks`, that escapes its values, `raw()` | |
-| [testing.lks](testing.lks) | Tests: functions named `test...`, `assert` and `test::throws` | `lks --test examples/testing.lks` |
+| [testing.lks](testing.lks) | Tests: functions named `test...`, `assert`, `test::throws`, `beforeEach` and `afterEach`, `test::tempDir()`, and `withoutAccents()` in a slug | `lks --test examples/testing.lks` |
 | [time.lks](time.lks) | `std/time`: timing code with `time::now()` in milliseconds | |
 | [dates.lks](dates.lks) | `std/time` and `std/time/zone`: parsing and formatting dates with Java's letters, ISO 8601, the same instant in other zones, comparing and sorting dates | |
 | [modules/main.lks](modules/main.lks) | `use` and `pub` with modules next to the script, in folders, with aliases, typed `pub const`s and a module's private `let` | |
@@ -64,7 +67,7 @@ Every example is type checked before it runs, like any script. `lks --no-type-ch
 
 | Example | Shows | Run it with |
 |---------|-------|-------------|
-| [sizes/](sizes) | A `ferry` project: `ferry.toml`, a module in `src/folgue02/sizes/` shared by two commands in `bin/`, its tests in `tests/`, its docs: `//!` and `///` comments and a `module.md`, a help text in `resources/` read with `std/resources`, and bundles of its commands | `ferry run human 1536`, `ferry run bytes`, `ferry test`, `ferry doc --open`, or `ferry bundle` and then `lks dist/human.lkb 1536`, from `examples/sizes` |
+| [sizes/](sizes) | A `ferry` project: `ferry.toml`, a module in `src/folgue02/sizes/` shared by two commands in `bin/`, its tests in `tests/`, its docs: `//!` and `///` comments and a `module.md`, a help text in `resources/` read with `std/resources`, bundles of its commands, and a task of its own in `scripts/` that reads the project with `std/tooling/ferry` | `ferry run human 1536`, `ferry run bytes`, `ferry test`, `ferry doc --open`, `ferry task info`, or `ferry bundle` and then `lks dist/human.lkb 1536`, from `examples/sizes` |
 
 The tests of `ferry` run it (`crates/ferry/tests/ferry.rs`).
 

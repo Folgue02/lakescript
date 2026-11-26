@@ -22,7 +22,7 @@ const MAX_DEPTH: usize = 512;
 // ---- Reading ----
 
 /// The value read into a type, when one is given *(i.e. `json::parse($text, User)`)*.
-fn typed(vm: &mut Interpreter, value: Value, target: &Value, span: Span) -> Exec<Value> {
+pub(super) fn typed(vm: &mut Interpreter, value: Value, target: &Value, span: Span) -> Exec<Value> {
     if matches!(target, Value::Null) { Ok(value) } else { convert_to(vm, value, target, "$", span) }
 }
 
@@ -32,7 +32,7 @@ fn convert_to(vm: &mut Interpreter, value: Value, target: &Value, path: &str, sp
     match target {
         Value::Class(class) => into_class(vm, value, class, path, span),
         Value::Type(t) => convert(vm, value, &t.0, &t.1, path, span),
-        other => error_as(TYPE_ERROR, format!("the type to read JSON into must be a type (i.e. `User` or `list<User>`), not a {}", other.type_name()), span),
+        other => error_as(TYPE_ERROR, format!("the type to read data into must be a type (i.e. `User` or `list<User>`), not a {}", other.type_name()), span),
     }
 }
 
@@ -417,7 +417,7 @@ fn unwritable(what: &str, path: &str) -> NativeError {
 }
 
 /// A key or a field after a path *(i.e. `$.name`, or `$["a b"]` for one that isn't a name)*.
-fn member_path(path: &str, key: &str) -> String {
+pub(super) fn member_path(path: &str, key: &str) -> String {
     if !key.is_empty() && key.chars().all(|c| c.is_alphanumeric() || c == '_') && !key.starts_with(|c: char| c.is_ascii_digit()) {
         format!("{path}.{key}")
     } else {

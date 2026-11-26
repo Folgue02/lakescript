@@ -718,6 +718,7 @@ fn string_method_plain(strings: &mut crate::strings::StringIndex, s: &Rc<str>, a
         }
         "reverse" => string(s.chars().rev().collect::<String>()),
         "collapseWhitespace" => string(s.split_whitespace().collect::<Vec<_>>().join(" ")),
+        "withoutAccents" => string(without_accents(&s)),
         "indent" => {
             a.count(0, 1)?;
             let spaces = " ".repeat(a.whole_or(0, 4)?.max(0) as usize);
@@ -1864,4 +1865,29 @@ fn describe_type(value: &Value) -> String {
         Value::Object(o) => format!("`{}`", o.class.name),
         other => format!("a {}", other.type_name()),
     }
+}
+
+/// A copy without accents *(i.e. `Árbol` to `Arbol`, `Ñandú` to `Nandu`)*:
+/// each letter is split into its base and its marks, and the marks are left
+/// out. Letters with a stroke, which aren't made of a base and a mark, are
+/// turned into their base too *(i.e. `ø`, `ł`, `đ`)*. Letters that aren't
+/// accented stay *(i.e. `ß`, `æ`)*.
+fn without_accents(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    use unicode_normalization::char::is_combining_mark;
+    text.nfd()
+        .filter(|c| !is_combining_mark(*c))
+        .map(|c| match c {
+            'ø' => 'o',
+            'Ø' => 'O',
+            'ł' => 'l',
+            'Ł' => 'L',
+            'đ' => 'd',
+            'Đ' => 'D',
+            'ħ' => 'h',
+            'Ħ' => 'H',
+            other => other,
+        })
+        .nfc()
+        .collect()
 }

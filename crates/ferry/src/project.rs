@@ -17,6 +17,17 @@ pub struct Manifest {
     pub project: Info,
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
+    #[serde(default)]
+    pub check: Checks,
+}
+
+/// What `ferry check` also looks at, when the project asks for it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Checks {
+    /// A warning for each `pub` item without a `///` comment.
+    #[serde(default)]
+    pub docs: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,6 +37,10 @@ pub struct Info {
     pub name: String,
     pub version: String,
     pub kind: Kind,
+    /// The oldest Lakescript the project needs *(i.e. `0.13.0`)*. An older
+    /// `ferry` warns.
+    #[serde(default)]
+    pub lks: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -51,10 +66,13 @@ impl Project {
         let manifest: Manifest = toml::from_str(&text).map_err(|e| format!("{} is wrong: {}", file.display(), e.message()))?;
         let id = id_of(&manifest.project.author, &manifest.project.name).map_err(|e| format!("{}: {e}", file.display()))?;
         check_version(&manifest.project.version).map_err(|e| format!("{}: {e}", file.display()))?;
+        if let Some(lks) = &manifest.project.lks {
+            check_version(lks).map_err(|e| format!("{}: the version of Lakescript it needs, `lks`, {e}", file.display()))?;
+        }
         let mut dependencies = Vec::new();
         for (key, version) in &manifest.dependencies {
             let package = Package::parse(key).map_err(|e| format!("{}: {e}", file.display()))?;
-            check_version(version).map_err(|e| format!("{}: the version of {package} {e}", file.display()))?;
+            check_requirement(version).map_err(|e| format!("{}: the version of {package} {e}", file.display()))?;
             dependencies.push((package, version.clone()));
         }
         Ok(Project { dir: dir.to_path_buf(), manifest, id, dependencies })
@@ -78,7 +96,20 @@ impl Project {
 
     /// The commands in `bin/`, sorted.
     pub fn commands(&self) -> Vec<String> {
-        let mut commands: Vec<String> = std::fs::read_dir(self.dir.join("bin"))
+        self.scripts_in("bin")
+    }
+
+    /// The project's own scripts, in `scripts/`, which `ferry task` runs.
+    pub fn tasks(&self) -> Vec<String> {
+        self.scripts_in("scripts")
+    }
+
+    pub fn task_file(&self, task: &str) -> PathBuf {
+        self.dir.join("scripts").join(format!("{task}.lks"))
+    }
+
+    fn scripts_in(&self, folder: &str) -> Vec<String> {
+        let mut commands: Vec<String> = std::fs::read_dir(self.dir.join(folder))
             .into_iter()
             .flatten()
             .flatten()
@@ -194,7 +225,15 @@ impl fmt::Display for Package {
     }
 }
 
-/// `repository:author/name@version`, as `ferry add` and `ferry install` take it.
+/// `repository:author/name@version` with an exact version, as `ferry install`
+/// and `ferry doc` take it.
+pub fn parse_exact_spec(text: &str) -> Result<(Package, String), String> {
+    let (package, version) = parse_spec(text)?;
+    check_version(&version).map_err(|e| format!("the version of {package} {e}"))?;
+    Ok((package, version))
+}
+
+/// `repository:author/name@version`, as `ferry add` takes it: the version can be a range.
 pub fn parse_spec(text: &str) -> Result<(Package, String), String> {
     // The package first, so the example of a missing version is a right one
     let (package, version) = match text.rsplit_once('@') {
@@ -205,7 +244,7 @@ pub fn parse_spec(text: &str) -> Result<(Package, String), String> {
     let Some(version) = version else {
         return Err(format!("`{package}` needs a version, i.e. `{package}@1.0.0`"));
     };
-    check_version(version).map_err(|e| format!("the version of {package} {e}"))?;
+    check_requirement(version).map_err(|e| format!("the version of {package} {e}"))?;
     Ok((package, version.to_string()))
 }
 
@@ -232,18 +271,69 @@ pub fn id_of(author: &str, name: &str) -> Result<String, String> {
 
 /// Versions are exact for now: `MAJOR.MINOR.PATCH`.
 pub fn check_version(version: &str) -> Result<(), String> {
+    match numbers(version) {
+        Some(_) => Ok(()),
+        None => Err(format!("`{version}` must be an exact version, like `1.4.2`")),
+    }
+}
+
+/// The three numbers of a version *(i.e. `1.4.2`)*, without leading zeros.
+pub fn numbers(version: &str) -> Option<(u64, u64, u64)> {
     let parts: Vec<&str> = version.split('.').collect();
     let number = |p: &&str| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) && (p.len() == 1 || !p.starts_with('0'));
-    if parts.len() == 3 && parts.iter().all(number) {
+    if parts.len() != 3 || !parts.iter().all(number) {
+        return None;
+    }
+    Some((parts[0].parse().ok()?, parts[1].parse().ok()?, parts[2].parse().ok()?))
+}
+
+/// What a dependency asks for: an exact version *(i.e. `1.4.2`)*, or a
+/// range like Cargo's: `^1.4.2` is that or newer below `2.0.0` *(below
+/// `0.5.0` for `^0.4.2`)*, and `~1.4.2` below `1.5.0`.
+pub fn check_requirement(requirement: &str) -> Result<(), String> {
+    let exact = requirement.trim_start_matches(['^', '~']);
+    if requirement.len() - exact.len() <= 1 && numbers(exact).is_some() {
         Ok(())
     } else {
-        Err(format!("`{version}` must be an exact version, like `1.4.2`. Ranges aren't supported yet"))
+        Err(format!("`{requirement}` isn't a version: it's an exact one like `1.4.2`, or a range like `^1.4.2` or `~1.4.2`"))
     }
+}
+
+/// Whether `version` is one that `requirement` takes.
+pub fn satisfies(requirement: &str, version: &str) -> bool {
+    let (Some(v), Some(low)) = (numbers(version), numbers(requirement.trim_start_matches(['^', '~']))) else { return false };
+    let high = match requirement.chars().next() {
+        Some('^') if low.0 > 0 => (low.0 + 1, 0, 0),
+        Some('^') if low.1 > 0 => (0, low.1 + 1, 0),
+        Some('^') => (0, 0, low.2 + 1),
+        Some('~') => (low.0, low.1 + 1, 0),
+        _ => return v == low,
+    };
+    v >= low && v < high
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ranges() {
+        let fits = |r: &str, v: &str| satisfies(r, v);
+        assert!(fits("1.4.2", "1.4.2") && !fits("1.4.2", "1.4.3"));
+        assert!(fits("^1.4.2", "1.4.2") && fits("^1.4.2", "1.9.0") && !fits("^1.4.2", "2.0.0") && !fits("^1.4.2", "1.4.1"));
+        // Below 1.0.0, the first number that isn't 0 is the one that can't change
+        assert!(fits("^0.4.2", "0.4.9") && !fits("^0.4.2", "0.5.0"));
+        assert!(fits("^0.0.3", "0.0.3") && !fits("^0.0.3", "0.0.4"));
+        assert!(fits("~1.4.2", "1.4.9") && !fits("~1.4.2", "1.5.0") && !fits("~1.4.2", "1.4.1"));
+        assert!(fits("~0.4.2", "0.4.5") && !fits("~0.4.2", "0.5.0"));
+        assert!(!fits("^1.0.0", "1.0") && !fits("^1.0", "1.0.0"));
+        for good in ["1.4.2", "^1.4.2", "~0.0.1"] {
+            assert!(check_requirement(good).is_ok(), "{good}");
+        }
+        for bad in ["1.4", "^^1.4.2", "^~1.4.2", ">=1.0.0", "01.0.0", "*", ""] {
+            assert!(check_requirement(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn an_id_in_another_case_says_how_its_written() {

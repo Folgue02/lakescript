@@ -24,7 +24,7 @@ TYPES = {
 # The modules written in Rust, by their file. The ones written in Lakescript
 # (i.e. std/http) get their types from their own code
 MODULES = {'general': 'general', 'bytes': 'std/bytes', 'path': 'std/path', 'env': 'std/env', 'io': 'std/io',
-           'resources': 'std/resources', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv',
+           'resources': 'std/resources', 'format/json': 'std/format/json', 'format/csv': 'std/format/csv', 'format/toml': 'std/format/toml', 'crypto/hash': 'std/crypto/hash', 'crypto/random': 'std/crypto/random', 'crypto/seal': 'std/crypto/seal', 'crypto/password': 'std/crypto/password',
            'template': 'std/template', 'test': 'std/test'}
 
 # Types described outside ideas/stdlib, and the Rust parts of the modules

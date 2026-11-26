@@ -55,6 +55,28 @@ assert failed: units::bytes('1.5 KB') == 1536
 - The condition must be a `bool`, like the one of an `if`. After the `assert`, the checker knows it holds, like after an `if` that returns *(i.e. `assert $name != null;` and then `$name.upper()`)*.
 - Its condition runs once: both sides of a comparison are kept, and shown from there.
 
+## Before and after each test
+
+A file of tests can have `void beforeEach()` and `void afterEach()`, found by their names like the tests. They run before and after each of its tests, with what the test prints:
+
+```
+use std/test;
+
+let string $dir = '';
+
+void beforeEach() {
+    $dir = test::tempDir();
+}
+
+void afterEach() {
+    outln(f"done with {$dir}");
+}
+```
+
+- `afterEach` runs also when the test or `beforeEach` failed, so it can clean up. When `beforeEach` fails, the test doesn't run, and fails with its error.
+- An error in `afterEach` makes a test that passed fail.
+- The folders of `test::tempDir()` are removed after `afterEach`.
+
 ## std/test
 
 What `assert` can't do *(see [stdlib/test.md](../stdlib/test.md))*:
@@ -97,6 +119,7 @@ tests/units.lks
 ```
 
 - A test that fails doesn't stop the others.
+- **The files run at once**, each in its own thread and its own engine, as many as the machine has cores *(built in phase 13)*. What each file gives is printed whole, in the order of the files, as soon as the ones before it are done, so the output is the same as one at a time. `ferry test --jobs 1` runs them one at a time, and `--jobs 4` four at once. The tests of one file still run one after another, since they share its top level.
 - The exit code is `1` when a test failed or a file couldn't run, and `0` when every one passed.
 - `ferry test` says all of it on stderr, like the rest of what ferry says. `lks --test` writes the tests on stdout, and an error that stops the file on stderr.
 - A file whose tests all are left out by the filter isn't shown. A filter that no test has in its name gets a note, since it picks tests by their names, not by their files. Whether it should also pick files isn't decided.
@@ -110,7 +133,4 @@ tests/units.lks
 
 ## Later
 
-- Running tests in parallel.
-- Functions that run before and after each test.
 - Running a test from an editor, through `lks-lsp`.
-- `test::tempDir()`, a folder that is removed after the test. Decided, for phase 13 in the plan of [roadmap.md](../roadmap.md), with running tests in parallel and the functions before and after each test. Running one from an editor is later.

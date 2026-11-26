@@ -104,6 +104,18 @@ pub struct ScriptState {
     pub cwd: PathBuf,
     /// Variables set (`Some`) or removed (`None`) by the script, over the real environment.
     pub env: HashMap<String, Option<String>>,
+    /// The folders of `test::tempDir()`, removed after the test, or when
+    /// the engine is done outside a test.
+    pub test_dirs: Vec<PathBuf>,
+}
+
+impl ScriptState {
+    /// Removes the folders of `test::tempDir()` made so far.
+    pub fn remove_test_dirs(&mut self) {
+        for dir in self.test_dirs.drain(..) {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
 }
 
 impl ScriptState {
@@ -116,6 +128,7 @@ impl ScriptState {
             resources: Resources::NextToScript,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             env: HashMap::new(),
+            test_dirs: Vec::new(),
         }
     }
 

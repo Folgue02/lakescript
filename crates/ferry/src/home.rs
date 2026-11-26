@@ -67,6 +67,11 @@ impl Home {
         }
     }
 
+    /// The versions of a package, from the tags of its repository, oldest first.
+    pub fn versions(&self, package: &Package) -> Result<Vec<String>, Fail> {
+        Ok(versions(&self.url(package)?))
+    }
+
     /// Checks that a repository is known, without downloading anything.
     pub fn knows(&self, package: &Package) -> Result<(), Fail> {
         self.url(package).map(|_| ())

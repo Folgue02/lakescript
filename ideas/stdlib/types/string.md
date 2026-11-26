@@ -87,6 +87,7 @@ All the `indexOf` methods return `null` when the text isn't found.
 | `repeat(number $times)` | `string` | *(i.e. `'-'.repeat(20)`)* |
 | `reverse()` | `string` | The characters in reverse order *(i.e. `'abc'.reverse()` is `'cba'`)* |
 | `collapseWhitespace()` | `string` | Trims it and turns every run of whitespace into one space *(i.e. `' a   b\n c '.collapseWhitespace()` is `'a b c'`)* |
+| `withoutAccents()` | `string` | A copy without accents *(i.e. `'Árbol Ñandú'.withoutAccents()` is `'Arbol Nandu'`)*, for slugs and searches. Letters with a stroke lose it too *(i.e. `ø`, `ł`)*, and letters that aren't accented stay *(i.e. `ß`, `æ`)* |
 | `indent(number $spaces = 4)` | `string` | Adds `$spaces` spaces at the start of every line that isn't empty |
 | `dedent()` | `string` | Removes the indentation all the lines share, like multi-line strings do |
 | `wrap(number $width)` | `string` | Breaks lines between words so none is longer than `$width`, when possible |

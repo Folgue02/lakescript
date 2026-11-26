@@ -127,6 +127,15 @@ fn a_new_project_runs() {
     // A library has no commands
     w.ok(&work, &["new", "me/lib", "--lib"]);
     assert!(w.fails(&w.work("lib"), &["run"]).contains("has no commands"));
+    // With a place for its tests and the front page of its docs
+    let lib = w.work("lib");
+    assert!(lib.join("tests").is_dir() && !lib.join("bin").exists());
+    let front = std::fs::read_to_string(lib.join("src/me/lib/module.md")).unwrap();
+    assert!(front.starts_with("# me/lib\n") && front.contains("ferry doc"), "{front}");
+    w.ok(&lib, &["doc"]);
+    assert!(std::fs::read_to_string(lib.join(".ferry/doc/index.html")).unwrap().contains("What lib is for"));
+    // An application gets neither
+    assert!(!project.join("tests").exists() && !project.join("src/some_user/my_tool/module.md").exists());
     assert!(w.fails(&work, &["new", "me/lib"]).contains("already exists"));
     assert_eq!(w.ferry(&work, &["new", "me/x", "--nope"]).status.code(), Some(2));
 }
@@ -239,7 +248,7 @@ fn a_moved_tag_is_noticed() {
 fn wrong_packages_and_versions() {
     let w = World::new();
     let dir = w.project("app", &app(""), &[("bin/app.lks", "")]);
-    assert!(w.fails(&dir, &["add", "local:acme/lib@^1.4"]).contains("must be an exact version"));
+    assert!(w.fails(&dir, &["add", "local:acme/lib@1.4"]).contains("isn't a version: it's an exact one like `1.4.2`, or a range like `^1.4.2`"));
     assert!(w.fails(&dir, &["add", "local:acme/lib"]).contains("needs a version"));
     assert!(w.fails(&dir, &["add", "nowhere:acme/lib@1.0.0"]).contains("there's no repository named `nowhere`"));
     assert!(w.fails(&dir, &["add", "local:acme/missing@1.0.0"]).contains("can't download"));
@@ -371,6 +380,8 @@ fn the_example_project_works() {
     assert!(w.fails(&example, &["run", "bytes", "1 XB"]).contains("unknown unit 'XB'"));
     // Its help is a resource
     assert!(w.ok(&example, &["run", "bytes"]).starts_with("Usage: bytes <size>..."));
+    // And a task of its own
+    assert_eq!(w.ok(&example, &["task", "info"]), "folgue02/sizes 0.1.0 (application)\nCommands: bytes, human\nTasks: info\n");
 }
 
 #[test]
@@ -694,4 +705,137 @@ fn installed_commands_read_their_resources() {
     std::fs::remove_dir_all(&dir).unwrap();
     let out = Command::new(w.home().join("bin/show")).output().unwrap();
     assert_eq!(stdout(&out), "kept\n", "{}", stderr(&out));
+}
+
+#[test]
+fn ranges_update_remove_and_uninstall() {
+    let w = World::new();
+    for version in ["1.0.0", "1.1.0", "1.2.3", "2.0.0"] {
+        w.publish("acme", "lib", version, "", &[("src/acme/lib/m.lks", &format!("pub string v() = '{version}';"))]);
+    }
+    let dir = w.project("app", &app(""), &[("bin/app.lks", "use acme/lib/m;\noutln(m::v());")]);
+    // A range takes the newest version that fits, and the lock keeps it
+    w.ok(&dir, &["add", "local:acme/lib@^1.0.0"]);
+    assert!(std::fs::read_to_string(dir.join("ferry.toml")).unwrap().contains("\"local:acme/lib\" = \"^1.0.0\""));
+    assert_eq!(w.ok(&dir, &["run"]), "1.2.3\n");
+    w.publish("acme", "lib", "1.3.0", "", &[("src/acme/lib/m.lks", "pub string v() = '1.3.0';")]);
+    assert_eq!(w.ok(&dir, &["run"]), "1.2.3\n", "the lock file keeps the version");
+    // Until `ferry update`
+    assert!(stderr(&w.ferry(&dir, &["--color", "never", "update"])).contains("Updated local:acme/lib from 1.2.3 to 1.3.0"));
+    assert_eq!(w.ok(&dir, &["run"]), "1.3.0\n");
+    assert!(stderr(&w.ferry(&dir, &["update", "acme/lib"])).contains("note: everything is at the newest version"));
+    assert!(w.fails(&dir, &["update", "acme/other"]).contains("acme/other isn't a dependency of me/app: they're local:acme/lib"));
+    // `~`, and nothing that fits
+    w.ok(&dir, &["add", "local:acme/lib@~1.1.0"]);
+    assert_eq!(w.ok(&dir, &["run"]), "1.1.0\n");
+    assert!(w.fails(&dir, &["add", "local:acme/lib@^3.0.0"]).contains("has no version that's ^3.0.0. Its versions are: 1.0.0, 1.1.0, 1.2.3, 1.3.0, 2.0.0"));
+    // Removing it takes it out of both files
+    assert!(stderr(&w.ferry(&dir, &["--color", "never", "remove", "local:acme/lib"])).contains("Removed local:acme/lib 1.1.0"));
+    assert!(!std::fs::read_to_string(dir.join("ferry.toml")).unwrap().contains("acme"));
+    assert!(!std::fs::read_to_string(dir.join("ferry.lock")).unwrap_or_default().contains("acme"));
+    assert!(w.fails(&dir, &["remove", "acme/lib"]).contains("it has none"));
+}
+
+#[test]
+fn uninstall_removes_the_commands_of_a_project() {
+    build_lks();
+    let w = World::new();
+    let tool = w.project(
+        "tool",
+        "[project]\nauthor = \"me\"\nname = \"tool\"\nversion = \"1.0.0\"\nkind = \"application\"\n",
+        &[("bin/tool.lks", "outln('tool');"), ("bin/other.lks", "outln('other');")],
+    );
+    let app_dir = w.project("app", &app(""), &[("bin/app.lks", "outln('app');")]);
+    w.ok(&tool, &["install"]);
+    w.ok(&app_dir, &["install"]);
+    let bin = w.home().join("bin");
+    assert!(bin.join("tool").exists() && bin.join("other").exists());
+    assert!(stderr(&w.ferry(&tool, &["--color", "never", "uninstall"])).contains("Uninstalled me/tool: other, tool"));
+    assert!(!bin.join("tool").exists() && !bin.join("other").exists());
+    // Another project's commands stay
+    assert!(bin.join("app").exists());
+    assert!(w.fails(&tool, &["uninstall", "me/tool"]).contains("me/tool isn't installed"));
+    w.ok(&w.dir, &["uninstall", "me/app"]);
+    assert!(!bin.join("app").exists());
+}
+
+#[test]
+fn a_project_can_need_a_newer_lakescript_and_its_docs() {
+    let w = World::new();
+    let manifest = "[project]\nauthor = \"me\"\nname = \"lib\"\nversion = \"1.0.0\"\nkind = \"library\"\nlks = \"99.0.0\"\n\n[check]\ndocs = true\n";
+    let dir = w.project(
+        "lib",
+        manifest,
+        &[("src/me/lib/m.lks", "/// Said.\npub number a() = 1;\npub number b() = 2;\n/// A point.\npub class P {\n    pub number @x;\n    /// Said.\n    pub number @y;\n}\nnumber hidden() = 3;\n")],
+    );
+    let said = stderr(&w.ferry(&dir, &["--color", "never", "check"]));
+    assert!(said.contains(&format!("warning: me/lib needs Lakescript 99.0.0 or newer, and this is ferry {}", env!("CARGO_PKG_VERSION"))), "{said}");
+    assert!(said.contains("warning: `m::b` is `pub`, and has no `///` comment\n --> src/me/lib/m.lks:3"), "{said}");
+    assert!(said.contains("`m::P.x` is `pub`"), "{said}");
+    assert!(!said.contains("`m::a`") && !said.contains("`m::P.y`") && !said.contains("hidden"), "{said}");
+    // Without `[check]`, nothing about docs; and an older one is fine
+    write(&dir.join("ferry.toml"), "[project]\nauthor = \"me\"\nname = \"lib\"\nversion = \"1.0.0\"\nkind = \"library\"\nlks = \"0.1.0\"\n");
+    let said = stderr(&w.ferry(&dir, &["check"]));
+    assert!(!said.contains("warning"), "{said}");
+    write(&dir.join("ferry.toml"), "[project]\nauthor = \"me\"\nname = \"lib\"\nversion = \"1.0.0\"\nkind = \"library\"\nlks = \"^1.0\"\n");
+    assert!(w.fails(&dir, &["check"]).contains("the version of Lakescript it needs, `lks`, `^1.0` must be an exact version"));
+}
+
+#[test]
+fn test_files_run_at_once_and_show_in_order() {
+    let w = World::new();
+    let files: Vec<(String, String)> = (0..6).map(|i| (format!("tests/t{i}.lks"), format!("void testN{i}() {{ assert {i} >= 0; }}\n"))).collect();
+    let files: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let dir = w.project("app", &app(""), &files);
+    for args in [&["--color", "never", "test"][..], &["--color", "never", "test", "--jobs", "1"][..], &["--color", "never", "test", "--jobs", "3", "N"][..]] {
+        let said = stderr(&w.ferry(&dir, args));
+        let at: Vec<usize> = (0..6).map(|i| said.find(&format!("testN{i}")).unwrap_or_else(|| panic!("{said}"))).collect();
+        assert!(at.windows(2).all(|w| w[0] < w[1]), "{said}");
+        assert!(said.contains("6 passed"), "{said}");
+    }
+    assert_eq!(w.ferry(&dir, &["test", "--jobs", "0"]).status.code(), Some(2));
+}
+
+#[test]
+fn task_runs_the_scripts_of_the_project() {
+    let w = World::new();
+    w.publish("acme", "lib", "1.0.0", "", &[("src/acme/lib/m.lks", "pub string hi() = 'hi';")]);
+    let release = "use std/tooling/ferry;\nuse std/process;\nuse acme/lib/m;\n\
+        const $p = ferry::project();\n\
+        outln([$p.id, $p.version, $p.commands(), $p.tasks(), process::args(), m::hi()]);\n\
+        for ($d in $p.dependencies) outln([$d.package, $d.wanted, $d.version]);\n";
+    let dir = w.project(
+        "app",
+        &app("\"local:acme/lib\" = \"^1.0.0\"\n"),
+        &[("bin/app.lks", ""), ("scripts/release.lks", release), ("scripts/.hidden.lks", "")],
+    );
+    let out = w.ok(&dir, &["task", "release", "1.2.0"]);
+    assert_eq!(out, "['me/app', '0.1.0', ['app'], ['release'], ['1.2.0'], 'hi']\n['local:acme/lib', '^1.0.0', '1.0.0']\n", "{out}");
+    // From a folder inside the project, too
+    std::fs::create_dir_all(dir.join("src/me/app")).unwrap();
+    assert!(w.ok(&dir.join("src/me/app"), &["task", "release"]).starts_with("['me/app'"));
+    assert!(w.fails(&dir, &["task"]).contains("they're release"));
+    assert!(w.fails(&dir, &["task", "nope"]).contains("has no task `nope`, the ones there are: release"));
+    // `ferry check` checks them
+    write(&dir.join("scripts/broken.lks"), "const number $n = 'x';\n");
+    assert!(w.fails(&dir, &["--color", "never", "check"]).contains("--> scripts/broken.lks:1:19"));
+}
+
+#[test]
+fn ranges_that_dont_fit_together() {
+    let w = World::new();
+    for version in ["1.0.0", "1.1.0", "2.0.0"] {
+        w.publish("acme", "base", version, "", &[("src/acme/base/b.lks", "pub number n() = 1;")]);
+    }
+    // A package that needs base 2, and the project that needs base 1
+    w.publish("acme", "top", "1.0.0", "\"local:acme/base\" = \"^2.0.0\"\n", &[("src/acme/top/t.lks", "pub number n() = 1;")]);
+    let dir = w.project("app", &app("\"local:acme/base\" = \"^1.0.0\"\n\"local:acme/top\" = \"1.0.0\"\n"), &[("bin/app.lks", "")]);
+    let said = w.fails(&dir, &["check"]);
+    assert!(said.contains("local:acme/base is needed in two versions that don't fit together: ^1.0.0 by the project me/app, which got 1.1.0, and ^2.0.0 by local:acme/top 1.0.0"), "{said}");
+    // When they fit, the one chosen first is shared
+    w.publish("acme", "mid", "1.0.0", "\"local:acme/base\" = \"~1.1.0\"\n", &[("src/acme/mid/m.lks", "pub number n() = 1;")]);
+    let dir = w.project("app2", &app("\"local:acme/base\" = \"^1.0.0\"\n\"local:acme/mid\" = \"1.0.0\"\n"), &[("bin/app.lks", "")]);
+    w.ok(&dir, &["check"]);
+    let lock = std::fs::read_to_string(dir.join("ferry.lock")).unwrap();
+    assert!(lock.contains("name = \"local:acme/base\"\nversion = \"1.1.0\""), "{lock}");
 }

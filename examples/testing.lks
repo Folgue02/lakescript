@@ -4,10 +4,12 @@
 // filter: `lks --test examples/testing.lks Slug`. In a ferry project they go
 // in tests/, and `ferry test` runs them.
 
+use std/fs;
+use std/path;
 use std/test;
 
 // The code being tested
-string slug(string $title) = $title.trim().lower().replaceMatches(%r"[^a-z0-9]+", '-').trimEnd('-');
+string slug(string $title) = $title.withoutAccents().trim().lower().replaceMatches(%r"[^a-z0-9]+", '-').trimEnd('-');
 
 number average(list<number> $values) {
     if ($values.empty?()) throw ValueError('there are no values');
@@ -22,6 +24,27 @@ void testSlug() {
 
 void testSlugOfNothing() {
     assert slug('') == '';
+}
+
+void testSlugWithoutAccents() {
+    assert slug('Crème Brûlée à la Ñandú') == 'creme-brulee-a-la-nandu';
+}
+
+// `beforeEach` and `afterEach` run around every test of the file, and
+// `test::tempDir()` is a folder that's removed when the test ends
+let string $notes = '';
+
+void beforeEach() {
+    $notes = path::join(test::tempDir(), 'notes.txt');
+}
+
+void afterEach() {
+    assert !fs::exists?($notes) || fs::read($notes) == 'buy milk';
+}
+
+void testNotesInATemporaryFolder() {
+    fs::write($notes, 'buy milk');
+    assert fs::read($notes) == 'buy milk';
 }
 
 void testAverage() {

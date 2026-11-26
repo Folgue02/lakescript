@@ -1,0 +1,43 @@
+#!/usr/bin/lks
+// std/crypto: hashes, HMAC, secure random values, sealing data with a key,
+// and passwords.
+
+use std/bytes;
+use std/crypto/hash;
+use std/crypto/password;
+use std/crypto/random as secure;
+use std/crypto/seal;
+use std/fs;
+use std/path;
+
+// Hashes are hexadecimal text, to print and compare
+outln(hash::sha256('hello'));
+outln(bytes::fromHex(hash::md5('hello')).length());
+
+// A file's, read in pieces
+const $file = path::join(fs::tempDir(), 'release.txt');
+fs::write($file, 'hello');
+outln(hash::file($file) == hash::sha256('hello'));
+
+// A webhook signed with a secret both sides know
+const $secret = 'shh';
+const $body = '{"event": "push"}';
+const $signature = hash::hmac($secret, $body);
+outln([hash::verifyHmac($secret, $body, $signature), hash::verifyHmac($secret, $body + ' ', $signature)]);
+
+// Secrets: from the system's secure source, never the same twice
+outln([secure::token().length(), secure::hex(8).length(), secure::token() == secure::token()]);
+
+// Sealed with a key: only who has it can open it, and nobody can change it unnoticed
+const $key = seal::key();
+const $sealed = seal::seal('the plans', $key);
+outln(seal::open($sealed, $key).text());
+try {
+    seal::open($sealed, seal::key());
+} catch (ValueError $e) {
+    outln($e.message());
+}
+
+// Passwords are kept hashed, and checked against it
+const $stored = password::hash('correct horse');
+outln([$stored.startsWith('$argon2id$'), password::verify('correct horse', $stored), password::verify('wrong', $stored)]);

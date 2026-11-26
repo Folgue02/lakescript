@@ -8,6 +8,14 @@ use crate::value::Value;
 
 pub fn register(m: &mut Exports) {
     m.vm_function("throws", &["code"], throws);
+    m.function("tempDir", |ctx, values| {
+        Args::new("test::tempDir", values, 0, 0)?;
+        let path = std::env::temp_dir().join(super::fs::temp_name(""));
+        std::fs::create_dir(&path).map_err(|e| super::io_error("create", &path.display().to_string(), e))?;
+        let path = crate::paths::canonical(&path);
+        ctx.state.test_dirs.push(path.clone());
+        Ok(Value::string(&path.display().to_string()))
+    });
 }
 
 /// Runs the function, and returns the exception it threw. Throwing nothing is

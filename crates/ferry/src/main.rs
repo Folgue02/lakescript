@@ -27,14 +27,19 @@ Usage: ferry <command> [arguments...]
 
 Commands:
   new <author/name> [--lib] [--example]
-                              Create a project in a new folder. --lib makes a library,
-                              and --example adds a module and a command to try it out
+                              Create a project in a new folder named like the project,
+                              i.e. ferry new acme/http makes http/. --lib makes a library,
+                              with tests/ and a module.md, and --example adds a module
+                              and a command to try it out
   run [command] [args...]     Run one of the project's commands from bin/. The name
                               can be left out when there's only one
-  check                       Type check the whole project, its tests too, without
-                              running it
-  test [filter]               Run the tests in tests/: their functions named test...
-                              With a filter, only the ones whose name has it
+  task <name> [args...]       Run one of the project's own scripts from scripts/, to
+                              automate what's done on it, i.e. ferry task release
+  check                       Type check the whole project, its tests and scripts too,
+                              without running it
+  test [filter] [--jobs <n>]  Run the tests in tests/: their functions named test...
+                              With a filter, only the ones whose name has it. The files
+                              run at once; --jobs 1 runs them one at a time
   doc [--open]                Make the docs of the project in .ferry/doc/, and
                               open them with --open
   doc <repository:author/name@version> [--open]
@@ -43,7 +48,11 @@ Commands:
   doc <name>                  Write the docs of one thing in the terminal,
                               i.e. ferry doc units::bytes
   add <repository:author/name@version>
-                              Add a dependency, i.e. ferry add github:acme/http@1.4.2
+                              Add a dependency, i.e. ferry add github:acme/http@1.4.2.
+                              The version can be a range: ^1.4.2 or ~1.4.2
+  remove <package>            Remove a dependency, i.e. ferry remove github:acme/http
+  update [package]            Move the dependencies, or one, to the newest version
+                              their range takes, in ferry.lock
   bundle [command]            Make a .lkb in dist/ for each command of bin/, or only
                               for one: the program in one file, with its modules and
                               resources/, run with `lks todo.lkb` or `./todo.lkb`
@@ -112,16 +121,33 @@ fn start() -> ExitCode {
             }
         }
         "run" => run(rest),
+        "task" => task(rest),
         "check" => match rest {
             [] => check(),
             _ => return usage_error("`ferry check` takes no arguments"),
         },
         "doc" => doc(rest),
-        "test" => match rest {
-            [] => test(None),
-            [filter] => test(Some(filter)),
-            _ => return usage_error("`ferry test` takes one filter at most, i.e. `ferry test bytes`"),
-        },
+        "test" => {
+            // `--jobs <n>` anywhere, and one filter at most
+            let mut jobs = None;
+            let mut filters = Vec::new();
+            let mut args = rest.iter();
+            while let Some(arg) = args.next() {
+                if arg == "--jobs" {
+                    match args.next().and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0) {
+                        Some(n) => jobs = Some(n),
+                        None => return usage_error("`--jobs` takes how many files of tests run at once, i.e. `ferry test --jobs 1`"),
+                    }
+                } else {
+                    filters.push(arg);
+                }
+            }
+            match filters.as_slice() {
+                [] => test(None, jobs),
+                [filter] => test(Some(filter), jobs),
+                _ => return usage_error("`ferry test` takes one filter at most, i.e. `ferry test bytes`"),
+            }
+        }
         "add" => match rest {
             [spec] => add(spec),
             _ => return usage_error("`ferry add` takes one package, i.e. `ferry add github:acme/http@1.4.2`"),
@@ -135,6 +161,20 @@ fn start() -> ExitCode {
             [] => install_here(),
             [spec] => install_package(spec),
             _ => return usage_error("`ferry install` takes one package at most"),
+        },
+        "remove" => match rest {
+            [package] => remove(package),
+            _ => return usage_error("`ferry remove` takes one dependency, i.e. `ferry remove github:acme/http`"),
+        },
+        "update" => match rest {
+            [] => update(None),
+            [package] => update(Some(package)),
+            _ => return usage_error("`ferry update` takes one dependency at most, i.e. `ferry update github:acme/http`"),
+        },
+        "uninstall" => match rest {
+            [] => uninstall(None),
+            [project] => uninstall(Some(project)),
+            _ => return usage_error("`ferry uninstall` takes one project at most, i.e. `ferry uninstall folgue02/backup`"),
         },
         other => return usage_error(&format!("there's no command `{other}`")),
     };
@@ -185,6 +225,11 @@ fn new(spec: &str, library: bool, example: bool) -> Result<ExitCode, Fail> {
     if example {
         write(src.join("greeting.lks"), "pub string greet(string $who) = f\"Hello, {$who}!\";\n".to_string())?;
     }
+    if library {
+        // The front page of its docs, and a place for its tests, which a library needs most
+        write(src.join("module.md"), format!("# {id}\n\nWhat {name} is for, the first page of its docs (`ferry doc`).\n"))?;
+        std::fs::create_dir_all(dir.join("tests")).map_err(|e| format!("can't create {}: {e}", dir.join("tests").display()))?;
+    }
     if !library {
         let command = if example {
             format!("use std/process;\nuse {id}/greeting;\n\noutln(greeting::greet(process::args()[0] ?? 'world'));\n")
@@ -201,6 +246,7 @@ fn new(spec: &str, library: bool, example: bool) -> Result<ExitCode, Fail> {
 fn open_project() -> Result<(Home, Project, Vec<Dependency>), Fail> {
     let home = Home::open()?;
     let project = Project::find(&current_dir()?)?;
+    too_old(&project);
     project.modules()?;
     let (dependencies, lock) = resolve::resolve(&home, &project, &Lock::read(&project.dir)?)?;
     lock.write(&project.dir)?;
@@ -241,6 +287,37 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
     }
 }
 
+/// `ferry task <name> [arguments...]`: one of the project's own scripts, in
+/// `scripts/`, run like a command *(see Scripts of a project in ideas/tooling/ferry.md)*.
+fn task(args: &[String]) -> Result<ExitCode, Fail> {
+    let (_, project, dependencies) = open_project()?;
+    let tasks = project.tasks();
+    let Some((name, args)) = args.split_first() else {
+        let there = if tasks.is_empty() { "it has none: they're the scripts in scripts/".to_string() } else { format!("they're {}", tasks.join(", ")) };
+        return Err(format!("`ferry task` takes the name of one of the tasks of {}: {there}", project.id).into());
+    };
+    if !tasks.contains(name) {
+        let there = if tasks.is_empty() { "it has none: they're the scripts in scripts/".to_string() } else { format!("the ones there are: {}", tasks.join(", ")) };
+        return Err(format!("{} has no task `{name}`, {there}", project.id).into());
+    }
+    let script = project.task_file(name);
+    let mut engine = engine(&resolve::module_path(&project, &dependencies));
+    engine.set_args(args.to_vec());
+    engine.set_command_name(&format!("ferry task {name}"));
+    engine.set_resources(&project.dir.join("resources"));
+    match engine.run_file(&script) {
+        Ok(outcome) => Ok(ExitCode::from(outcome.code().clamp(0, 255) as u8)),
+        Err(ref diagnostic) if let Some(text) = diagnostic.usage() => {
+            eprintln!("{} {text}", paint().error("error:"));
+            Ok(ExitCode::from(2))
+        }
+        Err(diagnostic) => {
+            eprintln!("{}", show_in(&project, &diagnostic, &script));
+            Ok(ExitCode::FAILURE)
+        }
+    }
+}
+
 /// The flag every engine shares, set on Ctrl+C *(see `on_ctrl_c` in lks)*.
 fn interrupt() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
     use std::sync::atomic::AtomicBool;
@@ -268,6 +345,7 @@ fn engine(module_path: &[PathBuf]) -> Engine {
 fn check() -> Result<ExitCode, Fail> {
     let (_, project, dependencies) = open_project()?;
     let errors = check_project(&project, &dependencies)?;
+    undocumented(&project)?;
     if errors > 0 {
         return Err(format!("{} has {errors} {}", project.id, if errors == 1 { "error" } else { "errors" }).into());
     }
@@ -302,7 +380,14 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
         }
     }
     let test_files = if tests { project.test_files() } else { Vec::new() };
-    let scripts: Vec<PathBuf> = project.commands().into_iter().map(|c| project.command_file(&c)).chain(test_files).collect();
+    let tasks = if tests { project.tasks() } else { Vec::new() };
+    let scripts: Vec<PathBuf> = project
+        .commands()
+        .into_iter()
+        .map(|c| project.command_file(&c))
+        .chain(tasks.iter().map(|t| project.task_file(t)))
+        .chain(test_files)
+        .collect();
     let mut waiting = Vec::new();
     for script in &scripts {
         if let Err(diagnostic) = engine(&module_path).check_file(script) {
@@ -320,6 +405,48 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
         stale_comments(project, &file);
     }
     Ok(shown.len())
+}
+
+/// Warns when this ferry is older than the Lakescript the project needs,
+/// its `lks` in `[project]`. It's a warning: an older one may still work.
+fn too_old(project: &Project) {
+    let Some(needed) = &project.manifest.project.lks else { return };
+    let this = env!("CARGO_PKG_VERSION");
+    if project::numbers(this) < project::numbers(needed) {
+        let paint = paint();
+        eprintln!("{} {} needs Lakescript {needed} or newer, and this is ferry {this}: it may use what this one doesn't have\n", paint.warning("warning:"), project.id);
+    }
+}
+
+/// Warns about each `pub` item of the project's modules without a `///`
+/// comment, when `ferry.toml` asks for it with `[check]` and `docs = true`.
+fn undocumented(project: &Project) -> Result<(), Fail> {
+    if !project.manifest.check.docs {
+        return Ok(());
+    }
+    let paint = paint();
+    for module in project.modules()? {
+        let file = project.src().join(format!("{module}.lks"));
+        let Ok(text) = std::fs::read_to_string(&file) else { continue };
+        let Ok(doc) = lakescript::docs::module_doc(&text) else { continue };
+        let short = module.rsplit('/').next().unwrap_or(&module).to_string();
+        let mut missing = Vec::new();
+        for item in &doc.items {
+            if item.doc.text.trim().is_empty() {
+                missing.push((format!("{short}::{}", item.name), item.line));
+            }
+            // The values of an enum are often clear from their names
+            for member in item.members.iter().filter(|m| m.kind != lakescript::docs::ItemKind::Value) {
+                if member.doc.text.trim().is_empty() {
+                    missing.push((format!("{short}::{}.{}", item.name, member.name), member.line));
+                }
+            }
+        }
+        for (name, line) in missing {
+            eprintln!("{} `{name}` is `pub`, and has no `///` comment\n {} {}:{line}\n", paint.warning("warning:"), paint.note("-->"), relative(project, &file));
+        }
+    }
+    Ok(())
 }
 
 /// Warns about the comments of a file that don't match its code *(i.e. a
@@ -399,7 +526,7 @@ fn package_docs(home: &Home, project: &Project, package: &project::Package, vers
 fn doc_package(spec: &str, open: bool) -> Result<ExitCode, Fail> {
     let home = Home::open()?;
     // Without a version, the one of the project's lock file *(i.e. `ferry doc github:acme/http`)*
-    let (package, version) = match project::parse_spec(spec) {
+    let (package, version) = match project::parse_exact_spec(spec) {
         Ok(found) => found,
         Err(e) => match locked(&project::Package::parse(spec)?.id())? {
             Some(dependency) => (dependency.package, dependency.version),
@@ -504,8 +631,10 @@ fn open_page(page: &Path) {
     }
 }
 
-/// `ferry test`: every file in `tests/`, and its tests whose name has `filter`.
-fn test(filter: Option<&str>) -> Result<ExitCode, Fail> {
+/// `ferry test`: every file in `tests/`, and its tests whose name has
+/// `filter`. The files run at once, `jobs` of them, each in its own engine
+/// and thread, and what each one gives is printed whole, in their order.
+fn test(filter: Option<&str>, jobs: Option<usize>) -> Result<ExitCode, Fail> {
     let (_, project, dependencies) = open_project()?;
     let files = project.test_files();
     status("Testing", &project.id);
@@ -514,28 +643,67 @@ fn test(filter: Option<&str>) -> Result<ExitCode, Fail> {
         return Ok(ExitCode::SUCCESS);
     }
     let module_path = resolve::module_path(&project, &dependencies);
+    let jobs = jobs.unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get())).clamp(1, files.len());
     let start = std::time::Instant::now();
     let mut results = Vec::new();
     let mut broken = 0;
-    for file in &files {
-        let shown = relative(&project, file);
-        let mut tests = engine(&module_path);
-        tests.set_resources(&project.dir.join("resources"));
-        match tests.run_tests(file, filter) {
-            Ok(found) if found.is_empty() => {}
-            Ok(found) => {
-                eprintln!("{shown}");
-                for result in &found {
-                    eprint!("{}", lakescript::render_result(result, &shown, paint()));
+    // What a file gave: its tests, or the error that stopped it, already shown
+    enum Outcome {
+        Ran(Vec<lakescript::TestResult>),
+        Broken(String),
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let (sender, received) = std::sync::mpsc::channel::<(usize, Outcome)>();
+    std::thread::scope(|scope| -> Result<(), Fail> {
+        for _ in 0..jobs {
+            let sender = sender.clone();
+            let (next, files, module_path, project) = (&next, &files, &module_path, &project);
+            std::thread::Builder::new()
+                .stack_size(STACK_SIZE)
+                .spawn_scoped(scope, move || {
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(file) = files.get(i) else { break };
+                        let mut tests = engine(module_path);
+                        tests.set_resources(&project.dir.join("resources"));
+                        let outcome = match tests.run_tests(file, filter) {
+                            Ok(found) => Outcome::Ran(found),
+                            Err(diagnostic) => Outcome::Broken(show_in(project, &diagnostic, file)),
+                        };
+                        if sender.send((i, outcome)).is_err() {
+                            break;
+                        }
+                    }
+                })
+                .map_err(|e| format!("can't start a thread for the tests: {e}"))?;
+        }
+        drop(sender);
+        // Printed in the order of the files, each one as soon as those before it are
+        let mut waiting = std::collections::BTreeMap::new();
+        let mut shown_up_to = 0;
+        for (i, outcome) in received {
+            waiting.insert(i, outcome);
+            while let Some(outcome) = waiting.remove(&shown_up_to) {
+                let shown = relative(&project, &files[shown_up_to]);
+                match outcome {
+                    Outcome::Ran(found) if found.is_empty() => {}
+                    Outcome::Ran(found) => {
+                        eprintln!("{shown}");
+                        for result in &found {
+                            eprint!("{}", lakescript::render_result(result, &shown, paint()));
+                        }
+                        results.extend(found);
+                    }
+                    Outcome::Broken(text) => {
+                        broken += 1;
+                        eprintln!("{text}\n");
+                    }
                 }
-                results.extend(found);
-            }
-            Err(diagnostic) => {
-                broken += 1;
-                eprintln!("{}\n", show_in(&project, &diagnostic, file));
+                shown_up_to += 1;
             }
         }
-    }
+        Ok(())
+    })?;
     eprint!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), paint()));
     if let Some(filter) = filter.filter(|_| results.is_empty() && broken == 0) {
         note(&format!("no test has `{filter}` in its name: the filter picks tests by their names, i.e. `testBytes`, not by their files"));
@@ -624,6 +792,112 @@ fn with_dependency(text: &str, key: &str, version: &str) -> String {
         }
     }
     lines.join("\n") + "\n"
+}
+
+/// `ferry.toml` without the dependency `key`, keeping everything else as it's written.
+fn without_dependency(text: &str, key: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(header) = lines.iter().position(|l| l.trim() == "[dependencies]") else { return text.to_string() };
+    let end = lines[header + 1..].iter().position(|l| l.trim_start().starts_with('[')).map_or(lines.len(), |i| header + 1 + i);
+    let kept: Vec<&str> = lines
+        .iter()
+        .enumerate()
+        .filter(|(i, l)| !(*i > header && *i < end && l.split_once('=').is_some_and(|(k, _)| k.trim().trim_matches('"').trim_matches('\'') == key)))
+        .map(|(_, l)| *l)
+        .collect();
+    kept.join("\n") + "\n"
+}
+
+/// The dependency of `project` named `name`: by its package *(i.e.
+/// `github:acme/http`)* or its ID *(i.e. `acme/http`)*.
+fn dependency_named(project: &Project, name: &str) -> Result<project::Package, Fail> {
+    let found = project.dependencies.iter().find(|(p, _)| p.to_string() == name || p.id() == name);
+    match found {
+        Some((package, _)) => Ok(package.clone()),
+        None => {
+            let there: Vec<String> = project.dependencies.iter().map(|(p, _)| p.to_string()).collect();
+            let there = if there.is_empty() { "it has none".to_string() } else { format!("they're {}", there.join(", ")) };
+            Err(format!("{name} isn't a dependency of {}: {there}", project.id).into())
+        }
+    }
+}
+
+/// `ferry remove`: a dependency out of `ferry.toml` and the lock file.
+fn remove(name: &str) -> Result<ExitCode, Fail> {
+    let home = Home::open()?;
+    let mut project = Project::find(&current_dir()?)?;
+    let package = dependency_named(&project, name)?;
+    project.dependencies.retain(|(p, _)| *p != package);
+    let old = Lock::read(&project.dir)?;
+    let (_, lock) = resolve::resolve(&home, &project, &old)?;
+    let file = project.dir.join(MANIFEST);
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("can't read {}: {e}", file.display()))?;
+    std::fs::write(&file, without_dependency(&text, &package.to_string())).map_err(|e| format!("can't write {}: {e}", file.display()))?;
+    lock.write(&project.dir)?;
+    // It, and what only it needed
+    for (verb, what) in lock.changes(&old) {
+        status(&verb, &what);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `ferry update`: each dependency, or one, to the newest version its range
+/// takes, in the lock file. `ferry.toml` doesn't change.
+fn update(name: Option<&String>) -> Result<ExitCode, Fail> {
+    let home = Home::open()?;
+    let project = Project::find(&current_dir()?)?;
+    let which = match name {
+        Some(name) => resolve::Update::Only(dependency_named(&project, name)?),
+        None => resolve::Update::All,
+    };
+    let old = Lock::read(&project.dir)?;
+    let (_, lock) = resolve::resolve_updating(&home, &project, &old, &which)?;
+    lock.write(&project.dir)?;
+    let changes = lock.changes(&old);
+    if changes.is_empty() {
+        note("everything is at the newest version its range in ferry.toml takes: an exact version like `1.4.2` never moves, a range like `^1.4.2` does");
+    }
+    for (verb, what) in changes {
+        status(&verb, &what);
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `ferry uninstall`: the commands an installed project wrote in
+/// `~/.ferry/bin`, and its copy. The project in the current folder, or the one named.
+fn uninstall(id: Option<&String>) -> Result<ExitCode, Fail> {
+    let home = Home::open()?;
+    let id = match id {
+        // `github:acme/backup` is the project `acme/backup`
+        Some(id) => match project::Package::parse(id) {
+            Ok(package) => package.id(),
+            Err(_) => id.clone(),
+        },
+        None => Project::find(&current_dir()?)?.id,
+    };
+    let bin = home.bin();
+    let mut removed = Vec::new();
+    for entry in std::fs::read_dir(&bin).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let owner = text.lines().find_map(|l| l.strip_prefix(OWNER).or_else(|| l.strip_prefix(OWNER_CMD)));
+        if owner == Some(id.as_str()) {
+            std::fs::remove_file(&path).map_err(|e| format!("can't remove {}: {e}", path.display()))?;
+            removed.push(path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        }
+    }
+    let copy = home.installed(&id);
+    let had_copy = copy.exists();
+    if had_copy {
+        std::fs::remove_dir_all(&copy).map_err(|e| format!("can't remove {}: {e}", copy.display()))?;
+    }
+    if removed.is_empty() && !had_copy {
+        return Err(format!("{id} isn't installed: no command in {} is from it", bin.display()).into());
+    }
+    removed.sort();
+    let commands = if removed.is_empty() { String::new() } else { format!(": {}", removed.join(", ")) };
+    status("Uninstalled", &format!("{id}{commands}"));
+    Ok(ExitCode::SUCCESS)
 }
 
 /// `ferry bundle`: a `.lkb` in `dist/` for each command, or for one, after
@@ -728,7 +1002,7 @@ fn install_here() -> Result<ExitCode, Fail> {
 }
 
 fn install_package(spec: &str) -> Result<ExitCode, Fail> {
-    let (package, version) = project::parse_spec(spec)?;
+    let (package, version) = project::parse_exact_spec(spec)?;
     let home = Home::open()?;
     let (dir, _) = home.fetch(&package, &version)?;
     let project = Project::read(&dir)?;

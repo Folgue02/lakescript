@@ -1,0 +1,28 @@
+#!/usr/bin/lks
+// .env files: variables for a script kept in a file next to it, like
+// API_URL=... , that never override the ones already set.
+
+use std/env;
+use std/fs;
+use std/path;
+
+const $file = path::join(fs::tempDir(), '.env');
+fs::write($file, """
+    # Settings for the script
+    API_URL=https://example.com/api
+    export NAME="Ana López"
+    GREETING="Hello\\nthere"   # in quotes, \\n is a new line
+    EDITOR=nano
+    """);
+
+// A variable that's already set wins: the file only gives defaults
+env::set('EDITOR', 'vim');
+env::load($file);
+outln(env::require('API_URL'));
+outln(env::get('NAME'));
+outln(env::get('GREETING'));
+outln(env::get('EDITOR'));
+
+// Without setting anything
+const $values = env::parse(fs::read($file));
+outln($values.keys());

@@ -73,6 +73,7 @@ pub struct Engine {
 /// *(i.e. a list inside itself)* is the only thing left behind.
 impl Drop for Engine {
     fn drop(&mut self) {
+        self.host.state.remove_test_dirs();
         let loader = &mut self.host.loader;
         let modules: Vec<Rc<crate::modules::Module>> =
             loader.cache.drain().map(|(_, m)| m).chain(loader.std_cache.drain().map(|(_, m)| m)).chain(loader.in_progress.drain().map(|(_, m)| m)).collect();

@@ -1,0 +1,9 @@
+//! Says what the project is, for `ferry task info`: one of the project's
+//! own scripts, which are never installed or bundled.
+
+use std/tooling/ferry;
+
+const $project = ferry::project();
+outln(f"{$project.id} {$project.version} ({$project.kind})");
+outln(f"Commands: {$project.commands().join(', ')}");
+outln(f"Tasks: {$project.tasks().join(', ')}");

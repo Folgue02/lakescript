@@ -4,19 +4,19 @@ What the standard library is getting next *(see [README.md](README.md))*. Termin
 
 ## Decided
 
-- **`std/crypto`, a family of modules**, decided after `v0.12.2`, for phase 13. Hashing and signing aren't encryption, so it's `crypto`, not `encryption`. On the RustCrypto crates, in pure Rust, not on `ring`, which needs a C compiler for Windows:
+- **`std/crypto`, a family of modules**, built in phase 13 *(see [crypto/hash.md](crypto/hash.md), [crypto/random.md](crypto/random.md), [crypto/seal.md](crypto/seal.md) and [crypto/password.md](crypto/password.md))*. Hashing and signing aren't encryption, so it's `crypto`, not `encryption`. On the RustCrypto crates, in pure Rust, not on `ring`, which needs a C compiler for Windows:
     - `std/crypto/hash`: SHA-256, SHA-512, SHA-1, MD5 and CRC32 of a string, `bytes` or a file, and HMAC, to sign and check webhooks and the requests of APIs.
     - Secure random values: tokens, keys and passwords from the system's own source, since `std/random` isn't for secrets.
     - Encryption: one pair, to seal data with a key and open it, like libsodium's secretbox. Which cipher, its mode and its nonce are never the script's choice, since that's where mistakes are made.
     - Password hashing, with Argon2, to keep passwords and check them.
-    - The names of the modules after `hash`, and their functions, aren't decided yet.
-- **`.env` files** in `std/env`, for phase 13. The proposal: `env::load('.env')` sets its variables, but never one that's already set, like dotenv; `env::parse($text)` gives them as a `map<string, string>` without setting them; lines are `KEY=value`, with `#` comments, quoted values and an `export` before them.
-- **`std/tooling/ferry`**, for the scripts of a project *(see Scripts of a project in [ferry.md](../tooling/ferry.md))*, in phase 13.
+    - The modules are `std/crypto/hash`, `std/crypto/random`, `std/crypto/seal` and `std/crypto/password`. A hash is hexadecimal text, to print and compare, and `bytes::fromHex()` gives its bytes. `raw: true` was the idea, but the type a function gives can't depend on an argument.
+- **`.env` files** in `std/env`, built in phase 13 *(see [env.md](env.md))*. The proposal: `env::load('.env')` sets its variables, but never one that's already set, like dotenv; `env::parse($text)` gives them as a `map<string, string>` without setting them; lines are `KEY=value`, with `#` comments, quoted values and an `export` before them.
+- **`std/tooling/ferry`**, for the scripts of a project, built in phase 13 *(see [tooling/ferry.md](tooling/ferry.md))*.
 
 - **`std/http`**, to make requests *(see [http.md](http.md))*.
   - A response with a 4xx or 5xx status isn't an exception: it's a response like any other, and the script checks its status.
   - When there's no response at all *(no network, a name that doesn't resolve, a refused connection, a timeout)*, it throws a `NetworkError`, a new built-in exception under `IOError`.
-- **Formats grouped under `std/format/`**: `std/format/json`, `std/format/csv`, `std/format/toml`, which is needed and is in phase 13 of the plan of [roadmap.md](../roadmap.md), and later, not planned, `std/format/xml`: XML is a document, not data, so it doesn't map onto lists and maps like JSON *(attributes and children, one element or many, text mixed with elements, namespaces, and entities that have to be turned off for safety)*. It would be an element tree like `std/html`'s. `std/json` moves there without a period of both, since only its author uses the language while it's in development *(see [roadmap.md](../roadmap.md))*. After `use std/format/json;` the module is still called `json`.
+- **Formats grouped under `std/format/`**: `std/format/json`, `std/format/csv`, `std/format/toml`, built in phase 13 *(see [format/toml.md](format/toml.md))*, and later, not planned, `std/format/xml`: XML is a document, not data, so it doesn't map onto lists and maps like JSON *(attributes and children, one element or many, text mixed with elements, namespaces, and entities that have to be turned off for safety)*. It would be an element tree like `std/html`'s. `std/json` moves there without a period of both, since only its author uses the language while it's in development *(see [roadmap.md](../roadmap.md))*. After `use std/format/json;` the module is still called `json`.
   - The formats share their names where they fit: `parse($text)` and `stringify($value)` for text, `read($path)` and `write($path, $value)` for files.
 - **CSV** in `std/format/csv`, read and written as lists of rows, or as maps by the names of the columns.
 - **`std/random`**, built *(see [random.md](random.md))*: `number()`, `between($min, $max)`, `bool()`, `uuid()` and `seed($n)`. Choosing and shuffling stay on lists *(`$list.random()`, `$list.shuffle()`)*, and `seed()` makes them repeatable too.

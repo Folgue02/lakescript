@@ -397,7 +397,7 @@ fn use_paths_are_completed_and_their_folders_documented() {
     let value = hover["contents"]["value"].as_str().unwrap();
     assert!(value.starts_with("```lakescript\nfolder std\n```\n\nThe standard library: ") && value.contains("`std/fs`"), "{hover}");
     let hover = server.at("textDocument/hover", &script, 0, 10);
-    assert_eq!(hover["contents"]["value"], "```lakescript\nfolder std/format\n```\n\nA folder of the standard library: `std/format/csv`, `std/format/json`.", "{hover}");
+    assert_eq!(hover["contents"]["value"], "```lakescript\nfolder std/format\n```\n\nA folder of the standard library: `std/format/csv`, `std/format/json`, `std/format/toml`.", "{hover}");
     server.change(&script, "use web/api;\noutln(api::count());\n", 6);
     server.diagnostics_for(&script);
     // The module: its `//!`
