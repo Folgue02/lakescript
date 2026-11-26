@@ -45,11 +45,6 @@ pub class App {
     }
 }
 
-/// The folders of a tool with that name, like `App($name)` *(i.e.
-/// `dirs::app('myapp').config()`)*. Throws a `ValueError` if the name is empty
-/// or has `/` or `\`.
-pub App app(string $name) = App($name);
-
 /// The folder for configuration: `$XDG_CONFIG_HOME` or `~/.config` on Linux
 /// and macOS, `%APPDATA%` on Windows.
 pub string config() = native::base('config')!;

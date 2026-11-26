@@ -17,7 +17,7 @@ const $base = fs::tempDir();
 env::set('XDG_CONFIG_HOME', $base);
 env::set('APPDATA', $base);
 
-const $app = dirs::app('notes');
+const $app = dirs::App('notes');
 const $file = path::join($app.config(), 'settings.json');
 
 // Reading needs no folder: without the file, the defaults

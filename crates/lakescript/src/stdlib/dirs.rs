@@ -214,7 +214,7 @@ pub fn register(m: &mut Exports) {
         Ok(found(place(ctx, |p| p.base(&kind))?))
     });
     m.function("app", |ctx, values| {
-        let a = Args::new("dirs::app", values, 2, 2)?;
+        let a = Args::new("dirs::App", values, 2, 2)?;
         let (kind, name) = (a.str(0)?, a.str(1)?);
         Ok(Value::string(&place(ctx, |p| p.app(&kind, &name))?))
     });

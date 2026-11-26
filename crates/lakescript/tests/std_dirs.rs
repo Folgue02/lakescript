@@ -23,7 +23,7 @@ fn error(source: &str) -> String {
 #[test]
 fn folders_follow_the_variables_of_the_script() {
     let code = "env::set('HOME', '/home/ana');\nenv::set('XDG_CONFIG_HOME', '/etc/ana');\nenv::set('XDG_CACHE_HOME', 'not/absolute');\nenv::set('TMPDIR', '/var/tmp/');\nenv::remove('XDG_DATA_HOME');\nenv::remove('XDG_RUNTIME_DIR');\n\
-        const $app = dirs::app('tool');\n\
+        const $app = dirs::App('tool');\n\
         outln([$app.name, $app.config(), $app.data(), $app.cache()]);\n\
         outln([dirs::config(), dirs::temp(), dirs::runtime()]);";
     assert_eq!(
@@ -35,7 +35,7 @@ fn folders_follow_the_variables_of_the_script() {
 #[test]
 fn create_makes_the_folder_only_when_asked() {
     let code = "const $base = fs::tempDir();\nenv::set('XDG_STATE_HOME', $base);\nenv::set('LOCALAPPDATA', $base);\n\
-        const $app = dirs::app('tool');\n\
+        const $app = dirs::App('tool');\n\
         outln(fs::dir?($app.state()));\n\
         const $made = $app.state(create: true);\n\
         outln([$made == $app.state(), fs::dir?($made)]);\n\
@@ -45,19 +45,18 @@ fn create_makes_the_folder_only_when_asked() {
 
 #[test]
 fn names_that_would_be_other_folders_throw() {
-    assert!(error("dirs::app('a/b');").contains("can't have `/`"), "{}", error("dirs::app('a/b');"));
-    assert!(error("dirs::app('a\\\\b');").contains("can't have `/`"));
-    assert!(error("dirs::app('  ');").contains("empty"));
-    // The constructor checks it too
-    assert!(error("dirs::App('a/b');").contains("can't have `/`"));
+    assert!(error("dirs::App('a/b');").contains("can't have `/`"), "{}", error("dirs::App('a/b');"));
+    assert!(error("dirs::App('a\\\\b');").contains("can't have `/`"));
+    assert!(error("dirs::App('  ');").contains("empty"));
     assert!(error("dirs::App('');").contains("empty"));
-    assert_eq!(run("outln(dirs::App('tool').config() == dirs::app('tool').config());"), "true\n");
+    // There's no function for it, only the class
+    assert!(!error("dirs::app('tool');").is_empty());
 }
 
 #[test]
 fn types() {
     // The user's folders and the runtime one may be missing
     assert!(error("const string $d = dirs::downloads();").contains("?string"), "{}", error("const string $d = dirs::downloads();"));
-    assert_eq!(run("const string $c = dirs::app('x').config();\nconst ?string $r = dirs::runtime();\noutln($c.length() > 0);"), "true\n");
-    assert!(error("dirs::app('x').config(create: 'yes');").contains("bool"));
+    assert_eq!(run("const string $c = dirs::App('x').config();\nconst ?string $r = dirs::runtime();\noutln($c.length() > 0);"), "true\n");
+    assert!(error("dirs::App('x').config(create: 'yes');").contains("bool"));
 }

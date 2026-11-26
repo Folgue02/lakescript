@@ -2187,7 +2187,7 @@ group = "Functions"
 short = "dirs"
 path = "std/dirs"
 title = "std/dirs"
-text = "The folders where a tool keeps its things, on every system: its configuration, its data, its cache. `use std/dirs;`, then `dirs::app('myapp')`, and the folders of the user like downloads.\n\n```\nuse std/dirs;\nuse std/format/json;\nuse std/fs;\nuse std/path;\n\nconst $app = dirs::app('myapp');\nconst $file = path::join($app.config(), 'settings.json');\nconst $settings = if (fs::exists?($file)) json::read($file) else {};\n\njson::write(path::join($app.config(create: true), 'settings.json'), $settings);\noutln(dirs::downloads() ?? 'no downloads folder');\n```"
+text = "The folders where a tool keeps its things, on every system: its configuration, its data, its cache. `use std/dirs;`, then `dirs::App('myapp')`, and the folders of the user like downloads.\n\n```\nuse std/dirs;\nuse std/format/json;\nuse std/fs;\nuse std/path;\n\nconst $app = dirs::App('myapp');\nconst $file = path::join($app.config(), 'settings.json');\nconst $settings = if (fs::exists?($file)) json::read($file) else {};\n\njson::write(path::join($app.config(create: true), 'settings.json'), $settings);\noutln(dirs::downloads() ?? 'no downloads folder');\n```"
 
 [[modules.groups]]
 name = "Functions"
@@ -2196,13 +2196,6 @@ text = "- These give the path, and never create the folder. The home folder is `
 [[modules.groups]]
 name = "The user's folders"
 text = "- `null` when the user has no such folder.\n- **Linux**: what `~/.config/user-dirs.dirs` says, the file of `xdg-user-dirs` that desktops write and translate *(i.e. `~/Descargas` in Spanish)*. A folder that isn't in it is the English name in the home folder if it exists. One set to the home folder itself is turned off, so it's `null`.\n- **macOS**: the folder in the home folder, if it exists. Videos are `~/Movies`.\n- **Windows**: the Known Folders of the system, so a folder moved elsewhere *(i.e. documents in OneDrive)* is found where it is."
-
-[[modules.items]]
-kind = "function"
-name = "app"
-code = "App app(string $name)"
-text = "The folders of a tool with that name, like `dirs::App($name)` *(i.e. `dirs::app('myapp').config()` is `~/.config/myapp`)*. Throws a `ValueError` if the name is empty or has `/` or `\\`"
-group = "Functions"
 
 [[modules.items]]
 kind = "function"
@@ -2292,7 +2285,7 @@ group = "The user's folders"
 kind = "class"
 name = "App"
 code = "class App"
-text = "The folders of a tool, created as `dirs::App('myapp')` or with `dirs::app('myapp')`, which is the same. Its own `new` throws a `ValueError` if the name is empty or has `/` or `\\`, so both check it. Each method gives the path, and creates the folder and the ones above it with `create: true`, for when the tool is about to write in it. Reading a configuration that isn't there doesn't need the folder, so it isn't created without being asked.\n\n\n\n- macOS uses the folders of Linux, not `~/Library/Application Support`, like most command-line tools *(i.e. git, gh, nvim, fish)*: the same paths on both, and easy to find and edit by hand.\n- On Windows the configuration is in `%APPDATA%` (Roaming), which follows the user to the other machines of a domain, and the rest is in `%LOCALAPPDATA%`, which stays on the machine, so nothing big is copied around. It's what Microsoft says each one is for, and what gh and Node's env-paths do."
+text = "The folders of a tool, created as `dirs::App('myapp')` *(i.e. `dirs::App('myapp').config()` is `~/.config/myapp`)*. Its `new` throws a `ValueError` if the name is empty or has `/` or `\\`. There's no `dirs::app()` function: the class's own `new` checks the name, so a function would only be a second way to write the same thing. Each method gives the path, and creates the folder and the ones above it with `create: true`, for when the tool is about to write in it. Reading a configuration that isn't there doesn't need the folder, so it isn't created without being asked.\n\n\n\n- macOS uses the folders of Linux, not `~/Library/Application Support`, like most command-line tools *(i.e. git, gh, nvim, fish)*: the same paths on both, and easy to find and edit by hand.\n- On Windows the configuration is in `%APPDATA%` (Roaming), which follows the user to the other machines of a domain, and the rest is in `%LOCALAPPDATA%`, which stays on the machine, so nothing big is copied around. It's what Microsoft says each one is for, and what gh and Node's env-paths do."
 
 [[modules.items.members]]
 kind = "field"

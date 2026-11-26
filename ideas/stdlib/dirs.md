@@ -1,6 +1,6 @@
 # std/dirs
 
-The folders where a tool keeps its things, on every system: its configuration, its data, its cache. `use std/dirs;`, then `dirs::app('myapp')`, and the folders of the user like downloads.
+The folders where a tool keeps its things, on every system: its configuration, its data, its cache. `use std/dirs;`, then `dirs::App('myapp')`, and the folders of the user like downloads.
 
 ```
 use std/dirs;
@@ -8,7 +8,7 @@ use std/format/json;
 use std/fs;
 use std/path;
 
-const $app = dirs::app('myapp');
+const $app = dirs::App('myapp');
 const $file = path::join($app.config(), 'settings.json');
 const $settings = if (fs::exists?($file)) json::read($file) else {};
 
@@ -20,7 +20,6 @@ outln(dirs::downloads() ?? 'no downloads folder');
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `app(string $name)` | `App` | The folders of a tool with that name, like `dirs::App($name)` *(i.e. `dirs::app('myapp').config()` is `~/.config/myapp`)*. Throws a `ValueError` if the name is empty or has `/` or `\` |
 | `config()` | `string` | The folder for configuration: `$XDG_CONFIG_HOME` or `~/.config` on Linux and macOS, `%APPDATA%` on Windows |
 | `data()` | `string` | The folder for data: `$XDG_DATA_HOME` or `~/.local/share` on Linux and macOS, `%LOCALAPPDATA%` on Windows |
 | `cache()` | `string` | The folder for caches: `$XDG_CACHE_HOME` or `~/.cache` on Linux and macOS, `%LOCALAPPDATA%` on Windows |
@@ -50,7 +49,7 @@ outln(dirs::downloads() ?? 'no downloads folder');
 
 ## App
 
-The folders of a tool, created as `dirs::App('myapp')` or with `dirs::app('myapp')`, which is the same. Its own `new` throws a `ValueError` if the name is empty or has `/` or `\`, so both check it. Each method gives the path, and creates the folder and the ones above it with `create: true`, for when the tool is about to write in it. Reading a configuration that isn't there doesn't need the folder, so it isn't created without being asked.
+The folders of a tool, created as `dirs::App('myapp')` *(i.e. `dirs::App('myapp').config()` is `~/.config/myapp`)*. Its `new` throws a `ValueError` if the name is empty or has `/` or `\`. There's no `dirs::app()` function: the class's own `new` checks the name, so a function would only be a second way to write the same thing. Each method gives the path, and creates the folder and the ones above it with `create: true`, for when the tool is about to write in it. Reading a configuration that isn't there doesn't need the folder, so it isn't created without being asked.
 
 | Field | Type | Description |
 |-------|------|-------------|
