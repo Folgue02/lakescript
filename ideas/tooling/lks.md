@@ -27,6 +27,23 @@ lks [options] <script> [arguments for the script...]
 | `--ast` | For debugging `lks`: prints the syntax tree of the script instead of running it |
 | `--bytecode` | For debugging `lks`: prints the bytecode of the script instead of running it. It changes between versions |
 
+## Checking without running
+
+*Backlog, see [roadmap.md](../roadmap.md).* `lks --check script.lks` checks the types of a script and the modules it uses without running it, and says nothing when there's no error, like `ferry check` for a project. A script's whole job is often to delete files or run commands, so checking it shouldn't need running it.
+
+## Interactive
+
+*Decided, for phase 14 in the plan of [roadmap.md](../roadmap.md). Not built yet.*
+
+Like Ruby's irb, to try the language and the standard library without a file:
+
+- **`lks` without a script opens a prompt.** Each line runs as soon as it's entered, and its variables, functions and `use` lines stay for the next ones. A line that gives a value shows it with its type *(i.e. `[1, 2] : list<number>`)*.
+- **It colors the code while it's typed**, with the same highlighting of Lakescript as the code blocks of `ferry doc`, and **completes it** with the completion of `lks-lsp`: methods after `.`, members after `::`, the variables there are. Everything typed so far is one script for them.
+- **A line that isn't finished asks for another one** *(i.e. after an open `{`, or a `(` that isn't closed)*, instead of an error.
+- History, kept between sessions, and the keys of a line editor. A crate does it *(i.e. `reedline`, MIT, the one of Nushell)*.
+- **`lks -e '...'`** runs one line from the shell *(i.e. `lks -e 'outln(1.5.round())'`)*, checked like a script.
+- Later, maybe: a mode that runs the code once for each line of stdin, like `perl -ne`.
+
 ## Environment variables
 
 | Variable | Meaning |

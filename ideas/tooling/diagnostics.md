@@ -13,6 +13,8 @@ error: $age is a number, can't assign a string
 - **Messages are plain text**, never Markdown: an example goes in parentheses *(i.e. ``the values of an enum are written in SCREAMING_CASE (i.e. `LEFT`)``)*, not in the `*(i.e. ...)*` of these notes. Names and code keep their backticks. Found when trying dependencies with two packages, in `v0.12.2`.
 - **A message says what's wrong where it points** *(i.e. ``the values of an enum are reached with `::`: `E::A`, not `E.A` ``, ``` `x` returns a string, but this is a number ```)*, and the fix when there's one *(i.e. `$a.concat($b)` for `+` on two lists, `use text/case as c;` for a module named like a reserved word)*.
 
+- **Backlog:** a name that isn't there suggests the closest one, and the names of other languages suggest Lakescript's *(i.e. `.toUpper()` → `.upper()`, `len($l)` → `$l.length()`)*. And errors can be given as JSON *(i.e. `--message-format json`)*, with the file, line, column, message and suggestion, for tools and agents *(see Backlog in [roadmap.md](../roadmap.md))*.
+
 `lks` shows errors this way: syntax errors, type errors and exceptions that aren't caught. A program that embeds Lakescript gets the message, the file, the line and the column, and can show them however it wants *(`Diagnostic::render` for one line, `Diagnostic::render_with_source` for this format)*.
 
 An exception that isn't caught also shows the calls that led to it, a line each above the error *(i.e. `  at report::build (/home/ana/report.lks:2:19)`, see Tracebacks in [errors.md](../language/errors.md))*. Both renders write them, and `Diagnostic::trace` has them for a program that shows errors its own way.

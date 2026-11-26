@@ -18,8 +18,8 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **10. Interactive scripts** | Talking with the person who runs the script | `std/terminal` *(prompts, styles, progress, a fuzzy finder, a pager, tables)*, Ctrl+C as an `Interrupted`, and dates, their formats and time zones in `std/time` |
 | **11. Data** | Data that isn't text, and typed data | `bytes`, JSON read into classes with types given as values, `std/random`, `std/archive`, `never` and `$x!`, symbols removed, and in `lks-lsp` signature help, the docs of parameters and importing types from completion |
 | **12. Shipping** | A program in one file | Bundles: `ferry bundle` makes a `.lkb` with every module and the `resources/` it needs, run by `lks` *(see [tooling/bundles.md](tooling/bundles.md))* |
-| **13. Projects, finished** | Every step of a project's life | `ferry uninstall`, `remove` and `update`, version ranges, and in tests `test::tempDir()`, before and after each test, and running them in parallel, `ferry new --lib` with `tests/` and `module.md`, warnings for `pub` items without docs and for an older `ferry`, taking the accents out of a string, and `std/format/toml` *(see [Plan](#plan))* |
-| **14. Editors and docs** | The rest of `lks-lsp` | Milestones 4 and 5 *(every error at once, the outline, find references, rename)*, and syntax highlighting in `ferry doc` |
+| **13. Projects, finished** | Every step of a project's life | `ferry uninstall`, `remove` and `update`, version ranges, and in tests `test::tempDir()`, before and after each test, and running them in parallel, `ferry new --lib` with `tests/` and `module.md`, warnings for `pub` items without docs and for an older `ferry`, taking the accents out of a string, `std/format/toml`, the project's own scripts with `ferry task` and `std/tooling/ferry`, `std/crypto` and `.env` files *(see [Plan](#plan))* |
+| **14. Editors and docs** | The rest of `lks-lsp`, and a prompt | Milestones 4 and 5 *(every error at once, the outline, find references, rename)*, syntax highlighting in `ferry doc`, and an interactive `lks` with highlighting and completion, and `lks -e` |
 | **15. The toolchain** | Installing and choosing versions | A version manager like rustup |
 | **1.0.0** | A stable language | Concurrency, tests on Windows, a formatter, the version manager and the rest of `lks-lsp` |
 | **Later** | | The rest of the standard library, the per-user bytecode cache |
@@ -98,11 +98,16 @@ Found by writing two packages with ferry, `folgue02/text` and `folgue02/table`, 
 - A warning when the `ferry` or `lks` that runs is older than the one the project needs. It needs the project to say which one, the same pin the version manager of phase 15 would read.
 - A method of `string` that takes the accents out *(i.e. `'Árbol'` to `'Arbol'`)*, which `folgue02/text` had to do with a table of its own. Its name isn't decided.
 - `std/format/toml`, reading and writing TOML like `std/format/json` *(see [stdlib/planned.md](stdlib/planned.md))*. The `toml` crate is already in the workspace, for `ferry.toml`, and a project's configuration is often TOML. XML is later, not planned.
+- **The project's own scripts**, to automate its builds, releases or generated code, in `scripts/` and run with `ferry task <name>` *(i.e. `ferry task release`)*. Unlike the commands of `bin/`, they're never installed or bundled *(see Scripts of a project in [tooling/ferry.md](tooling/ferry.md))*.
+- **`std/tooling/ferry`**, for those scripts: it reads the project, its ID, version, dependencies and folders, from its `ferry.toml`, on `std/format/toml`. Later it could run ferry's steps too *(i.e. check, test, bundle)*.
+- **`std/crypto`**, a family of modules *(see [stdlib/planned.md](stdlib/planned.md))*: hashes and HMAC, secure random values, encryption, and password hashing.
+- **`.env` files** in `std/env` *(i.e. `env::load('.env')`, see [stdlib/planned.md](stdlib/planned.md))*.
 
 ### Phase 14, `v0.14.0`: editors and docs
 
 - Milestones 4 and 5 of `lks-lsp`: every error at once and the outline of a file, then find references and rename *(see [tooling/lsp.md](tooling/lsp.md#milestones))*.
 - Syntax highlighting for the code blocks of `ferry doc` *(see [tooling/docs.md](tooling/docs.md))*. With the editor in the same phase, both can use the same highlighting of Lakescript.
+- **An interactive `lks`**, like irb: `lks` without a script opens a prompt that keeps its variables between lines, shows the type of each value, colors the code while it's typed and completes it, and asks for another line when one isn't finished *(i.e. after an open `{`)*. And `lks -e '...'` runs one line from the shell. It's in this phase since it uses the completion of `lks-lsp` and the highlighting of `ferry doc` *(see Interactive in [tooling/lks.md](tooling/lks.md))*. A mode that runs code once per line of stdin, like `perl -ne`, can come later.
 
 ### Phase 15, `v0.15.0`: the toolchain
 
@@ -116,6 +121,14 @@ Found by writing two packages with ferry, `folgue02/text` and `folgue02/table`, 
         - whether it's released with Lakescript or has versions of its own;
         - which `lks` the commands `ferry install` writes run.
     - Until then, mise's `github:` backend installs from the releases as they are *(`mise use github:Folgue02/lakescript@0.12.0`)*, and hasn't been tried.
+
+### Backlog
+
+Decided, without a phase yet. From how well Lakescript suits an LLM, or any tool, that writes it and fixes it from what `lks` says:
+
+- **"Did you mean"**: a name that isn't there suggests the closest one *(i.e. `.lenght()` → `.length()`)*, and the names of other languages suggest Lakescript's *(i.e. `.toUpper()` → `.upper()`, `len($l)` → `$l.length()`, `fs::exists` → `fs::exists?`, `print` → `outln`)* *(see [tooling/diagnostics.md](tooling/diagnostics.md))*.
+- **`lks --check script.lks`**: checks a script's types without running it, like `ferry check` does for a project, since a script's whole job is often to delete files or run commands *(see [tooling/lks.md](tooling/lks.md))*.
+- **Errors as JSON** *(i.e. `--message-format json`)*: the file, line, column, message and suggestion of each error, for tools and agents that shouldn't have to read the text *(see [tooling/diagnostics.md](tooling/diagnostics.md))*.
 
 ### Before `1.0.0`
 

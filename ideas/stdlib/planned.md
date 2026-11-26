@@ -4,6 +4,15 @@ What the standard library is getting next *(see [README.md](README.md))*. Termin
 
 ## Decided
 
+- **`std/crypto`, a family of modules**, decided after `v0.12.2`, for phase 13. Hashing and signing aren't encryption, so it's `crypto`, not `encryption`. On the RustCrypto crates, in pure Rust, not on `ring`, which needs a C compiler for Windows:
+    - `std/crypto/hash`: SHA-256, SHA-512, SHA-1, MD5 and CRC32 of a string, `bytes` or a file, and HMAC, to sign and check webhooks and the requests of APIs.
+    - Secure random values: tokens, keys and passwords from the system's own source, since `std/random` isn't for secrets.
+    - Encryption: one pair, to seal data with a key and open it, like libsodium's secretbox. Which cipher, its mode and its nonce are never the script's choice, since that's where mistakes are made.
+    - Password hashing, with Argon2, to keep passwords and check them.
+    - The names of the modules after `hash`, and their functions, aren't decided yet.
+- **`.env` files** in `std/env`, for phase 13. The proposal: `env::load('.env')` sets its variables, but never one that's already set, like dotenv; `env::parse($text)` gives them as a `map<string, string>` without setting them; lines are `KEY=value`, with `#` comments, quoted values and an `export` before them.
+- **`std/tooling/ferry`**, for the scripts of a project *(see Scripts of a project in [ferry.md](../tooling/ferry.md))*, in phase 13.
+
 - **`std/http`**, to make requests *(see [http.md](http.md))*.
   - A response with a 4xx or 5xx status isn't an exception: it's a response like any other, and the script checks its status.
   - When there's no response at all *(no network, a name that doesn't resolve, a refused connection, a timeout)*, it throws a `NetworkError`, a new built-in exception under `IOError`.

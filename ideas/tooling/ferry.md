@@ -148,6 +148,15 @@ The author and name of a project are its real ones, as the repository has them *
 - Dependencies are resolved before anything runs: every one of them is downloaded if it's not in the local repository yet, and every clash is found then.
 - `ferry.lock` is written by `ferry` and should be committed. It has the commit of every package, and a package whose tag now points to another commit is an error.
 
+## Scripts of a project
+
+*Decided, for phase 13 in the plan of [roadmap.md](../roadmap.md). Not built yet.*
+
+- **A project's own scripts**, to automate what's done on it *(i.e. a release, generated code, a deploy)*, like `cargo xtask` or the scripts of `npm run`, but in Lakescript. They're in `scripts/` *(i.e. `scripts/release.lks`)*.
+- **`ferry task <name> [arguments...]`** runs one, with the project's module path, like `ferry run` *(i.e. `ferry task release 1.2.0`)*.
+- They're apart from the commands of `bin/`: they're never installed, never bundled, and don't get docs pages. A name can be in both.
+- **`std/tooling/ferry`** gives them the project: its ID, version, kind, dependencies and folders, read from its `ferry.toml` *(on `std/format/toml`)*. Later it could also run ferry's steps *(i.e. check, test, bundle)*. Its functions aren't decided yet.
+
 ## Later
 
 - Data files in packages *(i.e. the levels of a game)*: being discussed with the bundles, as their `resources/` *(see [bundles.md](bundles.md))*. Raised again by cinder.
