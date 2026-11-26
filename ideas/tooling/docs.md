@@ -76,7 +76,7 @@ ferry doc units::bytes                     # one thing, in the terminal
 - **The pages of a project** go to `.ferry/doc/` in its folder, which git doesn't keep, like cargo's `target/doc`. `--open` opens them in the browser when they're made.
     - They have the `pub` items of its modules, the `module.md` of each folder, the `//!` of each module and the commands of `bin/`.
     - The project is type checked first, like `ferry check`: a project with errors gets no docs, since their signatures could be wrong.
-- **The docs of a package** are made from its copy in `~/.ferry/repository/`, once per version, in `~/.ferry/doc/`. A project's pages link to the pages of its dependencies made this way, so everything works without the internet.
+- **The docs of a package** are made from its copy in `~/.ferry/repository/`, once per version, in `~/.ferry/doc/`. A project's pages link to the pages of its dependencies made this way, so everything works without the internet: its front page to each one, the types of a dependency in a signature to their page *(i.e. `m::Greeting`)*, and search finds their items, after the project's own and before the standard library's. Built in `v0.12.1`.
 - **The standard library** has pages like a project's, made by the same code. Its docs come from the tables of `ideas/stdlib`, which `tools/docs/stdlib.py` reads into `crates/ferry/src/stdlib.toml`: committed, and inside ferry, so they work however ferry was installed, also with `cargo install`. `ferry doc std` writes them to `~/.ferry/doc/std/<version>/` and `--open` opens them. Releases ship them in `doc/std/` of every archive.
     - Its modules each have a page, with their functions in the groups of their notes *(i.e. Reading and Writing in `std/fs`)*. The built-in functions are a page, and each built-in type is a page with its methods *(i.e. `string`)*. A class of a module is a page *(i.e. `http::Response`)*.
     - A project's pages link the types of the standard library in their signatures to these pages, and their search finds the standard library too, after the project's own results.
@@ -104,8 +104,8 @@ Reads a size written as text, in any case, with or without a unit
 
 ## Not built yet
 
-- Search doesn't find the items of the dependencies, and their types in a signature aren't links yet. The project's own and the standard library's are.
 - The filter above the values of a long enum, and "Gives `+`" for the interfaces of operators.
+- Syntax highlighting for code blocks *(i.e. the examples in `///` comments and in `module.md`)*. Decided, for phase 14 in the plan of [roadmap.md](../roadmap.md); how it's done isn't decided yet.
 
 ## Being discussed
 

@@ -151,5 +151,5 @@ The author and name of a project are its real ones, as the repository has them *
 ## Later
 
 - Data files in packages *(i.e. the levels of a game)*: being discussed with the bundles, as their `resources/` *(see [bundles.md](bundles.md))*. Raised again by cinder.
-- Version ranges *(i.e. `^1.4`)*.
-- `ferry uninstall`, `ferry remove` and `ferry update`.
+- Version ranges *(i.e. `^1.4`)*. Decided, for phase 13, with `ferry update`.
+- `ferry uninstall`, `ferry remove` and `ferry update`. Decided, for phase 13 in the plan of [roadmap.md](../roadmap.md), with version ranges.

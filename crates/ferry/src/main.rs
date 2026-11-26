@@ -354,6 +354,9 @@ fn doc_project(open: bool) -> Result<ExitCode, Fail> {
     for dependency in &dependencies {
         let index = package_docs(&home, &dependency.project, &dependency.package, &dependency.version)?;
         site.dependencies.push((dependency.package.to_string(), dependency.version.clone(), Some(file_url(&index))));
+        // Its items, which the project's pages link to and search
+        let base = format!("{}/", file_url(index.parent().expect("the pages are in a folder")));
+        site.packages.push((ferry::doc::read(&dependency.project)?, base));
     }
     let out = project.dir.join(".ferry").join("doc");
     let index = ferry::doc::write(&site, &out)?;

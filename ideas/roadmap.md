@@ -18,13 +18,17 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **10. Interactive scripts** | Talking with the person who runs the script | `std/terminal` *(prompts, styles, progress, a fuzzy finder, a pager, tables)*, Ctrl+C as an `Interrupted`, and dates, their formats and time zones in `std/time` |
 | **11. Data** | Data that isn't text, and typed data | `bytes`, JSON read into classes with types given as values, `std/random`, `std/archive`, `never` and `$x!`, symbols removed, and in `lks-lsp` signature help, the docs of parameters and importing types from completion |
 | **12. Shipping** | A program in one file | Bundles: `ferry bundle` makes a `.lkb` with every module and the `resources/` it needs, run by `lks` *(see [tooling/bundles.md](tooling/bundles.md))* |
-| **Later** | | The rest of the standard library, the per-user bytecode cache, formatter, concurrency |
+| **13. Projects, finished** | Every step of a project's life | `ferry uninstall`, `remove` and `update`, version ranges, and in tests `test::tempDir()`, before and after each test, and running them in parallel, and `std/format/toml` *(see [Plan](#plan))* |
+| **14. Editors and docs** | The rest of `lks-lsp` | Milestones 4 and 5 *(every error at once, the outline, find references, rename)*, and syntax highlighting in `ferry doc` |
+| **15. The toolchain** | Installing and choosing versions | A version manager like rustup |
+| **1.0.0** | A stable language | Concurrency, tests on Windows, a formatter, the version manager and the rest of `lks-lsp` |
+| **Later** | | The rest of the standard library, the per-user bytecode cache |
 
 ## Versions
 
 Lakescript's own versions follow [semver](https://semver.org), like its packages *(see [modules.md](language/modules.md#packages))*.
 
-- Each finished phase is a new minor version with a git tag: phase 1 is `v0.1.0`, phase 5 is `v0.5.0`. Fixes between phases are patch versions *(i.e. `v0.5.1`)*.
+- Each finished phase is a new minor version with a git tag: phase 1 is `v0.1.0`, phase 5 is `v0.5.0`. Fixes between phases are patch versions *(i.e. `v0.5.1`)*. A patch is only fixes: anything new, even small and without breaking anything, waits for the next phase, so a patch is always safe to take.
 - The version in `Cargo.toml` is the one of the last tag, so `lks --version` says which phase it is.
 - Pushing a version tag runs `.github/workflows/release.yml`: it builds `lks`, `ferry` and `lks-lsp` for Linux (x86_64 and arm64, static with musl), macOS (arm64 and x86_64) and Windows (x86_64), and posts them on the tag's GitHub release, each as an archive with its SHA-256. Every archive has the pages of the standard library in `doc/std/`, made by the ferry just built *(`ferry doc std`)*, and the release has them on their own too, as `lakescript-<version>-stdlib.tar.gz`. `tools/release/package.sh <target>` builds one of those archives by hand, in `dist/`.
     - Windows is a supported platform, like Linux and macOS. Code only for Windows *(`#[cfg(windows)]`)* isn't built on the Mac where Lakescript is made, so before a release it's checked with `cargo check -p lakescript --all-targets --no-default-features --features archive,bundle,csv,dates,html,terminal --target x86_64-pc-windows-msvc`, with the rustup toolchain. `http` is left out since `ring` needs a C compiler for Windows. Commands run without a shell on every system *(see [builtin_types.md](language/builtin_types.md))*, and on Windows `ferry install` writes `.cmd` launchers. The tests don't run on Windows yet, since many of them run Unix programs like `printf` and `sort`.
@@ -64,13 +68,55 @@ Lakescript has no users but its author yet, so nothing is kept for old code:
 - Tests: functions named `test...`, the `assert` statement, `std/test`, `ferry test` and `lks --test` *(see [tooling/testing.md](tooling/testing.md))*.
 - `examples/backup/backup.lks` is the phase 3 milestone: a real backup script with a module next to it, a JSON config, commands and files.
 
-## Backlog
+## Plan
 
-Decided, and not built yet.
+What comes next, in order, decided after `v0.12.0`. Patches are only fixes; anything new waits for its phase. A phase is a step that's worth a version, so a single module goes into the phase it fits *(i.e. `std/format/toml` in phase 13)* instead of being one of its own.
 
-- **From the review after v0.10.0** *(see [tooling/vm.md](tooling/vm.md))*, not decided yet:
-    - A checker that keeps the types it finds, instead of working them out again and keeping facts in tables by place in the source.
-    - ~~Not doing: a faster allocator for `lks` and `ferry`. It's a C library, which makes the builds of the releases more fragile.~~ Done after phase 11, in pure Rust: `lakescript::SmallAlloc` *(see The review after phase 11 in [tooling/vm.md](tooling/vm.md))*.
+### `v0.12.1`, fixes
+
+- Built: in `ferry doc`, search finds the items of the dependencies, and their types in a signature link to their pages *(see ferry doc in [tooling/docs.md](tooling/docs.md))*.
+- Removing `dirs::app()` breaks code, so it isn't in it: it waits for `v0.13.0`.
+
+### Phase 13, `v0.13.0`: projects, finished
+
+- `ferry uninstall`, `ferry remove` and `ferry update` *(see Later in [tooling/ferry.md](tooling/ferry.md))*.
+- Version ranges for dependencies *(i.e. `^1.4`)*, which `ferry update` needs.
+- `test::tempDir()`, a folder that is removed after the test, functions that run before and after each test, and running tests in parallel *(see Later in [tooling/testing.md](tooling/testing.md))*.
+- `std/format/toml`, reading and writing TOML like `std/format/json` *(see [stdlib/planned.md](stdlib/planned.md))*. The `toml` crate is already in the workspace, for `ferry.toml`, and a project's configuration is often TOML. XML is later, not planned.
+
+### Phase 14, `v0.14.0`: editors and docs
+
+- Milestones 4 and 5 of `lks-lsp`: every error at once and the outline of a file, then find references and rename *(see [tooling/lsp.md](tooling/lsp.md#milestones))*.
+- Syntax highlighting for the code blocks of `ferry doc` *(see [tooling/docs.md](tooling/docs.md))*. With the editor in the same phase, both can use the same highlighting of Lakescript.
+
+### Phase 15, `v0.15.0`: the toolchain
+
+- A version manager like rustup. It's late in the plan since it matters most once other people install Lakescript. The idea so far:
+    - A manager installed first, on its own, with a script *(`curl … | sh`, and an `.exe` for Windows)*. It then installs versions of Lakescript from the releases *(i.e. `install 0.12.0`)*, checking their `.sha256`, into `~/.ferry/toolchains/<version>/`. It can also list them, set the default, update to the newest, update itself and uninstall a version.
+    - `lks`, `ferry` and `lks-lsp` in `~/.ferry/bin` are proxies of the manager, like `cargo` and `rustc` under rustup. Each one runs the version for where it's run: `lks +0.11.2 script.lks`, then the pin of the project, then the default. So an editor's `lks-lsp` checks each project with its own version.
+    - It's possible because the releases already have an archive for each target, with a `.sha256`, and the binaries don't need anything installed. Others from the same idea: a `doc` command for the std pages the archives already have, and a `link` for a local build, like `rustup toolchain link`, instead of `scripts/install-all.sh`.
+    - Still to decide:
+        - its name, and whether it's a tool of its own or part of `ferry`;
+        - where a project pins its version *(i.e. `lks = "0.12.0"` in `ferry.toml`, or a file of its own)*;
+        - whether it's released with Lakescript or has versions of its own;
+        - which `lks` the commands `ferry install` writes run.
+    - Until then, mise's `github:` backend installs from the releases as they are *(`mise use github:Folgue02/lakescript@0.12.0`)*, and hasn't been tried.
+
+### Before `1.0.0`
+
+- Concurrency. It changes the language, so it has to come before the language is stable. How it works isn't decided yet.
+- The tests run on Windows, in CI, and not only a check of the code built for it.
+- A formatter.
+- The version manager of phase 15.
+- Milestones 4 and 5 of `lks-lsp`, from phase 14.
+- And the language is stable *(see [Versions](#versions))*.
+
+### Later, not planned
+
+- The rest of the standard library, `std/format/xml` *(an element tree like `std/html`'s, see [stdlib/planned.md](stdlib/planned.md))* and `std/tui`.
+- The per-user bytecode cache.
+- Searching the docs by type, and running a test from an editor.
+- From the review after v0.10.0 *(see [tooling/vm.md](tooling/vm.md))*, not decided yet: a checker that keeps the types it finds, instead of working them out again and keeping facts in tables by place in the source. ~~Not doing: a faster allocator.~~ Done after phase 11, in pure Rust: `lakescript::SmallAlloc` *(see The review after phase 11 in [tooling/vm.md](tooling/vm.md))*.
 
 ## Notes
 

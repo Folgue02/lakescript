@@ -32,7 +32,7 @@ Each one is usable on its own, with tests that send real protocol messages to th
 | 4 | Every error at once, the outline of a file, the parameters while typing a call | The checker going on after an error |
 | 5 | Find references, rename | The recorded names, across modules |
 
-- Phase 8 is `v0.8.0` once milestones 1 to 3 work. Milestones 4 and 5 can be patch versions after it.
+- Phase 8 is `v0.8.0` once milestones 1 to 3 work. Milestones 4 and 5 are phase 14, `v0.14.0`, since patches are only fixes *(see Plan in [roadmap.md](../roadmap.md))*.
 
 ### Status
 

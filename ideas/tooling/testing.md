@@ -111,4 +111,4 @@ tests/units.lks
 - Running tests in parallel.
 - Functions that run before and after each test.
 - Running a test from an editor, through `lks-lsp`.
-- `test::tempDir()`, a folder that is removed after the test.
+- `test::tempDir()`, a folder that is removed after the test. Decided, for phase 13 in the plan of [roadmap.md](../roadmap.md), with running tests in parallel and the functions before and after each test. Running one from an editor is later.

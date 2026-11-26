@@ -26,6 +26,8 @@ pub struct Site {
     pub dependencies: Vec<(String, String, Option<String>)>,
     /// The docs of the standard library, and where their pages are, for links and search.
     pub std: Option<(Box<Site>, String)>,
+    /// The docs of the dependencies, and where their pages are, for links and search.
+    pub packages: Vec<(Site, String)>,
     /// Whether these are the docs of the standard library itself.
     pub standard: bool,
 }
@@ -119,6 +121,7 @@ pub fn read(project: &Project) -> Result<Site, Fail> {
         commands,
         dependencies: Vec::new(),
         std: None,
+        packages: Vec::new(),
         standard: false,
     })
 }
@@ -225,6 +228,7 @@ pub fn std_site() -> Site {
         commands: Vec::new(),
         dependencies: Vec::new(),
         std: None,
+        packages: Vec::new(),
         standard: true,
     }
 }
@@ -302,9 +306,14 @@ fn command_href(name: &str) -> String {
 /// The classes, interfaces and enums of the project, by name, and their pages.
 fn types(site: &Site) -> BTreeMap<String, String> {
     let mut types = BTreeMap::new();
-    // The standard library's, which the project's own replace
+    // The standard library's, then the dependencies', which the project's own replace
     if let Some((std, base)) = &site.std {
         for (name, href) in self::types(std) {
+            types.insert(name, format!("{base}{href}"));
+        }
+    }
+    for (package, base) in &site.packages {
+        for (name, href) in self::types(package) {
             types.insert(name, format!("{base}{href}"));
         }
     }
@@ -1007,6 +1016,9 @@ fn json(text: &str) -> String {
 fn index(site: &Site) -> String {
     let mut entries = Vec::new();
     entries_of(site, &site.id, "", &mut entries);
+    for (package, base) in &site.packages {
+        entries_of(package, &package.id, base, &mut entries);
+    }
     if let Some((std, base)) = &site.std {
         entries_of(std, "Standard library", base, &mut entries);
     }

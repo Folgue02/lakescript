@@ -370,7 +370,7 @@ fn test_runs_the_tests_folder() {
 #[test]
 fn doc_makes_the_pages_of_a_project() {
     let w = World::new();
-    w.publish("acme", "lib", "1.0.0", "", &[("src/acme/lib/m.lks", "//! What the library does.\n\n/// Says hi.\npub string hi() = 'hi';\n")]);
+    w.publish("acme", "lib", "1.0.0", "", &[("src/acme/lib/m.lks", "//! What the library does.\n\n/// Says hi.\npub string hi() = 'hi';\n\n/// A greeting.\npub class Greeting {\n    pub string @text = 'hi';\n}\n")]);
     let dir = w.project(
         "app",
         &app("\"local:acme/lib\" = \"1.0.0\"\n"),
@@ -379,6 +379,7 @@ fn doc_makes_the_pages_of_a_project() {
             ("src/me/app/math.lks", "//! Numbers.\n\n/// Twice a number.\n///\n/// $n: the number\n/// returns: `$n * 2`\n/// throws ValueError: never\npub number twice(number $n) = $n * 2;\n\n/// A point.\npub class Point {\n    /// Across.\n    pub number @x;\n}\n\nnumber hidden() = 1;\n"),
             ("src/me/app/api/module.md", "The endpoints.\n"),
             ("src/me/app/api/users.lks", "//! Users.\n"),
+            ("src/me/app/talk.lks", "use acme/lib/m;\n\n/// Its text.\npub string say(m::Greeting $g) = $g.text;\n"),
             ("bin/app.lks", "//! Runs the app.\n/// Greets people\ncommand Greet {\n    /// Who to greet\n    string @who;\n    /// Louder\n    flag(l) bool @loud;\n}\nconst $args = Greet::parse();\noutln($args.who);\n"),
             ("bin/plain.lks", "outln(1);\n"),
         ],
@@ -405,6 +406,14 @@ fn doc_makes_the_pages_of_a_project() {
     // The types of the standard library link to its pages, and search finds them
     assert!(math.contains("doc/std/") && math.contains("types.number.html"), "{math}");
     assert!(read("search.js").contains("\"g\":\"Standard library\",\"p\":\"fs::read\""));
+    // And so do the dependencies' types and items
+    let talk = read("talk.html");
+    assert!(talk.contains("doc/local/acme/lib/1.0.0/m.Greeting.html\">m::Greeting</a>"), "{talk}");
+    let search = read("search.js");
+    assert!(search.contains("\"g\":\"acme/lib\",\"p\":\"m::hi\"") && search.contains("\"p\":\"m::Greeting.text\""), "{search}");
+    assert!(search.contains("doc/local/acme/lib/1.0.0/m.html#"), "{search}");
+    // The project's results come first
+    assert!(search.find("\"p\":\"math::twice\"") < search.find("\"p\":\"m::hi\"") && search.find("\"p\":\"m::hi\"") < search.find("\"p\":\"fs::read\""));
     pages_are_well_formed(&doc);
 
     // One thing in the terminal
