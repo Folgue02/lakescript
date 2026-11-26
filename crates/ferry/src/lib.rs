@@ -18,9 +18,22 @@ pub fn paint() -> Paint {
     *PAINT.get_or_init(|| Paint(When::Auto.colors(std::io::stderr().is_terminal())))
 }
 
-/// A line about what ferry is doing, like cargo's: the verb in green, lined up on the right.
+/// Whether ferry says what it says on stderr as JSON, one object per line
+/// *(`--message-format json`, see Errors as JSON in ideas/tooling/diagnostics.md)*.
+pub static JSON: OnceLock<bool> = OnceLock::new();
+
+pub fn json() -> bool {
+    *JSON.get().unwrap_or(&false)
+}
+
+/// A line about what ferry is doing, like cargo's: the verb in green, lined
+/// up on the right. As JSON, a `status` whose message starts with the verb.
 pub fn status(verb: &str, text: &str) {
-    eprintln!("{} {text}", paint().good(&format!("{verb:>12}")));
+    if json() {
+        eprintln!("{}", lakescript::json_message("status", &format!("{verb} {text}"), None));
+    } else {
+        eprintln!("{} {text}", paint().good(&format!("{verb:>12}")));
+    }
 }
 
 /// Why ferry stopped. The message is already what the user sees.

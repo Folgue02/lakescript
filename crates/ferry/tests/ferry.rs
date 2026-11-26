@@ -816,6 +816,85 @@ fn a_dependency_can_need_a_newer_lakescript() {
 }
 
 #[test]
+fn messages_as_json() {
+    let w = World::new();
+    let json = |dir: &Path, args: &[&str]| {
+        let out = w.ferry(dir, &[&["--message-format", "json"][..], args].concat());
+        let said = stderr(&out);
+        // Every line ferry writes on stderr is one object
+        assert!(said.lines().all(|l| l.starts_with("{\"type\":") && l.ends_with('}')), "{args:?}: {said}");
+        (out, said)
+    };
+    let manifest = "[project]\nauthor = \"me\"\nname = \"lib\"\nversion = \"1.0.0\"\nkind = \"library\"\nlks = \"99.0.0\"\n\n[check]\ndocs = true\n";
+    let dir = w.project(
+        "lib",
+        manifest,
+        &[
+            ("src/me/lib/m.lks", "pub number a() = 1;\n"),
+            ("tests/t.lks", "use me/lib/m;\nvoid testA() { assert m::a() == 1; }\n"),
+            ("tests/broken.lks", "const number $n = 'one';\n"),
+        ],
+    );
+    let (out, said) = json(&dir, &["check"]);
+    assert_eq!(out.status.code(), Some(1));
+    let this = env!("CARGO_PKG_VERSION");
+    for line in [
+        format!("{{\"type\":\"warning\",\"message\":\"me/lib needs Lakescript 99.0.0 or newer, and this is ferry {this}: it may use what this one doesn't have\",\"exception\":null,\"file\":null,\"line\":null,\"column\":null,\"length\":null,\"trace\":[]}}"),
+        "{\"type\":\"error\",\"message\":\"`$n` is a number, but its value is a string\",\"exception\":null,\"file\":\"tests/broken.lks\",\"line\":1,\"column\":19,\"length\":5,\"trace\":[]}".to_string(),
+        "{\"type\":\"warning\",\"message\":\"`m::a` is `pub`, and has no `///` comment\",\"exception\":null,\"file\":\"src/me/lib/m.lks\",\"line\":1,\"column\":1,\"length\":1,\"trace\":[]}".to_string(),
+        "{\"type\":\"error\",\"message\":\"me/lib has 1 error\",\"exception\":null,\"file\":null,\"line\":null,\"column\":null,\"length\":null,\"trace\":[]}".to_string(),
+    ] {
+        assert!(said.lines().any(|l| l == line), "{line}\n{said}");
+    }
+    // The results of tests are text on stdout, so stderr is only objects
+    write(&dir.join("tests/broken.lks"), "void testB() { assert 1 + 1 == 2; }\n");
+    let (out, said) = json(&dir, &["test"]);
+    assert!(out.status.success(), "{said}");
+    let results = String::from_utf8_lossy(&out.stdout);
+    assert!(results.contains("tests/t.lks") && results.contains("2 passed"), "{results}");
+    assert!(!said.contains("passed"), "{said}");
+    // What ferry does is a `status`, its message starting with the verb
+    let app_dir = w.project("app", &app(""), &[("bin/app.lks", "outln('app');")]);
+    w.publish("acme", "util", "1.0.0", "", &[("src/acme/util/m.lks", "pub number one() = 1;")]);
+    let (_, said) = json(&app_dir, &["add", "local:acme/util@1.0.0"]);
+    assert!(said.lines().any(|l| l.starts_with("{\"type\":\"status\",\"message\":\"Added local:acme/util 1.0.0\"")), "{said}");
+    // A wrong command line too, and a script's error
+    let (out, said) = json(&app_dir, &["nope"]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(said.contains("\"message\":\"there's no command `nope`. Usage: ferry <command> [arguments...]\""), "{said}");
+    write(&app_dir.join("bin/app.lks"), "throw ValueError('no');\n");
+    let (out, said) = json(&app_dir, &["run"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(said.contains("\"exception\":\"ValueError\",\"file\":\"bin/app.lks\",\"line\":1"), "{said}");
+    assert!(w.fails(&app_dir, &["--message-format", "xml", "run"]).contains("`--message-format` needs `text` or `json` after it"));
+}
+
+#[test]
+fn check_shows_every_error_of_a_file() {
+    let w = World::new();
+    let dir = w.project(
+        "app",
+        &app(""),
+        &[
+            ("src/me/app/m.lks", "pub number one() = 'one';\npub string two() = 2;\n"),
+            ("bin/app.lks", "use me/app/m;\nconst number $a = 'a';\noutln(m::one());\nconst string $b = 1;\n"),
+        ],
+    );
+    let said = w.fails(&dir, &["--color", "never", "check"]);
+    for place in [" --> src/me/app/m.lks:1:", " --> src/me/app/m.lks:2:"] {
+        assert!(said.contains(place), "{place}: {said}");
+    }
+    assert!(said.contains("me/app has 2 errors"), "{said}");
+    // Fixed module: the command's own errors, all of them
+    write(&dir.join("src/me/app/m.lks"), "pub number one() = 1;\n");
+    let said = w.fails(&dir, &["--color", "never", "check"]);
+    assert!(said.contains(" --> bin/app.lks:2:") && said.contains(" --> bin/app.lks:4:") && said.contains("me/app has 2 errors"), "{said}");
+    let run = w.ferry(&dir, &["--color", "never", "run"]);
+    let said = stderr(&run);
+    assert!(said.contains(" --> bin/app.lks:2:") && said.contains(" --> bin/app.lks:4:"), "{said}");
+}
+
+#[test]
 fn test_files_run_at_once_and_show_in_order() {
     let w = World::new();
     let files: Vec<(String, String)> = (0..6).map(|i| (format!("tests/t{i}.lks"), format!("void testN{i}() {{ assert {i} >= 0; }}\n"))).collect();

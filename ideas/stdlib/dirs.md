@@ -10,7 +10,7 @@ use std/path;
 
 const $app = dirs::App('myapp');
 const $file = path::join($app.config(), 'settings.json');
-const $settings = if (fs::exists?($file)) json::read($file) else {};
+const $settings = if (fs::exists?($file)) json::read($file) else ({});
 
 json::write(path::join($app.config(create: true), 'settings.json'), $settings);
 outln(dirs::downloads() ?? 'no downloads folder');

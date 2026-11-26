@@ -42,7 +42,7 @@ mod value;
 
 pub use checker::complete::{Completion, Item as CompletionItem, ItemKind as CompletionKind};
 pub use checker::names::{Definition, Name};
-pub use diagnostic::{Call, Diagnostic};
+pub use diagnostic::{Call, Diagnostic, json_message, json_string};
 pub use engine::{CapturedOutput, Engine, Outcome};
 pub use interrupt::on_ctrl_c;
 pub use paths::{canonical, without_verbatim};

@@ -32,7 +32,7 @@ Each one is usable on its own, with tests that send real protocol messages to th
 | 4 | Every error at once, the outline of a file, the parameters while typing a call | The checker going on after an error |
 | 5 | Find references, rename | The recorded names, across modules |
 
-- Phase 8 is `v0.8.0` once milestones 1 to 3 work. Milestones 4 and 5 are phase 14, `v0.14.0`, since patches are only fixes *(see Plan in [roadmap.md](../roadmap.md))*.
+- Phase 8 is `v0.8.0` once milestones 1 to 3 work. Every error at once, from milestone 4, moved to phase 13, `v0.13.0`. The outline of a file and milestone 5 are phase 14, `v0.14.0`, since patches are only fixes *(see Plan in [roadmap.md](../roadmap.md))*.
 
 ### Status
 
@@ -45,12 +45,12 @@ Each one is usable on its own, with tests that send real protocol messages to th
     - It works on variables *(also where they're assigned)*, parameters, functions, modules *(`fs` in `fs::read`, and in `use` lines with what they import)*, the functions and constants of modules, classes *(in types and in calls)*, `Self`, type parameters, the built-in exceptions, fields, methods, static members and enum values. The types are the ones the checker found, also narrowed *(i.e. not `null` after `$x != null`)*.
     - The built-in functions and methods have their signature, but no comment yet: `prelude.txt` only has the signatures. Their comments are in `ideas/stdlib`, and can be added to it later.
     - The modules of the standard library written in Lakescript *(i.e. `std/http`)* have their `///` comments on hover, like any module. Go to definition doesn't jump into them, since they're inside the interpreter and not in a file.
-    - The checker stops at the first error, so only the names before it are known. A file that can't be read at all *(i.e. a string that isn't closed)* keeps the names of its last good version.
+    - The checker goes on after a type error *(see Every error at once)*, so the names after it are known too. A file that can't be read at all *(i.e. a string that isn't closed)* keeps the names of its last good version.
 - Milestone 3 is done. Completion gives what fits what's before the cursor:
     - after `.`: the fields and methods of the value before it, from its type *(i.e. `push` and `map` after `$words.`)*, and what every value has *(`toString`...)*. Private members only inside their class;
     - after `$`: the variables in scope there, with the `$` replaced by the whole name;
     - after `@`, in a class: its fields and methods, also the private ones;
-    - after `name::`: the functions, constants and types of a module, or the static methods, static fields and values of a class *(`Self::` too)*;
+    - after `name::`: the functions, constants and types of a module, or the static methods, static fields and values of a class *(`Self::` too)*, and the subcommands of a command *(i.e. `Else` after `Something::`, for `command Something { subcommand Else {} }`)*, added in phase 13;
     - after anything else: the variables, functions, classes and modules in scope, the reserved words and the built-in types.
     - Each one has its declaration as its detail *(i.e. `list<string> push(...string $values)`)*. It inserts the name only: the parentheses and arguments are written by hand.
     - The editor asks for it by itself after `.`, `$`, `@`, `:` and `/`. After a `/` that isn't in a `use` path *(i.e. a division)* there's nothing to complete.
@@ -66,7 +66,18 @@ Each one is usable on its own, with tests that send real protocol messages to th
     - A `(` or `[` that starts a line is the next code, not a call or an index of the line before.
     - The body of an `if` or a loop that isn't written yet *(a `}` or the end of the file instead)* is an error, and an empty block.
     - Any other error skips its statement, to its `;` or to the end of the block it opened.
-    - Only the first error is sent to the editor until milestone 4.
+    - Every error is sent to the editor: each syntax error, and each type error of the code that could be read *(phase 13)*.
+
+### Every error at once
+
+*Phase 13.* The checker goes on after a type error, so a file shows all its errors at once, and nobody fixes them one by one.
+
+- **Each statement is checked on its own.** One with an error is skipped: the error is kept, what the checker was in the middle of *(the scopes, the function, the class, the loop)* goes back to where it was before the statement, and the next one is checked. An error inside a block skips only its statement in that block, so an error in a function's body leaves the rest of the body, and the other functions, checked.
+- **What a skipped statement declares is still declared**, with any type: a `let` or `const` whose value has an error still makes its variable, so the lines after it don't say it doesn't exist. A function whose signature has an error *(i.e. a type that isn't there)* is declared taking anything and giving any value.
+- **Some errors still stop the check**: a `use` that can't be read *(every use of the module would be an error after it)*, and two classes with the same name.
+- An error is shown once, even when two ways reach it.
+- **Where:** `lks-lsp` sends every syntax and type error. `lks`, `lks --check` and `ferry check` show every type error, like rustc, but only the first syntax error, since errors after a broken line are often noise outside an editor. `--message-format json` gives one object for each.
+- A program that embeds Lakescript gets them with `Engine::check_all`.
 - For completion, the file is checked again with the place of the cursor. The checker keeps the scope it was in at the statement or expression around the cursor, or after the last statement before it. A `$` alone gets a name for that check, so it can be read.
 - The library has it too: `Engine::set_completion(file, offset)` before a check, and `Engine::completion()` after it.
 - A value whose type isn't known gets what every value has *(`toString`, `typeName`...)* after `.`.

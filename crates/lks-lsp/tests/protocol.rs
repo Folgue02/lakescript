@@ -471,3 +471,37 @@ fn completion_imports_types() {
     assert!(!labels(&server.at("textDocument/completion", &script, 0, 13)).contains(&"Circle".to_string()));
     server.stop();
 }
+
+/// Every error at once, not only the first one *(see Every error at once in ideas/tooling/lsp.md)*.
+#[test]
+fn every_error_at_once() {
+    let dir = temp("every-error");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    server.open(&script, "const number $a = 'one';\noutln($a);\nconst string $s = 2;\nvoid f() {\n    outln($nope);\n}\n");
+    let errors = server.diagnostics_for(&script);
+    let lines: Vec<&Value> = errors.iter().map(|e| &e["range"]["start"]["line"]).collect();
+    assert_eq!(lines, [&json!(0), &json!(2), &json!(4)], "{errors:?}");
+    // A syntax error and the type errors of the rest
+    server.change(&script, "const number $a = 'one';\noutln(1\nconst string $s = 2;\n", 2);
+    let errors = server.diagnostics_for(&script);
+    let messages: Vec<&str> = errors.iter().map(|e| e["message"].as_str().unwrap()).collect();
+    assert_eq!(messages.len(), 3, "{messages:?}");
+    assert!(messages[0].contains("expected `)`") && messages[1].contains("`$a` is a number") && messages[2].contains("`$s` is a string"), "{messages:?}");
+    server.stop();
+}
+
+#[test]
+fn every_error_of_a_module_of_a_project() {
+    let dir = temp("every-error-project");
+    std::fs::write(dir.join("ferry.toml"), "[project]\nname = \"demo\"\nauthor = \"ana\"\nversion = \"0.1.0\"\nkind = \"application\"\n").unwrap();
+    std::fs::create_dir_all(dir.join("src/ana/demo")).unwrap();
+    let module = dir.join("src/ana/demo/util.lks");
+    std::fs::write(&module, "pub number one() = 1;\n").unwrap();
+    let mut server = Server::start();
+    server.open(&module, "pub number one() = 'one';\npub number two() = 2;\npub string three() = 3;\n");
+    let errors = server.diagnostics_for(&module);
+    let lines: Vec<&Value> = errors.iter().map(|e| &e["range"]["start"]["line"]).collect();
+    assert_eq!(lines, [&json!(0), &json!(2)], "{errors:?}");
+    server.stop();
+}

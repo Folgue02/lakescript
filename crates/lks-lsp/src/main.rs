@@ -143,12 +143,12 @@ impl Server {
                     });
                 }
             }
-            let (result, names) = self.check(path);
+            let (errors, names) = self.check(path);
             // A file that doesn't parse has no names: the last ones stay, for hover while it's being written
-            if !names.is_empty() || result.is_ok() {
+            if !names.is_empty() || errors.is_empty() {
                 self.names.insert(path.clone(), names);
             }
-            if let Err(error) = result {
+            for error in errors {
                 let file = error.file.as_ref().map(PathBuf::from).unwrap_or_else(|| path.clone());
                 let file = lakescript::canonical(&file);
                 let text = self.text_of(&file);
@@ -177,7 +177,7 @@ impl Server {
     }
 
     /// Checks one file, and returns what was found about its names.
-    fn check(&self, path: &Path) -> (Result<(), Diagnostic>, Vec<Name>) {
+    fn check(&self, path: &Path) -> (Vec<Diagnostic>, Vec<Name>) {
         let mut engine = Engine::with_output(CapturedOutput::new());
         engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
         engine.set_names(true);
@@ -205,11 +205,18 @@ impl Server {
         (result, names)
     }
 
+    /// Every error of a check that failed: the checker goes on after one
+    /// *(see Every error at once in ideas/tooling/lsp.md)*.
+    fn all_errors(engine: &Engine, first: Diagnostic) -> Vec<Diagnostic> {
+        if engine.errors().is_empty() { vec![first] } else { engine.errors().to_vec() }
+    }
+
     /// Checks one file like `lks` or `ferry` would: a module of a ferry
     /// project with the project's module path, any other file as a script.
     /// `text` is the file's, and `complete` where completion is wanted in it.
     /// Returns whether it was checked as a module.
-    fn run_check(&self, engine: &mut Engine, path: &Path, text: &str, complete: Option<usize>) -> (Result<(), Diagnostic>, bool) {
+    /// Gives every error, none when it passes.
+    fn run_check(&self, engine: &mut Engine, path: &Path, text: &str, complete: Option<usize>) -> (Vec<Diagnostic>, bool) {
         for (open, text) in &self.documents {
             engine.set_file_text(open, text.clone());
         }
@@ -219,13 +226,17 @@ impl Server {
             Ok(project) => project,
             // A `ferry.toml` that can't be read: its error, instead of checking the file as if there were no project
             Err(e) if folder.ancestors().any(|d| d.join(ferry::project::MANIFEST).is_file()) => {
-                return (Err(Diagnostic::new(e, Default::default())), false);
+                return (vec![Diagnostic::new(e, Default::default())], false);
             }
             Err(_) => {
                 if let Some(offset) = complete {
                     engine.set_completion(None, offset);
                 }
-                return (engine.check_text(path, text), false);
+                let errors = match engine.check_text(path, text) {
+                    Ok(()) => Vec::new(),
+                    Err(first) => Self::all_errors(engine, first),
+                };
+                return (errors, false);
             }
         };
         let module_path = match ferry::home::Home::open() {
@@ -242,20 +253,31 @@ impl Server {
                 engine.set_completion(Some(path.display().to_string()), offset);
             }
             let module: Vec<String> = relative.with_extension("").iter().map(|p| p.to_string_lossy().into_owned()).collect();
-            let result = engine.check_source(&format!("use {} as module;\n", module.join("/"))).map_err(|mut e| {
-                // An error of the `use` line itself is the module's
-                if e.file.is_none() {
-                    e.file = Some(path.display().to_string());
-                    e.span = Default::default();
-                }
-                e
-            });
-            return (result.map_err(|e| missing_dependency(e, &project)), true);
+            let errors = match engine.check_source(&format!("use {} as module;\n", module.join("/"))) {
+                Ok(()) => Vec::new(),
+                Err(first) => Self::all_errors(engine, first),
+            };
+            let errors = errors
+                .into_iter()
+                .map(|mut e| {
+                    // An error of the `use` line itself is the module's
+                    if e.file.is_none() {
+                        e.file = Some(path.display().to_string());
+                        e.span = Default::default();
+                    }
+                    missing_dependency(e, &project)
+                })
+                .collect();
+            return (errors, true);
         }
         if let Some(offset) = complete {
             engine.set_completion(None, offset);
         }
-        (engine.check_text(path, text).map_err(|e| missing_dependency(e, &project)), false)
+        let errors = match engine.check_text(path, text) {
+            Ok(()) => Vec::new(),
+            Err(first) => Self::all_errors(engine, first),
+        };
+        (errors.into_iter().map(|e| missing_dependency(e, &project)).collect(), false)
     }
 
     /// Answers a request of the editor.

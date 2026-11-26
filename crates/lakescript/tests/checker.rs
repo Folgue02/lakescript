@@ -282,3 +282,114 @@ fn the_prelude_is_up_to_date() {
     let _ = std::fs::remove_file(&fresh);
     assert!(committed == fresh_text, "crates/lakescript/src/checker/prelude.txt is out of date: run `python3 tools/docs/prelude.py`");
 }
+
+/// A block that gives a value must give one on every way through it, or
+/// leave: reaching its end was only an error once it ran, after what it did.
+#[test]
+fn blocks_that_give_a_value_give_it_every_time() {
+    let wrong = "this block must give its value with `yield`";
+    for source in [
+        "const $v = 1;\nnumber f() { return switch ($v) { default -> { errln('x'); } }; }\noutln(f());",
+        "const $v = 1;\nnumber f() { return switch ($v) { case 1 -> 2; default -> { errln('x'); } }; }\noutln(f());",
+        "const $v = 1;\nnumber f() { return if ($v == 1) { errln('x'); } else 2; }\noutln(f());",
+        "const $v = 1;\nconst number $n = if ($v == 1) { errln('x'); } else { yield 2; };",
+        // Only one of the ways gives it
+        "const $v = 1;\nconst $n = if ($v == 1) { if ($v > 0) { yield 1; } } else 3;",
+        "const $v = 1;\nconst $n = switch ($v) { default -> { for ($i in 0..3) { yield $i; } } };",
+    ] {
+        assert_eq!(rejected(source), wrong, "{source}");
+    }
+    let accepted = ok("use std/process;\nconst $v = 1;\n\
+        number a() { return switch ($v) { case 1 -> 2; default -> { errln('x'); yield 3; } }; }\n\
+        number b() { return switch ($v) { case 2 -> 2; default -> { throw ValueError('no'); } }; }\n\
+        number c() { return if ($v == 1) { yield 1; } else { exit(2); }; }\n\
+        number d() { return if ($v == 1) { if ($v > 0) { yield 1; } else { yield 2; } } else 3; }\n\
+        number e() { return switch ($v) { default -> { switch ($v) { case 1 -> { yield 1; } default -> { yield 2; } } } }; }\n\
+        number g() { return if ($v == 1) { return 5; } else 3; }\n\
+        outln([a(), c(), d(), e(), g()]);\n");
+    assert_eq!(accepted, "[2, 1, 1, 1, 5]\n");
+}
+
+/// Every error of a check, in the order of the code.
+fn every_error(source: &str) -> Vec<String> {
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    let first = engine.check_source(source).expect_err("the script has errors");
+    let all: Vec<String> = engine.errors().iter().map(|e| format!("{}: {}", e.span.line, e.message)).collect();
+    assert_eq!(all.first(), Some(&format!("{}: {}", first.span.line, first.message)), "the check gives the first one");
+    all
+}
+
+/// The checker goes on after an error, so every error is there at once
+/// *(see Every error at once in ideas/tooling/lsp.md)*.
+#[test]
+fn every_error_at_once() {
+    let source = "\
+const number $a = 'one';
+outln($a.upper());
+number twice(Strng $s) = 2;
+outln(twice(3));
+void f() {
+    let $x = 1 + 'two';
+    outln($x);
+    const string $y = 5;
+}
+outln($missing);
+const $ok = if (true) { errln('x'); } else 2;
+class Point {
+    pub number @x;
+    pub string name() = @x;
+}
+outln(Point(1).x + 1);
+";
+    assert_eq!(
+        every_error(source),
+        [
+            "1: `$a` is a number, but its value is a string",
+            "3: unknown type `Strng`",
+            "6: `+` joins two strings, but got a number and a string. Use an f-string instead (i.e. f\"Age: {$age}\")",
+            "8: `$y` is a string, but its value is a number",
+            "10: `$missing` isn't declared",
+            "11: this block must give its value with `yield`",
+            "14: `name` returns a string, but this is a number",
+        ]
+    );
+    // Nothing to report: none
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    assert!(engine.check_source("outln(1);").is_ok() && engine.errors().is_empty());
+    // A run that fails on its types has them too, and runs nothing
+    let output = CapturedOutput::new();
+    let mut engine = Engine::with_output(output.clone());
+    assert!(engine.run("outln('ran');\nconst number $n = 'a';\nconst string $s = 1;").is_err());
+    assert_eq!((engine.errors().len(), output.text()), (2, String::new()));
+    // While running, an exception is one error, not a type error
+    assert!(engine.run("throw ValueError('no');").is_err());
+    assert!(engine.errors().is_empty());
+}
+
+#[test]
+fn every_error_of_a_module() {
+    let dir = std::env::temp_dir().join(format!("lks-every-error-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("util.lks"), "pub number one() = 'one';\npub number two() = 2;\npub string three() = 3;\n").unwrap();
+    std::fs::write(dir.join("main.lks"), "use util;\noutln(util::two());\n").unwrap();
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    let first = engine.check_file(&dir.join("main.lks")).unwrap_err();
+    let shown: Vec<(Option<String>, u32)> = engine.errors().iter().map(|e| (e.file.as_ref().map(|f| f.rsplit('/').next().unwrap().to_string()), e.span.line)).collect();
+    assert_eq!(shown, [(Some("util.lks".to_string()), 1), (Some("util.lks".to_string()), 3)]);
+    assert_eq!(first.span.line, 1);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// For an editor: every syntax error, then the type errors of what could be read.
+#[test]
+fn every_error_while_it_is_written() {
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    engine.set_names(true);
+    let source = "const number $a = 'one';\noutln(1\nconst string $s = 2;\nlet $x = ;\n";
+    assert!(engine.check_source(source).is_err());
+    let lines: Vec<u32> = engine.errors().iter().map(|e| e.span.line).collect();
+    // The two syntax errors first, then the two type errors
+    assert_eq!(lines.len(), 4, "{:?}", engine.errors().iter().map(|e| &e.message).collect::<Vec<_>>());
+    assert!(engine.errors()[2].message.contains("`$a` is a number"), "{}", engine.errors()[2].message);
+    assert!(engine.errors()[3].message.contains("`$s` is a string"), "{}", engine.errors()[3].message);
+}

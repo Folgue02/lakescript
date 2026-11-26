@@ -181,3 +181,109 @@ fn bundles_through_links_and_their_errors() {
     assert!(stderr(&out).starts_with("error: ") && stderr(&out).contains("isn't a bundle made by `ferry bundle`"), "{}", stderr(&out));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn check_without_running() {
+    let dir = std::env::temp_dir().join(format!("lks-check-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_lks")).args(args).current_dir(&dir).output().unwrap();
+    // Nothing runs, and nothing is said when there's no error
+    std::fs::write(dir.join("writes.lks"), "use std/fs;\nfs::write('ran.txt', 'yes');\noutln('ran');\n").unwrap();
+    let out = run(&["--check", "writes.lks"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!((stdout(&out), stderr(&out)), (String::new(), String::new()));
+    assert!(!dir.join("ran.txt").exists());
+    // A type error after code that would delete files
+    std::fs::write(dir.join("wrong.lks"), "use std/fs;\nfs::write('ran.txt', 'yes');\nconst number $a = 'old';\n").unwrap();
+    let out = run(&["--check", "--color", "never", "wrong.lks"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains(" --> wrong.lks:3:"), "{}", stderr(&out));
+    assert!(!dir.join("ran.txt").exists());
+    // And in a module it uses
+    std::fs::write(dir.join("helper.lks"), "pub number twice(number $n) = $n * 'two';\n").unwrap();
+    std::fs::write(dir.join("uses.lks"), "use helper;\noutln(helper::twice(2));\n").unwrap();
+    let out = run(&["--check", "--color", "never", "uses.lks"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("helper.lks:1:"), "{}", stderr(&out));
+    // It only checks
+    for (args, said) in [
+        (&["--check", "writes.lks", "x"][..], "`lks --check` takes only the script"),
+        (&["--check", "--test", "writes.lks"][..], "`--check` checks a script without running it, and `--test` runs its tests"),
+        (&["--check", "--no-type-check", "writes.lks"][..], "`--check` checks the types of the script, and `--no-type-check` doesn't"),
+    ] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
+        assert!(stderr(&out).contains(said), "{args:?}: {}", stderr(&out));
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn errors_as_json() {
+    let dir = std::env::temp_dir().join(format!("lks-json-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_lks")).arg("--message-format").arg("json").args(args).current_dir(&dir).output().unwrap();
+        let said = stderr(&out);
+        // One object on each line, and nothing else
+        assert!(said.lines().all(|l| l.starts_with("{\"type\":") && l.ends_with('}')), "{said}");
+        (out.status.code(), said)
+    };
+    std::fs::write(dir.join("types.lks"), "outln(1);\nconst number $age = 'old';\n").unwrap();
+    assert_eq!(
+        run(&["--check", "types.lks"]),
+        (Some(1), "{\"type\":\"error\",\"message\":\"`$age` is a number, but its value is a string\",\"exception\":null,\"file\":\"types.lks\",\"line\":2,\"column\":21,\"length\":5,\"trace\":[]}\n".to_string())
+    );
+    // An uncaught exception, its type and its calls, and a message that needs escaping
+    std::fs::write(dir.join("throws.lks"), "void f() {\n    throw ValueError(\"a \\\"b\\\"\\n\\tc\");\n}\nf();\n").unwrap();
+    assert_eq!(
+        run(&["throws.lks"]),
+        (
+            Some(1),
+            "{\"type\":\"error\",\"message\":\"ValueError: a \\\"b\\\"\\n\\tc\",\"exception\":\"ValueError\",\"file\":\"throws.lks\",\"line\":2,\"column\":5,\"length\":33,\"trace\":[{\"function\":\"the script\",\"file\":\"throws.lks\",\"line\":4,\"column\":1,\"times\":1}]}\n".to_string()
+        )
+    );
+    // What isn't at a place in the code
+    let (code, said) = run(&["missing.lks"]);
+    assert_eq!(code, Some(1));
+    assert!(said.starts_with("{\"type\":\"error\",\"message\":\"can't read missing.lks") && said.contains("\"line\":null,\"column\":null,\"length\":null,\"trace\":[]}"), "{said}");
+    let (code, said) = run(&["--nope", "types.lks"]);
+    assert_eq!(code, Some(2));
+    assert!(said.contains("\"message\":\"unknown option `--nope`. Usage: lks [options] <script> [arguments for the script...]\""), "{said}");
+    // Wrong arguments for the script itself
+    std::fs::write(dir.join("cli.lks"), "command Cinder {\n    /// The seed\n    flag number @seed = 1;\n}\nCinder::parse();\n").unwrap();
+    let (code, said) = run(&["cli.lks", "--nope"]);
+    assert_eq!(code, Some(2));
+    assert!(said.contains("\"exception\":\"UsageError\""), "{said}");
+    // The script's own output is its own
+    std::fs::write(dir.join("fine.lks"), "outln('out');\nerrln('err');\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_lks")).args(["--message-format", "json", "fine.lks"]).current_dir(&dir).output().unwrap();
+    assert_eq!((stdout(&out), stderr(&out)), ("out\n".to_string(), "err\n".to_string()));
+    // And `text` is the default
+    let out = Command::new(env!("CARGO_BIN_EXE_lks")).args(["--message-format", "text", "--color", "never", "types.lks"]).current_dir(&dir).output().unwrap();
+    assert!(stderr(&out).starts_with("error: `$age` is a number"), "{}", stderr(&out));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn every_type_error_at_once() {
+    let dir = std::env::temp_dir().join(format!("lks-every-error-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("two.lks"), "outln('ran');\nconst number $a = 'one';\nconst string $s = 2;\n").unwrap();
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_lks")).args(args).current_dir(&dir).output().unwrap();
+    for args in [&["--color", "never", "--check", "two.lks"][..], &["--color", "never", "two.lks"][..]] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(1));
+        let said = stderr(&out);
+        assert!(said.contains(" --> two.lks:2:19") && said.contains(" --> two.lks:3:19"), "{args:?}: {said}");
+        assert!(said.contains("^^^^^\n\nerror: `$s`"), "a blank line between them: {said}");
+        assert_eq!(stdout(&out), "", "nothing ran");
+    }
+    let said = stderr(&run(&["--message-format", "json", "--check", "two.lks"]));
+    assert_eq!(said.lines().count(), 2, "{said}");
+    // Only the first syntax error, outside an editor
+    std::fs::write(dir.join("syntax.lks"), "outln(1\nconst string $s = 2;\nlet $x = ;\n").unwrap();
+    let said = stderr(&run(&["--color", "never", "--check", "syntax.lks"]));
+    assert_eq!(said.matches("error:").count(), 1, "{said}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}

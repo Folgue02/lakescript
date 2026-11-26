@@ -53,6 +53,8 @@ pub struct Engine {
     /// The signatures of the built-in methods and the standard library, read the first time they're needed.
     prelude: Option<Rc<crate::checker::prelude::Prelude>>,
     check_state: crate::checker::State,
+    /// Every error of the last check, when it had any *(see `errors`)*.
+    errors: Vec<Diagnostic>,
     check_cache: HashMap<PathBuf, Result<crate::checker::prelude::ModuleSig, Diagnostic>>,
     check_classes: HashMap<(PathBuf, String), crate::checker::types::ClassRef>,
     check_declared: HashMap<PathBuf, crate::checker::prelude::ModuleSig>,
@@ -143,6 +145,7 @@ impl Engine {
             check_types: true,
             prelude: None,
             check_state: Default::default(),
+            errors: Vec::new(),
             check_cache: HashMap::new(),
             check_classes: HashMap::new(),
             check_declared: HashMap::new(),
@@ -250,6 +253,7 @@ impl Engine {
     /// Runs a script given as text. Variables and functions it declares are
     /// kept, so the next `run` can use them.
     pub fn run(&mut self, source: &str) -> Result<Outcome, Diagnostic> {
+        self.errors.clear();
         let path = self.host.state.script_path.clone();
         let (program, _) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), false)?;
         if self.check_types {
@@ -306,6 +310,7 @@ impl Engine {
     /// Type checks a script given as text without running it.
     pub fn check_source(&mut self, source: &str) -> Result<(), Diagnostic> {
         self.found.clear();
+        self.errors.clear();
         if self.record_names {
             self.checked_source = source.to_string();
         }
@@ -315,12 +320,19 @@ impl Engine {
             return self.check(&program).map_err(|d| self.locate(d));
         }
         // For an editor, the code is checked also after a syntax error, for its names
-        let (program, errors) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), true)?;
+        let (program, syntax) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), true)?;
         let result = self.check(&program).map_err(|d| self.locate(d));
-        match errors.into_iter().next() {
-            Some(error) => Err(error),
-            None => result,
+        if syntax.is_empty() {
+            return result;
         }
+        // Every syntax error, then the type errors of what could be read. One
+        // place gets one: after a missing `)`, the `;` is missing there too
+        let first = syntax[0].clone();
+        let types = std::mem::take(&mut self.errors);
+        let mut places = std::collections::HashSet::new();
+        let syntax: Vec<Diagnostic> = syntax.into_iter().filter(|d| places.insert((d.span.file, d.span.start))).map(|d| self.locate(d)).collect();
+        self.errors = syntax.into_iter().chain(types).collect();
+        Err(first)
     }
 
     /// Whether the checks are for an editor: they go on after syntax errors.
@@ -440,6 +452,7 @@ impl Engine {
     }
 
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {
+        let mut module_errors = Vec::new();
         let prelude = self.prelude.get_or_insert_with(crate::checker::prelude::Prelude::shared).clone();
         let recover = self.editing();
         let modules = crate::checker::Modules {
@@ -452,10 +465,32 @@ impl Engine {
             names: if self.record_names { Some(&mut self.found) } else { None },
             complete: self.completion.as_mut(),
             recover,
+            errors: &mut module_errors,
         };
         let mut checker = crate::checker::Checker::new(&prelude, modules, &mut self.check_state, &self.host_functions);
         checker.stack_budget = self.stack_budget;
-        checker.check_program(program)
+        let mut errors = checker.check_program(program);
+        // The rest of the errors of a module with one, after the first, which the script has
+        if !errors.is_empty() {
+            errors.extend(module_errors);
+        }
+        let errors: Vec<Diagnostic> = crate::checker::in_order(errors).into_iter().map(|d| self.locate(d)).collect();
+        let first = errors.first().cloned();
+        self.errors = errors;
+        match first {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Every error of the last check or run that failed on its types, in
+    /// the order of the code: the checker goes on after one, so they're all
+    /// there at once *(see Every error at once in ideas/tooling/lsp.md)*.
+    /// The check itself gives the first one. Empty when the last one had
+    /// none, or failed on something else *(a syntax error outside an editor,
+    /// or while running)*. For an editor, the syntax errors come first.
+    pub fn errors(&self) -> &[Diagnostic] {
+        &self.errors
     }
 
     /// Fills in the file of an error that happened in a module.

@@ -38,6 +38,8 @@ const $size = if ($bytes > 1_000_000) {
 
 - A body with a single expression doesn't end with `;`, since the whole `if` is part of a statement that already ends with one.
 - When the body is a block, `yield` gives its value, like in `switch`.
+- **Every way through such a block gives a value or leaves** *(`yield`, `throw`, `return`, `exit()` or a `never` function)*, and the checker says so before anything runs *(i.e. `if ($ok) { errln('x'); } else 2`)*: `this block must give its value with `yield``. It used to be found only when the block ran, after what it did. Found in phase 13, also in `switch`.
+- `{}` after `else` or `->` is an empty block, not an empty map, so it's that error. An empty map there is written `({})`.
 - For short cases, the ternary operator does the same: `$count > 1 ? 'items' : 'item'`.
 
 ## For loops

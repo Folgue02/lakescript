@@ -35,6 +35,11 @@ Options:
                    script's --help, instead of the name of its file
   --no-type-check  Run the script without checking its types first,
                    for scripts that were already checked
+  --check          Check the script and the modules it uses without
+                   running it. Says nothing when there's no error
+  --message-format <format>
+                   How errors are written on stderr: text (the default)
+                   or json, one object per line, for tools and agents
   --test           Run the tests of the script, its functions named test...,
                    instead of the script. An argument after the script
                    runs only the tests whose name has it
@@ -54,7 +59,7 @@ fn main() -> ExitCode {
     match runner.map(|handle| handle.join()) {
         Ok(Ok(code)) => code,
         _ => {
-            eprintln!("{} the interpreter crashed. This is a bug in lks, not in your script", paint().error("lks:"));
+            problem("the interpreter crashed. This is a bug in lks, not in your script");
             ExitCode::from(70)
         }
     }
@@ -63,6 +68,8 @@ fn main() -> ExitCode {
 #[derive(Default)]
 struct Options {
     no_type_check: bool,
+    /// `--check`: check the script without running it.
+    check: bool,
     test: bool,
     show_tokens: bool,
     show_ast: bool,
@@ -73,10 +80,29 @@ struct Options {
     /// `--resources`: where `std/resources` reads from.
     resources: Option<std::path::PathBuf>,
     color: When,
+    /// `--message-format json`: errors as JSON, one object per line.
+    json: bool,
 }
 
 /// The colors for stderr, decided once the options are read.
 static PAINT: OnceLock<Paint> = OnceLock::new();
+
+/// Whether errors are JSON *(`--message-format json`)*, decided once the options are read.
+static JSON: OnceLock<bool> = OnceLock::new();
+
+fn json() -> bool {
+    *JSON.get().unwrap_or(&false)
+}
+
+/// An error that isn't at a place in the code *(i.e. a wrong command line)*,
+/// as `lks: message` or as JSON.
+fn problem(message: &str) {
+    if json() {
+        eprintln!("{}", lakescript::json_message("error", message, None));
+    } else {
+        eprintln!("{} {message}", paint().error("lks:"));
+    }
+}
 
 fn paint() -> Paint {
     *PAINT.get_or_init(|| Paint(When::Auto.colors(std::io::stderr().is_terminal())))
@@ -91,14 +117,25 @@ enum Request {
 
 /// The options of `lks` end at the first argument that isn't one: that's the
 /// script, and every argument after it belongs to the script.
-fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String> {
+/// A wrong one is an error, with whether it asked for JSON before it.
+fn parse_args(args: impl Iterator<Item = String>) -> Result<Request, (String, bool)> {
     let mut options = Options::default();
+    parse_options(args, &mut options).map_err(|message| (message, options.json))
+}
+
+fn parse_options(mut args: impl Iterator<Item = String>, options: &mut Options) -> Result<Request, String> {
     let script = loop {
         let Some(arg) = args.next() else {
             return Err("no script given".into());
         };
         match arg.as_str() {
             "--no-type-check" => options.no_type_check = true,
+            "--check" => options.check = true,
+            "--message-format" => match args.next().as_deref() {
+                Some("text") => options.json = false,
+                Some("json") => options.json = true,
+                _ => return Err("`--message-format` needs `text` or `json` after it".into()),
+            },
             "--test" => options.test = true,
             "--tokens" => options.show_tokens = true,
             "--ast" => options.show_ast = true,
@@ -131,7 +168,22 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Request, String>
             _ => break arg,
         }
     };
-    Ok(Request::Run { options, script, args: args.collect() })
+    let args: Vec<String> = args.collect();
+    if options.check {
+        let wrong = if !args.is_empty() {
+            Some("`lks --check` takes only the script, since it doesn't run it")
+        } else if options.test {
+            Some("`--check` checks a script without running it, and `--test` runs its tests: use one of them")
+        } else if options.no_type_check {
+            Some("`--check` checks the types of the script, and `--no-type-check` doesn't: use one of them")
+        } else {
+            None
+        };
+        if let Some(wrong) = wrong {
+            return Err(wrong.into());
+        }
+    }
+    Ok(Request::Run { options: std::mem::take(options), script, args })
 }
 
 fn run() -> ExitCode {
@@ -145,20 +197,26 @@ fn run() -> ExitCode {
             println!("lks {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
-        Err(message) => {
-            let paint = paint();
-            eprintln!("{} {message}", paint.error("lks:"));
-            eprintln!("{} lks [options] <script> [arguments for the script...]. See `lks --help`", paint.good("Usage:"));
+        Err((message, json)) => {
+            let _ = JSON.set(json);
+            if json {
+                problem(&format!("{message}. Usage: lks [options] <script> [arguments for the script...]"));
+            } else {
+                let paint = paint();
+                eprintln!("{} {message}", paint.error("lks:"));
+                eprintln!("{} lks [options] <script> [arguments for the script...]. See `lks --help`", paint.good("Usage:"));
+            }
             return ExitCode::from(2);
         }
     };
 
     let _ = PAINT.set(Paint(options.color.colors(std::io::stderr().is_terminal())));
+    let _ = JSON.set(options.json);
     if options.show_tokens || options.show_ast || options.show_bytecode {
         let source = match std::fs::read_to_string(&script) {
             Ok(source) => source,
             Err(err) => {
-                eprintln!("{} can't read {script}: {err}", paint().error("error:"));
+                error(&format!("can't read {script}: {err}"), &script);
                 return ExitCode::FAILURE;
             }
         };
@@ -186,9 +244,22 @@ fn run() -> ExitCode {
     }
     // A bundle made by `ferry bundle`, which checked its types already
     let bundle = lakescript::is_bundle(Path::new(&script));
+    if options.check {
+        if bundle {
+            problem(&format!("{script} is a bundle, which `ferry bundle` checked when it made it: `lks --check` checks a script"));
+            return ExitCode::from(2);
+        }
+        return match engine.check_file(Path::new(&script)) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(diagnostic) => {
+                show_all(&engine, diagnostic, &script);
+                ExitCode::FAILURE
+            }
+        };
+    }
     if options.test {
         if bundle {
-            eprintln!("{} `lks --test` runs the tests of a script, and {script} is a bundle: its project's tests run with `ferry test`", paint().error("lks:"));
+            problem(&format!("`lks --test` runs the tests of a script, and {script} is a bundle: its project's tests run with `ferry test`"));
             return ExitCode::from(2);
         }
         return test(&mut engine, &script, &args, options.color);
@@ -204,11 +275,15 @@ fn run() -> ExitCode {
         // Arguments that don't match the script's command: the message and
         // the usage, without the code, and code 2 like most command-line tools
         Err(ref diagnostic) if let Some(text) = diagnostic.usage() => {
-            eprintln!("{}{text}", paint().error("error: "));
+            if json() {
+                eprintln!("{}", show(diagnostic, &script));
+            } else {
+                eprintln!("{}{text}", paint().error("error: "));
+            }
             ExitCode::from(2)
         }
         Err(diagnostic) => {
-            eprintln!("{}", show(&diagnostic, &script));
+            show_all(&engine, diagnostic, &script);
             ExitCode::FAILURE
         }
     }
@@ -221,7 +296,7 @@ fn test(engine: &mut Engine, script: &str, args: &[String], color: When) -> Exit
         [] => None,
         [filter] => Some(filter.as_str()),
         _ => {
-            eprintln!("{} `lks --test` takes the script and one filter at most", paint().error("lks:"));
+            problem("`lks --test` takes the script and one filter at most");
             return ExitCode::from(2);
         }
     };
@@ -230,7 +305,7 @@ fn test(engine: &mut Engine, script: &str, args: &[String], color: When) -> Exit
     let results = match engine.run_tests(Path::new(script), filter) {
         Ok(results) => results,
         Err(diagnostic) => {
-            eprintln!("{}", show(&diagnostic, script));
+            show_all(engine, diagnostic, script);
             return ExitCode::FAILURE;
         }
     };
@@ -248,11 +323,34 @@ fn on_ctrl_c(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     lakescript::on_ctrl_c(flag);
 }
 
-/// An error with the line of code it points to, read from the file it's in.
+/// The errors of a check or a run that failed: every type error the check
+/// found *(see Every error at once in ideas/tooling/lsp.md)*, or the one
+/// error otherwise. As text, with a blank line between them.
+fn show_all(engine: &Engine, diagnostic: lakescript::Diagnostic, script: &str) {
+    let errors = if engine.errors().is_empty() { vec![diagnostic] } else { engine.errors().to_vec() };
+    let shown: Vec<String> = errors.iter().map(|d| show(d, script)).collect();
+    eprintln!("{}", shown.join(if json() { "\n" } else { "\n\n" }));
+}
+
+/// An error about a file, not at a place in it *(i.e. it can't be read)*.
+fn error(message: &str, file: &str) {
+    if json() {
+        eprintln!("{}", lakescript::json_message("error", message, Some(file)));
+    } else {
+        eprintln!("{} {message}", paint().error("error:"));
+    }
+}
+
+/// An error with the line of code it points to, read from the file it's in,
+/// or as JSON.
 fn show(diagnostic: &lakescript::Diagnostic, script: &str) -> String {
     let file = diagnostic.file.as_deref().unwrap_or(script);
     // A bundle is a zip: its code isn't shown from it
     let bundle = lakescript::is_bundle(Path::new(file));
+    if json() {
+        let source = std::fs::read_to_string(file).ok().filter(|_| !bundle);
+        return diagnostic.render_json("error", script, source.as_deref());
+    }
     // What isn't at a place in the code *(i.e. a bundle that can't be read)*: only the message
     if diagnostic.span.line == 0 && diagnostic.trace.is_empty() {
         return format!("{} {}", paint().error("error:"), diagnostic.message);

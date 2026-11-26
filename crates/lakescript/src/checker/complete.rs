@@ -245,6 +245,21 @@ impl Checker<'_> {
         for value in &body.values {
             push(&mut items, &mut seen, value.clone(), ItemKind::EnumValue, format!("{}::{value}", class.0.name));
         }
+        // A command's subcommands *(i.e. `Git::Commit`)*, from the type of its `subcommand` field
+        if class.0.command {
+            let field = body.fields.iter().find(|f| f.name == "subcommand").map(|f| f.ty.clone());
+            let field = match field {
+                Some(Ty::Nullable(inner)) => Some(*inner),
+                other => other,
+            };
+            if let Some(Ty::Object(base, _)) = field {
+                for sub in &base.0.body.borrow().subcommands {
+                    // Its name is the whole path *(i.e. `Git::Commit`)*
+                    let name = sub.0.name.rsplit("::").next().unwrap_or(&sub.0.name).to_string();
+                    push(&mut items, &mut seen, name, ItemKind::Class, format!("subcommand {}", sub.0.name));
+                }
+            }
+        }
         let mut methods: Vec<_> = body.static_methods.iter().filter(|(_, m)| m.public || open).collect();
         methods.sort_by(|a, b| a.0.cmp(b.0));
         for (name, m) in methods {

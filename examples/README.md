@@ -12,6 +12,13 @@ Or build once with `cargo build -p lks` and use `target/debug/lks examples/hello
 
 Every example is type checked before it runs, like any script. `lks --no-type-check` skips it.
 
+To check one without running it, for one that deletes files or runs commands, there's `lks --check`, which says nothing when there's no error. For a tool or an agent, `--message-format json` gives each error as one line of JSON on stderr, in `lks` and `ferry`:
+
+```
+target/debug/lks --check examples/commands.lks
+target/debug/lks --message-format json --check examples/commands.lks
+```
+
 ## The language
 
 | Example | Shows |

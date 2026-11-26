@@ -84,3 +84,19 @@ fn members_in_a_chain_on_several_lines() {
     assert!(labels(&found.members.expect("the type of `$f` is known")).contains(&"startsWith"));
 }
 
+
+#[test]
+fn the_subcommands_of_a_command() {
+    let source = "command Something {\n    subcommand Else {}\n    subcommand Other { flag bool @all; }\n}\nSomething::|\n";
+    let found = complete(source);
+    let items = &found.paths["Something"];
+    let names = labels(items);
+    for name in ["Else", "Other", "parse", "help"] {
+        assert!(names.contains(&name), "{names:?}");
+    }
+    let other = items.iter().find(|i| i.label == "Other").unwrap();
+    assert_eq!((other.kind, other.detail.as_str()), (CompletionKind::Class, "subcommand Something::Other"));
+    // An optional subcommand too
+    let found = complete("command Git {\n    optional subcommand Commit {}\n}\nGit::|\n");
+    assert!(labels(&found.paths["Git"]).contains(&"Commit"));
+}

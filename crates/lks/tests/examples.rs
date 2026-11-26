@@ -50,6 +50,20 @@ fn every_example_is_listed_and_tested() {
     }
 }
 
+/// `lks --check` passes every example without running it, and says nothing.
+#[test]
+fn every_example_checks_without_running() {
+    for entry in std::fs::read_dir(root().join("examples")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "lks") {
+            let script = format!("examples/{}", path.file_name().unwrap().to_string_lossy());
+            let output = lks(&["--check", &script], None);
+            assert!(output.status.success(), "{script}: {}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{script} said something");
+        }
+    }
+}
+
 #[test]
 fn language_examples() {
     for (script, expected) in [

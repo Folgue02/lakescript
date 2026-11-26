@@ -82,6 +82,7 @@ pub fn uncaught(exception: &ExceptionValue, files: &[String]) -> Diagnostic {
     };
     let mut diagnostic = Diagnostic::new(message, exception.place());
     diagnostic.trace = calls(exception, files, false);
+    diagnostic.exception = Some(exception.kind.to_string());
     diagnostic
 }
 

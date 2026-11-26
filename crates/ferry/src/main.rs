@@ -15,7 +15,7 @@ use lakescript::{Diagnostic, Engine};
 use ferry::home::Home;
 use ferry::project::{self, Kind, MANIFEST, Project};
 use ferry::resolve::{self, Dependency, Lock};
-use ferry::{Fail, PAINT, paint, status};
+use ferry::{Fail, JSON, PAINT, json, paint, status};
 
 /// Scripts run on a thread with a big stack, like with `lks`.
 const STACK_SIZE: usize = 512 * 1024 * 1024;
@@ -64,6 +64,9 @@ Options:
   --color <when>              When to use colors: auto (on a terminal, the default),
                               always or never. NO_COLOR also turns them off.
                               It goes before the command
+  --message-format <format>   How ferry writes what it says on stderr: text (the
+                              default) or json, one object per line, for tools and
+                              agents. It goes before the command
   -h, --help                  Show this help
   -V, --version               Show the version of ferry
 
@@ -72,7 +75,50 @@ FERRY_HOME replaces ~/.ferry, where ferry keeps what it downloads and installs.
 
 /// A hint, in cyan.
 fn note(text: &str) {
-    eprintln!("{} {text}", paint().note("note:"));
+    if json() {
+        eprintln!("{}", lakescript::json_message("note", text, None));
+    } else {
+        eprintln!("{} {text}", paint().note("note:"));
+    }
+}
+
+/// An error that isn't at a place in the code.
+fn error(text: &str) {
+    if json() {
+        eprintln!("{}", lakescript::json_message("error", text, None));
+    } else {
+        eprintln!("{} {text}", paint().error("error:"));
+    }
+}
+
+/// A warning, at a place in a file of the project when it's about one
+/// *(the file as seen from the project's folder, its line and column)*.
+fn warning(text: &str, place: Option<(&str, u32, u32)>) {
+    match place {
+        _ if json() => {
+            let Some((file, line, column)) = place else {
+                eprintln!("{}", lakescript::json_message("warning", text, None));
+                return;
+            };
+            let mut diagnostic = Diagnostic::new(text, lakescript::Span { start: 0, end: 0, line, column: column.max(1), file: 0 });
+            diagnostic.file = Some(file.to_string());
+            eprintln!("{}", diagnostic.render_json("warning", file, None));
+        }
+        Some((file, line, column)) => {
+            let at = if column > 0 { format!("{file}:{line}:{column}") } else { format!("{file}:{line}") };
+            eprintln!("{} {text}\n {} {at}\n", paint().warning("warning:"), paint().note("-->"));
+        }
+        None => eprintln!("{} {text}\n", paint().warning("warning:")),
+    }
+}
+
+/// An error in the code, from `show_in`, with a blank line after it as text.
+fn report(shown: &str) {
+    if json() {
+        eprintln!("{shown}");
+    } else {
+        eprintln!("{shown}\n");
+    }
 }
 
 fn main() -> ExitCode {
@@ -80,7 +126,7 @@ fn main() -> ExitCode {
     match runner.map(|handle| handle.join()) {
         Ok(Ok(code)) => code,
         _ => {
-            eprintln!("{} ferry crashed. This is a bug in ferry", paint().error("error:"));
+            error("ferry crashed. This is a bug in ferry");
             ExitCode::from(70)
         }
     }
@@ -89,10 +135,20 @@ fn main() -> ExitCode {
 fn start() -> ExitCode {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let mut color = When::Auto;
-    while args.first().is_some_and(|a| a == "--color") {
-        match args.get(1).and_then(|w| When::parse(w)) {
-            Some(when) => color = when,
-            None => return usage_error("`--color` needs `auto`, `always` or `never` after it"),
+    while let Some(option) = args.first().filter(|a| *a == "--color" || *a == "--message-format").cloned() {
+        if option == "--color" {
+            match args.get(1).and_then(|w| When::parse(w)) {
+                Some(when) => color = when,
+                None => return usage_error("`--color` needs `auto`, `always` or `never` after it"),
+            }
+        } else {
+            match args.get(1).map(String::as_str) {
+                Some("text") => {}
+                Some("json") => {
+                    let _ = JSON.set(true);
+                }
+                _ => return usage_error("`--message-format` needs `text` or `json` after it"),
+            }
         }
         args.drain(..2);
     }
@@ -181,13 +237,17 @@ fn start() -> ExitCode {
     match result {
         Ok(code) => code,
         Err(Fail(message)) => {
-            eprintln!("{} {message}", paint().error("error:"));
+            error(&message);
             ExitCode::FAILURE
         }
     }
 }
 
 fn usage_error(message: &str) -> ExitCode {
+    if json() {
+        error(&format!("{message}. Usage: ferry <command> [arguments...]"));
+        return ExitCode::from(2);
+    }
     let paint = paint();
     eprintln!("{} {message}", paint.error("error:"));
     eprintln!("{} ferry <command> [arguments...]. See `ferry --help`", paint.good("Usage:"));
@@ -278,11 +338,15 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
         Ok(outcome) => Ok(ExitCode::from(outcome.code().clamp(0, 255) as u8)),
         // The person's mistake in the arguments, like `lks` shows it
         Err(ref diagnostic) if let Some(text) = diagnostic.usage() => {
-            eprintln!("{} {text}", paint().error("error:"));
+            if json() {
+                eprintln!("{}", show_in(&project, diagnostic, &script));
+            } else {
+                error(text);
+            }
             Ok(ExitCode::from(2))
         }
         Err(diagnostic) => {
-            eprintln!("{}", show_in(&project, &diagnostic, &script));
+            eprintln!("{}", show_all_in(&project, &engine, diagnostic, &script));
             Ok(ExitCode::FAILURE)
         }
     }
@@ -309,11 +373,15 @@ fn task(args: &[String]) -> Result<ExitCode, Fail> {
     match engine.run_file(&script) {
         Ok(outcome) => Ok(ExitCode::from(outcome.code().clamp(0, 255) as u8)),
         Err(ref diagnostic) if let Some(text) = diagnostic.usage() => {
-            eprintln!("{} {text}", paint().error("error:"));
+            if json() {
+                eprintln!("{}", show_in(&project, diagnostic, &script));
+            } else {
+                error(text);
+            }
             Ok(ExitCode::from(2))
         }
         Err(diagnostic) => {
-            eprintln!("{}", show_in(&project, &diagnostic, &script));
+            eprintln!("{}", show_all_in(&project, &engine, diagnostic, &script));
             Ok(ExitCode::FAILURE)
         }
     }
@@ -370,14 +438,17 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
     let mut report = |diagnostic: &Diagnostic, script: &Path| {
         let text = show_in(project, diagnostic, script);
         if shown.insert(text.clone()) {
-            eprintln!("{text}\n");
+            report(&text);
         }
     };
     let modules = project.modules()?;
     for module in &modules {
         let file = project.src().join(format!("{module}.lks"));
-        if let Err(diagnostic) = engine(&module_path).check_source(&format!("use {module} as module;\n")) {
-            report(&diagnostic, &file);
+        let mut checker = engine(&module_path);
+        if let Err(diagnostic) = checker.check_source(&format!("use {module} as module;\n")) {
+            for error in all_errors(&checker, diagnostic) {
+                report(&error, &file);
+            }
         }
     }
     let test_files = if tests { project.test_files() } else { Vec::new() };
@@ -391,11 +462,14 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
         .collect();
     let mut waiting = Vec::new();
     for script in &scripts {
-        if let Err(diagnostic) = engine(&module_path).check_file(script) {
-            report(&diagnostic, script);
-            // The checker stops at the first error, which here is in a module it uses
+        let mut checker = engine(&module_path);
+        if let Err(diagnostic) = checker.check_file(script) {
+            // A module it uses that has an error stops its check: its own code is checked once that's fixed
             if let Some(file) = &diagnostic.file {
                 waiting.push((relative(project, script), relative(project, Path::new(file))));
+            }
+            for error in all_errors(&checker, diagnostic) {
+                report(&error, script);
             }
         }
     }
@@ -408,14 +482,25 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
     Ok(shown.len())
 }
 
+/// Every type error of a check or run that failed *(see Every error at once
+/// in ideas/tooling/lsp.md)*, or the one error it gave otherwise.
+fn all_errors(engine: &Engine, error: Diagnostic) -> Vec<Diagnostic> {
+    if engine.errors().is_empty() { vec![error] } else { engine.errors().to_vec() }
+}
+
+/// Every error of a run that failed, each one as `show_in` writes it, with a blank line between them as text.
+fn show_all_in(project: &Project, engine: &Engine, error: Diagnostic, script: &Path) -> String {
+    let shown: Vec<String> = all_errors(engine, error).iter().map(|d| show_in(project, d, script)).collect();
+    shown.join(if json() { "\n" } else { "\n\n" })
+}
+
 /// Warns when this ferry is older than the Lakescript the project needs,
 /// its `lks` in `[project]`. It's a warning: an older one may still work.
 fn too_old(project: &Project) {
     let Some(needed) = &project.manifest.project.lks else { return };
     let this = project::THIS;
     if project::newer(needed) {
-        let paint = paint();
-        eprintln!("{} {} needs Lakescript {needed} or newer, and this is ferry {this}: it may use what this one doesn't have\n", paint.warning("warning:"), project.id);
+        warning(&format!("{} needs Lakescript {needed} or newer, and this is ferry {this}: it may use what this one doesn't have", project.id), None);
     }
 }
 
@@ -426,13 +511,12 @@ fn too_old_dependencies(dependencies: &[Dependency]) {
     for dependency in dependencies {
         let Some(needed) = &dependency.project.manifest.project.lks else { continue };
         if project::newer(needed) {
-            let paint = paint();
-            eprintln!(
-                "{} {} {}, for {}, needs Lakescript {needed} or newer, and this is ferry {this}: it may use what this one doesn't have\n",
-                paint.warning("warning:"),
-                dependency.package,
-                dependency.version,
-                dependency.required_by
+            warning(
+                &format!(
+                    "{} {}, for {}, needs Lakescript {needed} or newer, and this is ferry {this}: it may use what this one doesn't have",
+                    dependency.package, dependency.version, dependency.required_by
+                ),
+                None,
             );
         }
     }
@@ -444,7 +528,6 @@ fn undocumented(project: &Project) -> Result<(), Fail> {
     if !project.manifest.check.docs {
         return Ok(());
     }
-    let paint = paint();
     for module in project.modules()? {
         let file = project.src().join(format!("{module}.lks"));
         let Ok(text) = std::fs::read_to_string(&file) else { continue };
@@ -463,7 +546,7 @@ fn undocumented(project: &Project) -> Result<(), Fail> {
             }
         }
         for (name, line) in missing {
-            eprintln!("{} `{name}` is `pub`, and has no `///` comment\n {} {}:{line}\n", paint.warning("warning:"), paint.note("-->"), relative(project, &file));
+            warning(&format!("`{name}` is `pub`, and has no `///` comment"), Some((&relative(project, &file), line as u32, 0)));
         }
     }
     Ok(())
@@ -474,11 +557,8 @@ fn undocumented(project: &Project) -> Result<(), Fail> {
 fn stale_comments(project: &Project, file: &Path) {
     let Ok(text) = std::fs::read_to_string(file) else { return };
     let Ok(warnings) = lakescript::docs::stale_params(&text) else { return };
-    let paint = paint();
     for w in warnings {
-        eprintln!("{} {}
- {} {}:{}:{}
-", paint.warning("warning:"), w.message, paint.note("-->"), relative(project, file), w.line, w.column);
+        warning(&w.message, Some((&relative(project, file), w.line as u32, w.column as u32)));
     }
 }
 
@@ -688,7 +768,7 @@ fn test(filter: Option<&str>, jobs: Option<usize>) -> Result<ExitCode, Fail> {
                         tests.set_resources(&project.dir.join("resources"));
                         let outcome = match tests.run_tests(file, filter) {
                             Ok(found) => Outcome::Ran(found),
-                            Err(diagnostic) => Outcome::Broken(show_in(project, &diagnostic, file)),
+                            Err(diagnostic) => Outcome::Broken(show_all_in(project, &tests, diagnostic, file)),
                         };
                         if sender.send((i, outcome)).is_err() {
                             break;
@@ -707,6 +787,14 @@ fn test(filter: Option<&str>, jobs: Option<usize>) -> Result<ExitCode, Fail> {
                 let shown = relative(&project, &files[shown_up_to]);
                 match outcome {
                     Outcome::Ran(found) if found.is_empty() => {}
+                    // With JSON on stderr, the results are text on stdout, like `lks --test`'s
+                    Outcome::Ran(found) if json() => {
+                        println!("{shown}");
+                        for result in &found {
+                            print!("{}", lakescript::render_result(result, &shown, Paint(false)));
+                        }
+                        results.extend(found);
+                    }
                     Outcome::Ran(found) => {
                         eprintln!("{shown}");
                         for result in &found {
@@ -716,7 +804,7 @@ fn test(filter: Option<&str>, jobs: Option<usize>) -> Result<ExitCode, Fail> {
                     }
                     Outcome::Broken(text) => {
                         broken += 1;
-                        eprintln!("{text}\n");
+                        report(&text);
                     }
                 }
                 shown_up_to += 1;
@@ -724,7 +812,11 @@ fn test(filter: Option<&str>, jobs: Option<usize>) -> Result<ExitCode, Fail> {
         }
         Ok(())
     })?;
-    eprint!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), paint()));
+    if json() {
+        print!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), Paint(false)));
+    } else {
+        eprint!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), paint()));
+    }
     if let Some(filter) = filter.filter(|_| results.is_empty() && broken == 0) {
         note(&format!("no test has `{filter}` in its name: the filter picks tests by their names, i.e. `testBytes`, not by their files"));
     }
@@ -759,6 +851,10 @@ fn show_in(project: &Project, diagnostic: &Diagnostic, script: &Path) -> String 
         call.file = call.file.as_ref().map(|f| relative(project, Path::new(f)));
     }
     let name = relative(project, script);
+    if json() {
+        let text = std::fs::read_to_string(&source).ok();
+        return short.render_json("error", &name, text.as_deref());
+    }
     match std::fs::read_to_string(&source) {
         Ok(text) if short.span.line > 0 => short.render_with_source_painted(&name, &text, paint()),
         _ => short.render_painted(&name, paint()),

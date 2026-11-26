@@ -49,6 +49,9 @@ pub struct Modules<'a> {
     pub complete: Option<&'a mut complete::Request>,
     /// Going on after syntax errors, for code that's being written *(see `parser::parse_recovering`)*.
     pub recover: bool,
+    /// Every error of every module checked, where they're in: a file that
+    /// uses one gets only its first error, and these are all of them.
+    pub errors: &'a mut Vec<Diagnostic>,
 }
 
 #[derive(Default, Clone)]
@@ -138,6 +141,22 @@ pub struct Checker<'a> {
     never_calls: HashSet<(u32, usize, usize)>,
     /// How many `@super(...)` calls were checked, so a constructor knows whether it has one.
     super_calls: usize,
+    /// The errors of the statements that were skipped: the checker goes on
+    /// after one, so a file shows every error at once *(see Every error at
+    /// once in ideas/tooling/lsp.md)*.
+    errors: Vec<Diagnostic>,
+    /// The functions whose signature had an error, by where they are: their
+    /// error is kept, and their body isn't checked.
+    broken: HashSet<(u32, usize)>,
+}
+
+/// Where the checker was before a statement, to go back to after its error.
+struct Mark {
+    scopes: usize,
+    returns: usize,
+    loop_depth: usize,
+    this: usize,
+    super_calls: usize,
 }
 
 type Check<T> = Result<T, Diagnostic>;
@@ -189,17 +208,55 @@ impl<'a> Checker<'a> {
             unnarrowed_uses: HashMap::new(),
             never_calls: HashSet::new(),
             super_calls: 0,
+            errors: Vec::new(),
+            broken: HashSet::new(),
         }
     }
 
     /// Checks a whole script. The globals it declares are kept for the next run.
-    pub fn check_program(mut self, program: &[Stmt]) -> Check<()> {
+    /// Gives every error, in the order of the code, or none.
+    pub fn check_program(mut self, program: &[Stmt]) -> Vec<Diagnostic> {
         let result = self.block(program);
         self.finish_names();
         self.finish_completion();
         let globals = self.scopes.remove(1);
         self.state.globals = globals;
-        result
+        let mut errors = std::mem::take(&mut self.errors);
+        errors.extend(result.err());
+        in_order(errors)
+    }
+
+    fn mark(&self) -> Mark {
+        Mark { scopes: self.scopes.len(), returns: self.returns.len(), loop_depth: self.loop_depth, this: self.this.len(), super_calls: self.super_calls }
+    }
+
+    /// Back to where the checker was before a statement with an error.
+    fn restore(&mut self, mark: Mark) {
+        self.scopes.truncate(mark.scopes);
+        self.returns.truncate(mark.returns);
+        self.this.truncate(mark.this);
+        self.loop_depth = mark.loop_depth;
+        self.super_calls = mark.super_calls;
+        self.callee = None;
+    }
+
+    /// What a statement with an error would have declared, with any type,
+    /// so the code after it doesn't say it isn't there.
+    fn skipped(&mut self, stmt: &Stmt) {
+        let declare = |c: &mut Self, name: &str, constant: bool| {
+            let scope = c.scopes.last_mut().unwrap();
+            scope.vars.entry(name.to_string()).or_insert(VarInfo { ty: Ty::Any, constant, place: None, about: None });
+        };
+        match &stmt.kind {
+            StmtKind::Pub(inner) => self.skipped(inner),
+            StmtKind::Let { constant, name, .. } => declare(self, name, *constant),
+            StmtKind::LetList { constant, names, rest, .. } => {
+                for name in names.iter().chain(rest) {
+                    declare(self, name, *constant);
+                }
+            }
+            _ => {}
+        }
     }
 
     // ---- Errors ----
@@ -587,12 +644,25 @@ impl<'a> Checker<'a> {
                 _ => stmt,
             };
             if let StmtKind::Function(decl) = &inner.kind {
-                self.hoist(decl, inner.span)?;
+                let mark = self.mark();
+                if let Err(error) = self.hoist(decl, inner.span) {
+                    // A signature with an error: a function that takes anything, so its calls aren't errors too
+                    self.restore(mark);
+                    self.errors.push(error);
+                    self.scopes.last_mut().unwrap().funcs.entry(decl.name.clone()).or_insert_with(FnTy::unknown);
+                    self.broken.insert((inner.span.file, inner.span.start));
+                }
             }
         }
+        // Each statement on its own: one with an error is skipped, and the next one checked
         for (i, stmt) in stmts.iter().enumerate() {
             if !early.contains(&i) {
-                self.stmt(stmt)?;
+                let mark = self.mark();
+                if let Err(error) = self.stmt(stmt) {
+                    self.restore(mark);
+                    self.skipped(stmt);
+                    self.errors.push(error);
+                }
             }
         }
         Ok(())
@@ -930,6 +1000,9 @@ impl<'a> Checker<'a> {
     }
 
     fn function(&mut self, decl: &FunctionDecl, span: Span) -> Check<()> {
+        if self.broken.contains(&(span.file, span.start)) {
+            return Ok(());
+        }
         // Usually declared when the block started *(see `block`)*
         if !self.scopes.last_mut().unwrap().pending.remove(&decl.name) {
             self.hoist(decl, span)?;
@@ -1220,6 +1293,7 @@ impl<'a> Checker<'a> {
             names: None,
             complete: None,
             recover: self.modules.recover,
+            errors: &mut *self.modules.errors,
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1307,6 +1381,7 @@ impl<'a> Checker<'a> {
             names: self.modules.names.as_deref_mut(),
             complete: self.modules.complete.as_deref_mut(),
             recover: self.modules.recover,
+            errors: &mut *self.modules.errors,
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1350,6 +1425,12 @@ impl<'a> Checker<'a> {
             return Err(located(error));
         }
         result.map_err(located)?;
+        // A file that uses it gets the module's first error, and `Modules::errors` all of them
+        let errors: Vec<Diagnostic> = in_order(std::mem::take(&mut checker.errors)).into_iter().map(located).collect();
+        if let Some(first) = errors.first().cloned() {
+            checker.modules.errors.extend(errors);
+            return Err(first);
+        }
         let globals = &checker.scopes[1];
         let mut sig = ModuleSig { path: shown, ..Default::default() };
         for name in public_fns {
@@ -1944,8 +2025,13 @@ impl<'a> Checker<'a> {
     fn branch(&mut self, branch: &Branch, expected: Option<&Ty>) -> Check<Ty> {
         match branch {
             Branch::Expr(e) => self.expr(e, expected),
-            Branch::Block(stmts, _) => {
+            Branch::Block(stmts, span) => {
                 self.block(stmts)?;
+                // Reaching its end is an error when it runs, so it is one here:
+                // every way through it gives a value, or leaves *(`throw`, `return`, `exit()`)*
+                if !self.block_terminates(stmts) {
+                    return self.fail("this block must give its value with `yield`", *span);
+                }
                 // The value is the `yield`, checked as part of the block
                 Ok(yield_type(self, stmts))
             }
@@ -2688,6 +2774,13 @@ fn plural(ty: &Ty) -> String {
         Ty::Any | Ty::Var(_) => "any values".into(),
         other => format!("{other} values"),
     }
+}
+
+/// Errors in the order of the code, each one once.
+pub(crate) fn in_order(mut errors: Vec<Diagnostic>) -> Vec<Diagnostic> {
+    errors.sort_by_key(|d| (d.span.file, d.span.start, d.span.end));
+    errors.dedup_by(|a, b| a.message == b.message && a.span == b.span && a.file == b.file);
+    errors
 }
 
 /// Removes unknown type variables, which only mean something inside one checker.

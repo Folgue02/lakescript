@@ -21,6 +21,8 @@ lks [options] <script> [arguments for the script...]
 | `--resources <folder>` | Where `std/resources` reads the files of a script outside a project, instead of the folder `resources/` next to it *(see [bundles.md](bundles.md))* |
 | `--name <name>` | The name of the command for the `Usage:` line of `--help`, instead of the name of the script's path *(i.e. `--name cinder`)*. `ferry run` and the commands `ferry install` writes pass it, since the person typed `cinder`, not `cinder.lks` *(see Parsing in [cli.md](../language/cli.md))* |
 | `--no-type-check` | Runs the script without checking its types first, for scripts that were already checked. Since types never change what the code does, it behaves the same |
+| `--check` | Checks the script without running it *(see [Checking without running](#checking-without-running))* |
+| `--message-format <format>` | How errors are written on stderr: `text` (the default) or `json`, one object per line, for tools and agents *(see Errors as JSON in [diagnostics.md](diagnostics.md))* |
 | `-h`, `--help` | Shows the help |
 | `-V`, `--version` | Shows the version |
 | `--tokens` | For debugging `lks`: prints the tokens of the script instead of running it |
@@ -29,7 +31,11 @@ lks [options] <script> [arguments for the script...]
 
 ## Checking without running
 
-*Backlog, see [roadmap.md](../roadmap.md).* `lks --check script.lks` checks the types of a script and the modules it uses without running it, and says nothing when there's no error, like `ferry check` for a project. A script's whole job is often to delete files or run commands, so checking it shouldn't need running it.
+*In phase 13, see [roadmap.md](../roadmap.md).* `lks --check script.lks` checks the syntax and types of a script and the modules it uses without running it, and says nothing when there's no error, like `ferry check` for a project. A script's whole job is often to delete files or run commands, so checking it shouldn't need running it.
+
+- The exit code is `0` with no error and `1` with any. Like running, it shows every type error, or the first syntax error *(see Every error at once in [lsp.md](lsp.md))*.
+- It takes only the script: arguments after it, `--test` or `--no-type-check` with it, or a bundle *(which `ferry bundle` checked)* are a wrong command line, code `2`.
+- With `--message-format json` the error is JSON *(see Errors as JSON in [diagnostics.md](diagnostics.md))*.
 
 ## Interactive
 

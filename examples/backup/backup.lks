@@ -30,7 +30,7 @@ fs::makeDir($target);
 
 // Settings, with defaults when the file is missing
 const $configPath = path::join($target, 'backup.json');
-const $config = if (-f $configPath) json::read($configPath) else {};
+const $config = if (-f $configPath) json::read($configPath) else ({});
 const $keep = ($config['keep'] ?? $defaultKeep).as(number);
 const $exclude = ($config['exclude'] ?? []).as(list<string>);
 

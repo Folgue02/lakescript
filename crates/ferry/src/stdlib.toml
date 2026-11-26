@@ -2353,7 +2353,7 @@ group = "Functions"
 short = "dirs"
 path = "std/dirs"
 title = "std/dirs"
-text = "The folders where a tool keeps its things, on every system: its configuration, its data, its cache. `use std/dirs;`, then `dirs::App('myapp')`, and the folders of the user like downloads.\n\n```\nuse std/dirs;\nuse std/format/json;\nuse std/fs;\nuse std/path;\n\nconst $app = dirs::App('myapp');\nconst $file = path::join($app.config(), 'settings.json');\nconst $settings = if (fs::exists?($file)) json::read($file) else {};\n\njson::write(path::join($app.config(create: true), 'settings.json'), $settings);\noutln(dirs::downloads() ?? 'no downloads folder');\n```"
+text = "The folders where a tool keeps its things, on every system: its configuration, its data, its cache. `use std/dirs;`, then `dirs::App('myapp')`, and the folders of the user like downloads.\n\n```\nuse std/dirs;\nuse std/format/json;\nuse std/fs;\nuse std/path;\n\nconst $app = dirs::App('myapp');\nconst $file = path::join($app.config(), 'settings.json');\nconst $settings = if (fs::exists?($file)) json::read($file) else ({});\n\njson::write(path::join($app.config(create: true), 'settings.json'), $settings);\noutln(dirs::downloads() ?? 'no downloads folder');\n```"
 
 [[modules.groups]]
 name = "Functions"
