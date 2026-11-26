@@ -476,7 +476,9 @@ impl Engine {
             };
             let mut message = format!("assert failed: {text}");
             if let [_, left, right] = args.as_slice() {
-                message.push_str(&format!("\n  left:  {}\n  right: {}", left.nested(), right.nested()));
+                // A value of several lines goes on under its first one, after the `'`
+                let aligned = |v: &Value| v.nested().replace('\n', &format!("\n{}", " ".repeat(10)));
+                message.push_str(&format!("\n  left:  {}\n  right: {}", aligned(left), aligned(right)));
                 // `==` compares lists and maps by reference
                 let what = match (left, right) {
                     (Value::List(_), Value::List(_)) => Some("lists"),
@@ -549,7 +551,7 @@ fn print(to: &mut dyn Write, args: Vec<Value>, name: &str, newline: bool) -> Nat
         _ => {
             return Err(NativeError::new(
                 "TypeError",
-                format!("`{name}` takes one value. Use an f-string to print several *(i.e. f\"{{$a}} {{$b}}\")*"),
+                format!("`{name}` takes one value. Use an f-string to print several (i.e. f\"{{$a}} {{$b}}\")"),
             ));
         }
     };

@@ -491,7 +491,7 @@ impl<'a> Checker<'a> {
                     "bytes" => Ty::Bytes,
                     "type" => match args.as_slice() {
                         [one] => Ty::TypeOf(Box::new(self.ty(one)?)),
-                        _ => return self.fail("`type` takes one type *(i.e. `type<User>`)*", ty.span),
+                        _ => return self.fail("`type` takes one type (i.e. `type<User>`)", ty.span),
                     },
                     "range" => Ty::Range,
                     "command" => Ty::Command,
@@ -862,7 +862,7 @@ impl<'a> Checker<'a> {
                         let found = self.expr(v, Some(&expected))?;
                         if !self.assignable(&found, &expected) {
                             let found = self.resolve(&found);
-                            return self.fail(format!("this function returns {}, not {}", a(&expected), a(&found)), v.span);
+                            return self.fail(format!("this function returns {}, but this is {}", a(&expected), a(&found)), v.span);
                         }
                     }
                     (Return::Declared(expected), None) if *expected != Ty::Void && *expected != Ty::Any => {
@@ -1035,7 +1035,7 @@ impl<'a> Checker<'a> {
                     if let Some(expected) = expected {
                         if !self.assignable(&found, &expected) {
                             let found = self.resolve(&found);
-                            return self.fail(format!("`{}` returns {}, not {}", decl.name, a(&expected), a(&found)), e.span);
+                            return self.fail(format!("`{}` returns {}, but this is {}", decl.name, a(&expected), a(&found)), e.span);
                         }
                     }
                     Ok(found)
@@ -1060,7 +1060,7 @@ impl<'a> Checker<'a> {
         let t = self.shallow(&t);
         let custom = matches!(&t, Ty::Object(c, _) if c.0.body.borrow().exception.is_some());
         if !custom && !matches!(t, Ty::Exception(_) | Ty::Any | Ty::Var(_)) {
-            return self.fail(format!("only exceptions can be thrown, not {} *(i.e. `throw ValueError('...')`)*", a(&t)), value.span);
+            return self.fail(format!("only exceptions can be thrown, not {} (i.e. `throw ValueError('...')`)", a(&t)), value.span);
         }
         Ok(())
     }
@@ -1595,7 +1595,7 @@ impl<'a> Checker<'a> {
             ExprKind::Null => Ty::Null,
             ExprKind::Regex { .. } => Ty::Regex,
             ExprKind::Bytes(_) => Ty::Bytes,
-            ExprKind::Spread(_) => return self.fail("`...` only goes in calls and in lists *(i.e. `[...$a, ...$b]`)*", span),
+            ExprKind::Spread(_) => return self.fail("`...` only goes in calls and in lists (i.e. `[...$a, ...$b]`)", span),
             ExprKind::Type(te) => Ty::TypeOf(Box::new(self.ty(te)?)),
             ExprKind::Interpolated(parts) => {
                 for p in parts {
@@ -1753,7 +1753,7 @@ impl<'a> Checker<'a> {
                     return self.fail(format!("`{name}` is a command: its object comes from `{name}::parse()`"), span);
                 }
                 None if self.class_named(name).is_some_and(|c| c.0.is_enum) => {
-                    return self.fail(format!("`{name}` is an enum: its values are created where it's declared *(i.e. `{name}::...`)*"), span);
+                    return self.fail(format!("`{name}` is an enum: its values are created where it's declared (i.e. `{name}::...`)"), span);
                 }
                 None => return self.fail(format!("there's no function named `{name}`. Functions must be defined before they're used"), span),
             },
@@ -2436,7 +2436,7 @@ impl<'a> Checker<'a> {
                     if !both(self, &Ty::Str) {
                         let (l, r) = (self.resolve(&l), self.resolve(&r));
                         return self.fail(
-                            format!("`+` joins two strings, but got {} and {}. Use an f-string instead *(i.e. f\"Age: {{$age}}\")*", a(&l), a(&r)),
+                            format!("`+` joins two strings, but got {} and {}. Use an f-string instead (i.e. f\"Age: {{$age}}\")", a(&l), a(&r)),
                             span,
                         );
                     }
@@ -2447,7 +2447,9 @@ impl<'a> Checker<'a> {
                     Ty::Number
                 } else {
                     let (l, r) = (self.resolve(&l), self.resolve(&r));
-                    return self.fail(format!("`+` adds two numbers or joins two strings, but got {} and {}", a(&l), a(&r)), span);
+                    // Lists are joined with a method or `...`, not `+`
+                    let hint = if matches!((&l, &r), (Ty::List(_), Ty::List(_))) { ". Two lists are joined with `$a.concat($b)` or `[...$a, ...$b]`" } else { "" };
+                    return self.fail(format!("`+` adds two numbers or joins two strings, but got {} and {}{hint}", a(&l), a(&r)), span);
                 }
             }
             Sub | Mul | Div | Rem | Pow => {
@@ -2483,7 +2485,7 @@ impl<'a> Checker<'a> {
                 let (lr, rr) = (self.resolve(&l), self.resolve(&r));
                 if !could_be_equal(&lr, &rr) {
                     return self.fail(
-                        format!("{} and {} can never be equal. Convert one first *(i.e. `$text.toNumber() == 1`)*", a(&lr), a(&rr)),
+                        format!("{} and {} can never be equal. Convert one first (i.e. `$text.toNumber() == 1`)", a(&lr), a(&rr)),
                         span,
                     );
                 }

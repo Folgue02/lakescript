@@ -534,11 +534,11 @@ impl Parser {
         let word = kind.word();
         let name = self.expect_ident(&format!("for the {word}"))?;
         if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
-            return Err(Diagnostic::new(format!("the name of a {word} is written in PascalCase *(i.e. `{}`)*", pascal(&name)), self.span_from(start)));
+            return Err(Diagnostic::new(format!("the name of a {word} is written in PascalCase (i.e. `{}`)", pascal(&name)), self.span_from(start)));
         }
         if kind == ClassKind::Interface && !(name.len() > 1 && name.starts_with('I') && name[1..].starts_with(|c: char| c.is_ascii_uppercase())) {
             return Err(Diagnostic::new(
-                format!("the name of an interface starts with `I` *(i.e. `I{}`)*, so it's never confused with a class", pascal(&name)),
+                format!("the name of an interface starts with `I` (i.e. `I{}`), so it's never confused with a class", pascal(&name)),
                 self.span_from(start),
             ));
         }
@@ -595,7 +595,7 @@ impl Parser {
                 self.advance();
                 let sub = self.expect_ident("for the subcommand")?;
                 if !is_type_name(&sub) {
-                    return self.error_here(format!("the name of a subcommand is written in PascalCase *(i.e. `{}`)*", pascal(&sub)));
+                    return self.error_here(format!("the name of a subcommand is written in PascalCase (i.e. `{}`)", pascal(&sub)));
                 }
                 subcommands.push(self.command_body(format!("{name}::{sub}"), doc, member_start)?);
                 continue;
@@ -604,7 +604,7 @@ impl Parser {
                 self.advance();
                 let mut flag = Flag { short: None, count: false };
                 if self.eat(&TokenKind::LParen) {
-                    let letter = self.expect_ident("for the short flag *(i.e. `flag(v)`)*")?;
+                    let letter = self.expect_ident("for the short flag (i.e. `flag(v)`)")?;
                     let mut chars = letter.chars();
                     match (chars.next(), chars.next()) {
                         (Some(c), None) if c.is_ascii_alphanumeric() => flag.short = Some(c),
@@ -628,7 +628,7 @@ impl Parser {
             let field = match self.peek().kind.clone() {
                 TokenKind::Field(f) => f,
                 TokenKind::Variable(v) => {
-                    return self.error_here(format!("the arguments of a command are fields of its object, written with `@` *(i.e. `@{v}`)*"));
+                    return self.error_here(format!("the arguments of a command are fields of its object, written with `@` (i.e. `@{v}`)"));
                 }
                 TokenKind::Ident(_) => return self.error_here("commands only have fields and subcommands, not methods"),
                 other => return self.error_here(format!("expected a field like `@name` after the type, found {other}")),
@@ -660,7 +660,9 @@ impl Parser {
         while let TokenKind::Ident(name) = self.peek().kind.clone() {
             let start = self.peek().span;
             if !name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
-                return self.error_here(format!("the values of an enum are written in SCREAMING_CASE *(i.e. `{}`)*, and end with `;`", name.to_ascii_uppercase()));
+                // After a `,`, it may be a member that needed the `;` that ends the values
+                let end = if values.is_empty() { "" } else { ". If it starts a field or a method, the values end with `;` before it" };
+                return self.error_here(format!("the values of an enum are written in SCREAMING_CASE (i.e. `{}`){end}", name.to_ascii_uppercase()));
             }
             self.advance();
             let args = if self.check(&TokenKind::LParen) { self.arguments()? } else { Vec::new() };
@@ -890,15 +892,19 @@ impl Parser {
     /// `use a/b/c;`, `use a/b/c as x;`, `use a/b/c::name;`, `use a/b/c::{x, $y as $z};`
     fn use_decl(&mut self) -> Result<UseDecl> {
         self.advance();
+        let mut last_span = self.peek().span;
+        let mut last_reserved = matches!(self.peek().kind, TokenKind::Keyword(_));
         let mut path = vec![self.path_part("after `use`")?];
         while self.eat(&TokenKind::Slash) {
+            last_span = self.peek().span;
+            last_reserved = matches!(self.peek().kind, TokenKind::Keyword(_));
             path.push(self.path_part("in the path of the module")?);
         }
         let start = self.peek().span;
         for part in &path[..path.len() - 1] {
             if part.starts_with(|c: char| c.is_ascii_uppercase()) {
                 return Err(Diagnostic::new(
-                    format!("`{part}` is a folder, and folders are written in lowercase: only the last part of a path can be a type *(i.e. `people/ChildClass`)*"),
+                    format!("`{part}` is a folder, and folders are written in lowercase: only the last part of a path can be a type (i.e. `people/ChildClass`)"),
                     start,
                 ));
             }
@@ -930,6 +936,13 @@ impl Parser {
             UseItems::Items(items)
         } else {
             let alias = if self.eat_as() { Some(self.expect_ident("after `as`")?) } else { None };
+            // `case::x()` can't be written, so the module needs a name of its own
+            if alias.is_none() && last_reserved {
+                return Err(Diagnostic::new(
+                    format!("`{last}` is a reserved word, so the module needs another name to be used: `use {} as {};`", path.join("/"), &last[..1]),
+                    last_span,
+                ));
+            }
             UseItems::Module { alias }
         };
         self.expect(&TokenKind::Semicolon, "after `use`")?;
@@ -1017,7 +1030,7 @@ impl Parser {
         let first = self.expect_variable("in the `for`")?;
         let pattern = if self.check(&TokenKind::Comma) || self.check(&TokenKind::FatArrow) {
             if ty.is_some() {
-                return self.error_here("the type goes before the variable of the element *(i.e. `for ($i, string $line in $lines)`)*");
+                return self.error_here("the type goes before the variable of the element (i.e. `for ($i, string $line in $lines)`)");
             }
             let indexed = self.eat(&TokenKind::Comma);
             if !indexed {
@@ -1157,7 +1170,7 @@ impl Parser {
             return self.error_here("`?.` and `?[` can't be assigned to, since there may be nothing there: check for `null` first");
         }
         if !is_assignable(&target) {
-            return self.error_here("only variables, fields and indexes can be assigned to *(i.e. `$x = 1`, `$point.x = 1`, `$list[0] = 1`)*");
+            return self.error_here("only variables, fields and indexes can be assigned to (i.e. `$x = 1`, `$point.x = 1`, `$list[0] = 1`)");
         }
         self.advance();
         let value = self.assignment()?;
@@ -1206,7 +1219,7 @@ impl Parser {
                 Infix::Range(inclusive) => {
                     let end = if can_start_expression(&self.peek().kind) { Some(Box::new(self.binary_expr(PREC_RANGE + 1)?)) } else { None };
                     if end.is_none() && inclusive {
-                        return self.error_here("`..=` needs an end *(i.e. `1..=5`)*");
+                        return self.error_here("`..=` needs an end (i.e. `1..=5`)");
                     }
                     left = Expr { kind: ExprKind::Range { start: Box::new(left), end, inclusive }, span: self.span_from(start) };
                     if matches!(self.peek().kind, TokenKind::DotDot | TokenKind::DotDotEq) {
@@ -1220,7 +1233,7 @@ impl Parser {
                     left = self.binary(op, left, right, start);
                     if prec == PREC_RELATIONAL && infix_op(&self.peek().kind).is_some_and(|(p, _)| p == PREC_RELATIONAL) {
                         return self.error_here(format!(
-                            "comparisons can't be chained: use `&&` *(i.e. `$a < $b && $b < $c`)*, found {}",
+                            "comparisons can't be chained: use `&&` (i.e. `$a < $b && $b < $c`), found {}",
                             self.peek().kind
                         ));
                     }
@@ -1533,7 +1546,7 @@ impl Parser {
                 let body = if self.eat(&TokenKind::Arrow) {
                     FunctionBody::Expr(self.expression()?)
                 } else if self.check(&TokenKind::Eq) {
-                    return self.error_here("anonymous functions use `->` before their value *(i.e. `($x) -> $x + 1`)*; `=` is only for named functions");
+                    return self.error_here("anonymous functions use `->` before their value (i.e. `($x) -> $x + 1`); `=` is only for named functions");
                 } else {
                     FunctionBody::Block(self.block()?)
                 };
@@ -1768,8 +1781,8 @@ impl Parser {
                 let key = types.pop().unwrap();
                 Ok(ExprKind::Map { types: Some((key, value)), entries: self.map_entries()? })
             }
-            (1, _) => self.error_here("expected `[` after the type of the list *(i.e. `<string>[]`)*"),
-            (2, _) => self.error_here("expected `{` after the types of the map *(i.e. `<string, number>{}`)*"),
+            (1, _) => self.error_here("expected `[` after the type of the list (i.e. `<string>[]`)"),
+            (2, _) => self.error_here("expected `{` after the types of the map (i.e. `<string, number>{}`)"),
             _ => self.error_here("a list takes one type and a map takes two"),
         }
     }

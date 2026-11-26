@@ -249,6 +249,25 @@ fn wrong_packages_and_versions() {
     assert!(!std::fs::read_to_string(dir.join("ferry.toml")).unwrap().contains("acme"));
     assert!(w.fails(&dir, &["add", "local:9acme/lib@1.0.0"]).contains("can't start with a digit"));
     assert_eq!(w.ferry(&dir, &["nope"]).status.code(), Some(2));
+    // The package is checked before the version, so the example is a right one
+    assert!(w.fails(&dir, &["add", "acme/lib"]).contains("isn't a package"));
+    assert!(w.fails(&dir, &["add", "local:acme/lib"]).contains("`local:acme/lib` needs a version, i.e. `local:acme/lib@1.0.0`"));
+    // A version that isn't there says which ones are
+    w.publish("acme", "lib", "1.1.0", "", &[("src/acme/lib/m.lks", "")]);
+    assert!(w.fails(&dir, &["add", "local:acme/lib@1.2.0"]).contains("Its versions are: 1.0.0, 1.1.0"));
+    // Adding it again, and another version
+    w.ok(&dir, &["add", "local:acme/lib@1.0.0"]);
+    assert!(stderr(&w.ferry(&dir, &["add", "local:acme/lib@1.0.0"])).contains("note: local:acme/lib 1.0.0 is already a dependency"));
+    assert!(stderr(&w.ferry(&dir, &["--color", "never", "add", "local:acme/lib@1.1.0"])).contains("Changed local:acme/lib from 1.0.0 to 1.1.0"));
+}
+
+#[test]
+fn a_test_filter_that_matches_nothing_says_so() {
+    let w = World::new();
+    let dir = w.project("app", &app(""), &[("bin/app.lks", ""), ("tests/units.lks", "void testBytes() { assert true; }\n")]);
+    let said = stderr(&w.ferry(&dir, &["--color", "never", "test", "units"]));
+    assert!(said.contains("note: no test has `units` in its name"), "{said}");
+    assert!(!stderr(&w.ferry(&dir, &["test", "Bytes"])).contains("no test has"));
 }
 
 #[test]
@@ -264,6 +283,30 @@ fn check_finds_errors_in_commands_and_unused_modules() {
     // Several commands need a name
     assert!(w.fails(&dir, &["run"]).contains("say which one"));
     assert_eq!(w.ok(&dir, &["run", "app"]), "1\n");
+}
+
+#[test]
+fn check_shows_the_error_of_every_file() {
+    let w = World::new();
+    let dir = w.project(
+        "lib",
+        &app(""),
+        &[
+            ("src/me/app/w.lks", "pub number a() = 'no';\n"),
+            ("src/me/app/z.lks", "pub number b() = 'no';\n"),
+            ("tests/own.lks", "void testX() { const number $n = 'x'; }\n"),
+            ("tests/uses.lks", "use me/app/w;\nvoid testY() { const number $n = 'x'; }\n"),
+        ],
+    );
+    let said = w.fails(&dir, &["--color", "never", "check"]);
+    // Each one, as seen from the project's folder
+    for place in ["--> src/me/app/w.lks:1:18", "--> src/me/app/z.lks:1:18", "--> tests/own.lks:1:34"] {
+        assert!(said.contains(place), "{place}:\n{said}");
+    }
+    assert!(!said.contains(&w.dir.display().to_string()), "an absolute path:\n{said}");
+    // The one that stops in a module says so, and the error is counted once
+    assert!(said.contains("note: tests/uses.lks is checked once the error in src/me/app/w.lks, which it uses, is fixed"), "{said}");
+    assert!(said.contains("has 3 errors"), "{said}");
 }
 
 /// The launchers run `lks`, which ferry finds next to itself.
@@ -379,6 +422,7 @@ fn doc_makes_the_pages_of_a_project() {
             ("src/me/app/math.lks", "//! Numbers.\n\n/// Twice a number.\n///\n/// $n: the number\n/// returns: `$n * 2`\n/// throws ValueError: never\npub number twice(number $n) = $n * 2;\n\n/// A point.\npub class Point {\n    /// Across.\n    pub number @x;\n}\n\nnumber hidden() = 1;\n"),
             ("src/me/app/api/module.md", "The endpoints.\n"),
             ("src/me/app/api/users.lks", "//! Users.\n"),
+            ("src/me/app/Shape.lks", "/// A shape.\npub enum Shape { CIRCLE, SQUARE }\n"),
             ("src/me/app/talk.lks", "use acme/lib/m;\n\n/// Its text.\npub string say(m::Greeting $g) = $g.text;\n"),
             ("bin/app.lks", "//! Runs the app.\n/// Greets people\ncommand Greet {\n    /// Who to greet\n    string @who;\n    /// Louder\n    flag(l) bool @loud;\n}\nconst $args = Greet::parse();\noutln($args.who);\n"),
             ("bin/plain.lks", "outln(1);\n"),
@@ -392,7 +436,7 @@ fn doc_makes_the_pages_of_a_project() {
     let index = read("index.html");
     assert!(index.contains("The app, in <strong>Markdown</strong>."), "{index}");
     assert!(index.contains("href=\"math.html\"") && index.contains("href=\"folder.api.html\"") && index.contains("href=\"command.app.html\""));
-    assert!(index.contains("local:acme/lib") && index.contains("file://"), "the dependency links to its docs");
+    assert!(index.contains("href=\"deps/local/acme/lib/1.0.0/index.html\""), "the dependency links to its docs: {index}");
     let math = read("math.html");
     assert!(math.contains("<span class=\"n\">twice</span>") && math.contains("the number") && math.contains("ValueError"));
     assert!(math.contains("href=\"math.Point.html\""));
@@ -404,16 +448,24 @@ fn doc_makes_the_pages_of_a_project() {
     assert!(read("command.plain.html").contains("ferry run plain [arguments...]"));
     assert!(read("search.js").contains("\"p\":\"math::twice\""));
     // The types of the standard library link to its pages, and search finds them
-    assert!(math.contains("doc/std/") && math.contains("types.number.html"), "{math}");
+    assert!(math.contains("href=\"std/types.number.html\""), "{math}");
     assert!(read("search.js").contains("\"g\":\"Standard library\",\"p\":\"fs::read\""));
     // And so do the dependencies' types and items
     let talk = read("talk.html");
-    assert!(talk.contains("doc/local/acme/lib/1.0.0/m.Greeting.html\">m::Greeting</a>"), "{talk}");
+    assert!(talk.contains("href=\"deps/local/acme/lib/1.0.0/m.Greeting.html\">m::Greeting</a>"), "{talk}");
     let search = read("search.js");
     assert!(search.contains("\"g\":\"acme/lib\",\"p\":\"m::hi\"") && search.contains("\"p\":\"m::Greeting.text\""), "{search}");
-    assert!(search.contains("doc/local/acme/lib/1.0.0/m.html#"), "{search}");
+    assert!(search.contains("\"deps/local/acme/lib/1.0.0/m.html#"), "{search}");
     // The project's results come first
     assert!(search.find("\"p\":\"math::twice\"") < search.find("\"p\":\"m::hi\"") && search.find("\"p\":\"m::hi\"") < search.find("\"p\":\"fs::read\""));
+    // Their pages are in the same folder, so it works wherever it's moved
+    assert!(read("std/index.html").contains("std/fs") && read("deps/local/acme/lib/1.0.0/m.Greeting.html").contains("A greeting."));
+    for page in ["index.html", "math.html", "talk.html", "search.js"] {
+        assert!(!read(page).contains("file://"), "{page} has an absolute link");
+    }
+    // A type module is one page, its type's
+    assert!(read("Shape.html").contains("use</span> me/app/Shape;") && read("Shape.html").contains("A shape."));
+    assert!(!doc.join("Shape.Shape.html").exists() && read("search.js").contains("\"p\":\"Shape.CIRCLE\""));
     pages_are_well_formed(&doc);
 
     // One thing in the terminal
@@ -423,10 +475,17 @@ fn doc_makes_the_pages_of_a_project() {
     assert!(w.ok(&dir, &["doc", "Point.x"]).contains("Across."));
     assert!(w.ok(&dir, &["doc", "math"]).starts_with("module me/app/math"));
     assert!(w.fails(&dir, &["doc", "nothing"]).contains("there's nothing named `nothing`"));
+    // A dependency's items, and the dependency by its ID or without its version
+    assert!(w.ok(&dir, &["doc", "m::hi"]).starts_with("pub string hi()"));
+    assert!(w.ok(&dir, &["doc", "acme/lib"]).trim().ends_with("doc/local/acme/lib/1.0.0/index.html"));
+    assert!(w.ok(&dir, &["doc", "local:acme/lib"]).trim().ends_with("doc/local/acme/lib/1.0.0/index.html"));
 
     // A package's docs, and a project with errors gets none
     let out = w.ok(&w.dir, &["doc", "local:acme/lib@1.0.0"]);
     assert!(out.trim().ends_with("doc/local/acme/lib/1.0.0/index.html"), "{out}");
+    // An error in a test doesn't stop the docs, an error in a module does
+    write(&dir.join("tests/math.lks"), "void testX() { const number $n = 'no'; }\n");
+    w.ok(&dir, &["doc"]);
     write(&dir.join("src/me/app/math.lks"), "pub number twice(number $n) = 'no';\n");
     assert!(w.fails(&dir, &["doc"]).contains("has 1 error, so its docs weren't made"));
 }

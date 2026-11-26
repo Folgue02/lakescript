@@ -659,7 +659,7 @@ impl Lexer {
                     let hex: String = chars.by_ref().take(2).collect();
                     match u8::from_str_radix(&hex, 16) {
                         Ok(b) if hex.len() == 2 => bytes.push(b),
-                        _ => return self.error("a byte is written `\\x` and two hex digits *(i.e. `\\x89`)*", start),
+                        _ => return self.error("a byte is written `\\x` and two hex digits (i.e. `\\x89`)", start),
                     }
                 }
                 Some('n') => bytes.push(b'\n'),

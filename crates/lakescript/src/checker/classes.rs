@@ -802,6 +802,13 @@ impl Checker<'_> {
 
     /// `$object.name`, or `$object?.name`, which is `null` when the object is.
     pub(super) fn field(&mut self, target: &Expr, name: &str, nullable: bool, span: Span) -> Check<Ty> {
+        // `Align.LEFT`, for `Align::LEFT`
+        if let ExprKind::Function(enum_name) = &target.kind
+            && !name.is_empty()
+            && self.class_named(enum_name).is_some_and(|c| c.0.is_enum)
+        {
+            return self.fail(format!("the values of an enum are reached with `::`: `{enum_name}::{name}`, not `{enum_name}.{name}`"), span);
+        }
         // What a `switch` on this field proved *(i.e. `case Git::Push ->`)*
         if let Some(key) = key_of(target, name, nullable) {
             if let Some(t) = self.scopes.iter().rev().find_map(|s| s.narrowed.get(&key).cloned()) {

@@ -1457,7 +1457,7 @@ impl<'a> Interpreter<'a> {
     fn op_throw(&mut self, span: Span) -> Flow {
         let v = self.pop();
         let Value::Exception(exception) = v else {
-            let message = format!("only exceptions can be thrown, not a {} *(i.e. `throw ValueError('...')`)*", v.type_name());
+            let message = format!("only exceptions can be thrown, not a {} (i.e. `throw ValueError('...')`)", v.type_name());
             return flow_error_as(exceptions::TYPE_ERROR, message, span);
         };
         // A new exception gets the place where it's thrown; a caught one keeps its own
@@ -1958,7 +1958,7 @@ impl Interpreter<'_> {
             return error_as(exceptions::TYPE_ERROR, format!("`{}` is an interface: it doesn't create objects, classes implement it", class.name), span);
         }
         if class.is_enum {
-            return error_as(exceptions::TYPE_ERROR, format!("`{}` is an enum: its values are created where it's declared *(i.e. `{}::...`)*", class.name, class.name), span);
+            return error_as(exceptions::TYPE_ERROR, format!("`{}` is an enum: its values are created where it's declared (i.e. `{}::...`)", class.name, class.name), span);
         }
         // The constructor that takes every field, given all of them in order and
         // nothing to compute first: the arguments are the fields
@@ -2770,7 +2770,7 @@ pub fn arithmetic(op: BinaryOp, l: &Value, r: &Value) -> Result<Value, String> {
         }
         (Value::Bytes(a), Value::Bytes(b)) if op == Add => Ok(Value::Bytes(a.iter().chain(b.iter()).copied().collect())),
         (Value::Str(_), _) | (_, Value::Str(_)) if op == Add => Err(format!(
-            "`+` joins two strings, but got a {} and a {}. Use an f-string instead *(i.e. f\"Age: {{$age}}\")*",
+            "`+` joins two strings, but got a {} and a {}. Use an f-string instead (i.e. f\"Age: {{$age}}\")",
             l.type_name(),
             r.type_name()
         )),

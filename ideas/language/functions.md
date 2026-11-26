@@ -3,7 +3,7 @@
 - Should allow parameter types
 - Should allow default values. They're evaluated on every call, so `list<string> $items = []` gives a new list each time.
 - Should allow varargs. Inside the function, `...string $names` is a `list<string>`.
-- A list can be spread into the arguments with `...` *(i.e. `greet(...$names)`)*.
+- A list can be spread into the arguments of any call with `...`, also of a method, and next to other arguments *(i.e. `greet(...$names)`, `greet('Ana', ...$others)`, `$list.push(...$other)`)*. Inside a list literal it does the same *(i.e. `[...$a, ...$b]`, see [operators.md](operators.md))*.
 - Should allow calling them while naming parameters. Named and positional arguments can be mixed, but positional ones go first *(i.e. `createFile('daniel', extension: 'jpg')`)*.
     - Methods of classes take them too *(i.e. `$zip.add('photos/', as: 'pictures')`)*. The methods of built-in types *(i.e. `'ab'.repeat(2)`)* only take their arguments in order, and naming one is an error.
 - Must always have a return type. Functions that don't return anything use `void` *(i.e. `void log(string $message) { ... }`)*. This way a definition never looks like a call followed by a block.

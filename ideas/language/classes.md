@@ -159,6 +159,7 @@ outln(PersonStatus::fromIgnoreCase('sick'));
 ```
 
 - Values are written in SCREAMING_CASE and reached with `::` *(i.e. `PersonStatus::SICK`)*. Inside the enum, `@` is the value itself.
+- The `;` after the values is only needed when fields or methods follow them, so an enum of only values fits in one line *(i.e. `enum Align { LEFT, RIGHT, CENTER }`)*.
 - A `switch` with a case for every value doesn't need a `default`.
 - Printing a value shows its enum and its name *(i.e. `PersonStatus::SICK`)*.
 - Values are created once, in order, when the enum is declared, and calling the enum is an error. Two values are `==` only if they're the same value.

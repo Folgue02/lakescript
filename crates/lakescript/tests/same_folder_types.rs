@@ -116,3 +116,15 @@ fn a_file_named_like_a_type_must_declare_it() {
     // The error is where the type is used
     assert!(err.contains("must declare `pub class Thing`") && err.contains("main.lks:2:"), "{err}");
 }
+
+#[test]
+fn enum_values_and_files_named_in_another_case_arent_types() {
+    // On macOS and Windows `b.lks` is found as `B.lks` too
+    let dir = TempDir::new("case");
+    dir.file("b.lks", "pub number x() = 1;\n");
+    assert_eq!(run(&dir, "enum E { A, B }\noutln(E::B);\n"), "E::B\n");
+    // A type named like a file of another case isn't that file
+    let script = dir.file("other.lks", "const B $b = null;\n");
+    let err = Engine::with_output(CapturedOutput::new()).run_file(&script).unwrap_err().message;
+    assert!(err.contains("`B`"), "{err}");
+}

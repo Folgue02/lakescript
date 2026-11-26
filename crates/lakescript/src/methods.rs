@@ -443,7 +443,7 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
         let re = match a.get(0) {
             Some(Value::Regex(r)) => r.clone(),
             Some(Value::Str(_)) if method == "match" || method == "matchAll" => {
-                return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a regex, not a string *(i.e. `%r\"...\"`)*"));
+                return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a regex, not a string (i.e. `%r\"...\"`)"));
             }
             Some(Value::Str(_)) => {
                 let plain = match method {
@@ -451,7 +451,7 @@ fn string_method(interp: &mut Interpreter, s: &Rc<str>, a: &Args) -> Exec<Option
                     "replaceFirstMatch" => "replaceFirst",
                     "replaceLastMatch" => "replaceLast",
                     "removeMatches" => "remove",
-                    "replaceMatchesWith" => return a.fail_as(TYPE_ERROR, "`.replaceMatchesWith()` takes a regex *(i.e. `%r\"...\"`)*"),
+                    "replaceMatchesWith" => return a.fail_as(TYPE_ERROR, "`.replaceMatchesWith()` takes a regex (i.e. `%r\"...\"`)"),
                     _ => "split",
                 };
                 return a.fail_as(TYPE_ERROR, format!("`.{method}()` takes a regex. For a string, use `.{plain}()`"));
@@ -1698,7 +1698,7 @@ fn command_method(
         "pipe" => {
             a.count(1, 1)?;
             let Value::Command(other) = a.value(0) else {
-                return a.fail_as(TYPE_ERROR, "`.pipe()` takes another command *(i.e. `.pipe(%x\"sort\")`)*");
+                return a.fail_as(TYPE_ERROR, "`.pipe()` takes another command (i.e. `.pipe(%x\"sort\")`)");
             };
             let piped = command.borrow().piped_to(&other.borrow());
             Value::Command(Rc::new(RefCell::new(piped)))

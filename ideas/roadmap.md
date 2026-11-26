@@ -18,7 +18,7 @@ The first versions were a **tree-walking interpreter**: the script is parsed int
 | **10. Interactive scripts** | Talking with the person who runs the script | `std/terminal` *(prompts, styles, progress, a fuzzy finder, a pager, tables)*, Ctrl+C as an `Interrupted`, and dates, their formats and time zones in `std/time` |
 | **11. Data** | Data that isn't text, and typed data | `bytes`, JSON read into classes with types given as values, `std/random`, `std/archive`, `never` and `$x!`, symbols removed, and in `lks-lsp` signature help, the docs of parameters and importing types from completion |
 | **12. Shipping** | A program in one file | Bundles: `ferry bundle` makes a `.lkb` with every module and the `resources/` it needs, run by `lks` *(see [tooling/bundles.md](tooling/bundles.md))* |
-| **13. Projects, finished** | Every step of a project's life | `ferry uninstall`, `remove` and `update`, version ranges, and in tests `test::tempDir()`, before and after each test, and running them in parallel, and `std/format/toml` *(see [Plan](#plan))* |
+| **13. Projects, finished** | Every step of a project's life | `ferry uninstall`, `remove` and `update`, version ranges, and in tests `test::tempDir()`, before and after each test, and running them in parallel, `ferry new --lib` with `tests/` and `module.md`, warnings for `pub` items without docs and for an older `ferry`, taking the accents out of a string, and `std/format/toml` *(see [Plan](#plan))* |
 | **14. Editors and docs** | The rest of `lks-lsp` | Milestones 4 and 5 *(every error at once, the outline, find references, rename)*, and syntax highlighting in `ferry doc` |
 | **15. The toolchain** | Installing and choosing versions | A version manager like rustup |
 | **1.0.0** | A stable language | Concurrency, tests on Windows, a formatter, the version manager and the rest of `lks-lsp` |
@@ -77,11 +77,25 @@ What comes next, in order, decided after `v0.12.0`. Patches are only fixes; anyt
 - Built: in `ferry doc`, search finds the items of the dependencies, and their types in a signature link to their pages *(see ferry doc in [tooling/docs.md](tooling/docs.md))*.
 - Removing `dirs::app()` breaks code, so it isn't in it: it waits for `v0.13.0`.
 
+### `v0.12.2`, fixes
+
+Found by writing two packages with ferry, `folgue02/text` and `folgue02/table`, which depends on it.
+
+- `ferry check` shows the first error of every file, not only of the first one, with the right count, and paths from the project's folder everywhere *(see [tooling/ferry.md](tooling/ferry.md))*.
+- `ferry doc`: an error in a test doesn't stop it; the pages of the dependencies and of the standard library are written into the project's docs, so every link is relative; a type module is one page; and `ferry doc <name>` finds a dependency's items, and its pages by its ID or without its version *(see [tooling/docs.md](tooling/docs.md))*.
+- Messages: no Markdown in them, `E.A` for an enum's value, the return type of a function, a module named like a reserved word, `+` on two lists, and values of several lines in a failed `assert` *(see [tooling/diagnostics.md](tooling/diagnostics.md) and [tooling/testing.md](tooling/testing.md))*.
+- `ferry add`: the package is checked before the version, a dependency added again, the versions there are when one isn't, a repository that isn't there or is private, and an ID in another case. `ferry test` says when its filter matches nothing.
+- A type in the same folder is a file with exactly its name, and the values of an enum aren't types *(see [language/modules.md](language/modules.md))*.
+
 ### Phase 13, `v0.13.0`: projects, finished
 
 - `ferry uninstall`, `ferry remove` and `ferry update` *(see Later in [tooling/ferry.md](tooling/ferry.md))*.
 - Version ranges for dependencies *(i.e. `^1.4`)*, which `ferry update` needs.
 - `test::tempDir()`, a folder that is removed after the test, functions that run before and after each test, and running tests in parallel *(see Later in [tooling/testing.md](tooling/testing.md))*.
+- `ferry new --lib` also makes `tests/` and a `module.md` to fill in, and the help of `ferry new` says that `ferry new a/b` makes the folder `b`.
+- A warning for a `pub` item without a `///` comment. Whether it's always on or asked for isn't decided.
+- A warning when the `ferry` or `lks` that runs is older than the one the project needs. It needs the project to say which one, the same pin the version manager of phase 15 would read.
+- A method of `string` that takes the accents out *(i.e. `'Árbol'` to `'Arbol'`)*, which `folgue02/text` had to do with a table of its own. Its name isn't decided.
 - `std/format/toml`, reading and writing TOML like `std/format/json` *(see [stdlib/planned.md](stdlib/planned.md))*. The `toml` crate is already in the workspace, for `ferry.toml`, and a project's configuration is often TOML. XML is later, not planned.
 
 ### Phase 14, `v0.14.0`: editors and docs
