@@ -1,7 +1,7 @@
 //! What a project is: its `ferry.toml`, its ID, and the packages it names.
 
 use std::collections::BTreeMap;
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -172,6 +172,20 @@ impl Package {
     pub fn id(&self) -> String {
         id_of(&self.author, &self.name).expect("checked when parsed")
     }
+
+    /// The error for a package whose project has another ID than it was
+    /// asked for, with how to write it when only the case is different
+    /// *(i.e. `github:Folgue02/text` for `folgue02/text`)*.
+    pub fn wrong_id(&self, version: &str, found: &str) -> String {
+        let id = self.id();
+        let mut text = format!("{self} {version} says it's {found}, not {id}");
+        if found.eq_ignore_ascii_case(&id)
+            && let Some((author, name)) = found.split_once('/')
+        {
+            let _ = write!(text, ". IDs are written as the project's ferry.toml has them, so it's `{}:{author}/{name}`", self.repository);
+        }
+        text
+    }
 }
 
 impl fmt::Display for Package {
@@ -182,10 +196,15 @@ impl fmt::Display for Package {
 
 /// `repository:author/name@version`, as `ferry add` and `ferry install` take it.
 pub fn parse_spec(text: &str) -> Result<(Package, String), String> {
-    let Some((package, version)) = text.rsplit_once('@') else {
-        return Err(format!("`{text}` needs a version, i.e. `{text}@1.0.0`"));
+    // The package first, so the example of a missing version is a right one
+    let (package, version) = match text.rsplit_once('@') {
+        Some((package, version)) => (package, Some(version)),
+        None => (text, None),
     };
     let package = Package::parse(package)?;
+    let Some(version) = version else {
+        return Err(format!("`{package}` needs a version, i.e. `{package}@1.0.0`"));
+    };
     check_version(version).map_err(|e| format!("the version of {package} {e}"))?;
     Ok((package, version.to_string()))
 }
@@ -219,5 +238,20 @@ pub fn check_version(version: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("`{version}` must be an exact version, like `1.4.2`. Ranges aren't supported yet"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_id_in_another_case_says_how_its_written() {
+        let package = Package::parse("github:Folgue02/text").unwrap();
+        assert_eq!(
+            package.wrong_id("0.1.0", "folgue02/text"),
+            "github:Folgue02/text 0.1.0 says it's folgue02/text, not Folgue02/text. IDs are written as the project's ferry.toml has them, so it's `github:folgue02/text`"
+        );
+        assert_eq!(package.wrong_id("0.1.0", "acme/other"), "github:Folgue02/text 0.1.0 says it's acme/other, not Folgue02/text");
     }
 }

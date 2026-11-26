@@ -1504,7 +1504,7 @@ impl<'a> Compiler<'a> {
                 }
             }
             ExprKind::Spread(inner) => {
-                return Err(Diagnostic::new("`...` only goes in calls and in lists *(i.e. `[...$a, ...$b]`)*", inner.span));
+                return Err(Diagnostic::new("`...` only goes in calls and in lists (i.e. `[...$a, ...$b]`)", inner.span));
             }
             ExprKind::Map { entries, .. } => {
                 for (k, v) in entries {
@@ -1538,7 +1538,7 @@ impl<'a> Compiler<'a> {
             }
             ExprKind::Range { start, end, inclusive } => {
                 let Some(end) = end else {
-                    self.fail("a range without an end can only be used as an index *(i.e. `$text[2..]`)*");
+                    self.fail("a range without an end can only be used as an index (i.e. `$text[2..]`)");
                     return Ok(());
                 };
                 self.expr(start)?;

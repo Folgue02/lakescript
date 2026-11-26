@@ -59,6 +59,8 @@ fn given(program: &[Stmt]) -> HashSet<String> {
     fn class(decl: &ClassDecl, names: &mut HashSet<String>) {
         names.insert(decl.name.clone());
         names.extend(decl.generics.iter().cloned());
+        // The values of an enum *(i.e. `B` in `enum E { A, B }`)*
+        names.extend(decl.values.iter().map(|v| v.name.clone()));
         for member in &decl.members {
             if let MemberKind::Method { decl, .. } | MemberKind::Constructor(decl) = &member.kind {
                 names.extend(decl.generics.iter().cloned());
@@ -117,7 +119,7 @@ impl Loader {
             return crate::stdlib::MODULES.contains(&joined.as_str()) && !self.disabled.contains(&joined);
         }
         let relative: std::path::PathBuf = path.iter().collect::<std::path::PathBuf>().with_extension("lks");
-        self.roots.iter().map(|r| r.join(&relative)).any(|p| p.is_file() || self.overlay.contains_key(&p))
+        self.roots.iter().map(|r| r.join(&relative)).any(|p| self.overlay.contains_key(&p) || (p.is_file() && named_exactly(&p)))
     }
 
     /// Adds a `use` for each type of `names` that nothing in `program` gives
@@ -144,6 +146,13 @@ impl Loader {
         }
         program.splice(0..0, uses);
     }
+}
+
+/// Whether the file at `path` has that name with the same case: on macOS
+/// and Windows `b.lks` is found as `B.lks` too, and `B` isn't its type.
+fn named_exactly(path: &Path) -> bool {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else { return false };
+    std::fs::read_dir(parent).is_ok_and(|entries| entries.flatten().any(|e| e.file_name() == name))
 }
 
 #[cfg(test)]

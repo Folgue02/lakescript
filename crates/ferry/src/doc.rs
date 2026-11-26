@@ -259,7 +259,10 @@ pub fn write(site: &Site, dir: &Path) -> Result<PathBuf, Fail> {
     let types = types(site);
     let mut pages: Vec<(String, String)> = vec![("index.html".into(), front_page(site, &types))];
     for module in &site.modules {
-        pages.push((module_href(module), module_page(site, module, &types)));
+        // A type module *(i.e. `Border.lks` with `enum Border`)* is its type's page
+        if type_module(module).is_none() {
+            pages.push((module_href(module), module_page(site, module, &types)));
+        }
         for item in module.doc.items.iter().filter(|i| has_page(i)) {
             pages.push((type_href(module, &item.name), type_page(site, module, item, &types)));
         }
@@ -292,7 +295,20 @@ fn module_href(module: &ModulePage) -> String {
 }
 
 fn type_href(module: &ModulePage, name: &str) -> String {
-    format!("{}.{name}.html", dotted(&module.short))
+    match type_module(module) {
+        Some(item) if item.name == name => module_href(module),
+        _ => format!("{}.{name}.html", dotted(&module.short)),
+    }
+}
+
+/// The type of a type module: a module named like the one thing it has, a
+/// class, interface or enum *(i.e. `Border.lks` with `enum Border`)*. Its
+/// page is the module's page.
+fn type_module(module: &ModulePage) -> Option<&Item> {
+    match module.doc.items.as_slice() {
+        [item] if module.importable && has_page(item) && item.name == module.title => Some(item),
+        _ => None,
+    }
 }
 
 fn folder_href(short: &str) -> String {
@@ -734,7 +750,12 @@ fn module_page(site: &Site, module: &ModulePage, types: &BTreeMap<String, String
 }
 
 fn type_page(site: &Site, module: &ModulePage, item: &Item, types: &BTreeMap<String, String>) -> String {
-    let mut main = breadcrumb(site, &[(module.title.clone(), Some(module_href(module))), (item.name.clone(), None)]);
+    let alone = type_module(module).is_some();
+    let mut main = if alone {
+        breadcrumb(site, &[(module.title.clone(), None)])
+    } else {
+        breadcrumb(site, &[(module.title.clone(), Some(module_href(module))), (item.name.clone(), None)])
+    };
     let place = if item.line > 0 { format!("{}:{}", module.file, item.line) } else { String::new() };
     let _ = writeln!(
         main,
@@ -744,6 +765,18 @@ fn type_page(site: &Site, module: &ModulePage, item: &Item, types: &BTreeMap<Str
         esc(&place),
         code(&item.code, &item.name, types)
     );
+    if alone {
+        // What the module's page would have had: its `use` line and its `//!`
+        let _ = writeln!(
+            main,
+            "<div class=\"use\"><code><span class=\"k\">use</span> {};</code><button type=\"button\" data-copy=\"use {};\">Copy</button></div>",
+            esc(&module.path),
+            esc(&module.path)
+        );
+        if let Some(text) = &module.doc.text {
+            let _ = writeln!(main, "<div class=\"doc big\">{}</div>", md(text));
+        }
+    }
     if !item.doc.text.is_empty() {
         let _ = writeln!(main, "<div class=\"doc big\">{}</div>", md(&item.doc.text));
     }
@@ -1039,14 +1072,19 @@ fn entries_of(site: &Site, group: &str, base: &str, entries: &mut Vec<String>) {
         ));
     };
     for module in &site.modules {
-        let summary = module.doc.text.as_ref().map(|t| Doc { text: t.clone(), ..Doc::default() }.summary()).unwrap_or_default();
-        add(module.path.clone(), "module", summary, module_href(module));
+        // A type module is found as its type, which is what `use` gives *(i.e. `Border`, not `Border::Border`)*
+        let alone = type_module(module).is_some();
+        let prefix = if alone { "" } else { module.prefix.as_str() };
+        if !alone {
+            let summary = module.doc.text.as_ref().map(|t| Doc { text: t.clone(), ..Doc::default() }.summary()).unwrap_or_default();
+            add(module.path.clone(), "module", summary, module_href(module));
+        }
         for item in &module.doc.items {
             let href = if has_page(item) { type_href(module, &item.name) } else { format!("{}#{}", module_href(module), anchor(&item.name)) };
-            add(format!("{}{}", module.prefix, item.name), item.kind.word(), item.doc.summary(), href);
+            add(format!("{prefix}{}", item.name), item.kind.word(), item.doc.summary(), href);
             for member in &item.members {
                 let page = type_href(module, &item.name);
-                add(format!("{}{}.{}", module.prefix, item.name, member.name), member.kind.word(), member.doc.summary(), format!("{page}#{}", anchor(&member.name)));
+                add(format!("{prefix}{}.{}", item.name, member.name), member.kind.word(), member.doc.summary(), format!("{page}#{}", anchor(&member.name)));
             }
         }
     }

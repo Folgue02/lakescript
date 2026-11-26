@@ -48,6 +48,8 @@ assert failed: units::bytes('1.5 KB') == 1536
   right: 1536
 ```
 
+- A value of several lines goes on under its first line, after its `'`, so both sides line up *(since `v0.12.2`)*.
+
 - `$a.equals($b)` shows both sides too, since it's how lists and maps are compared by their values.
 - `==` compares lists and maps by reference *(see [operators.md](../language/operators.md))*, so `assert $list == [1, 2]` fails even when `$list` has those values. Then the message says so, and that `.equals()` compares the values.
 - The condition must be a `bool`, like the one of an `if`. After the `assert`, the checker knows it holds, like after an `if` that returns *(i.e. `assert $name != null;` and then `$name.upper()`)*.
@@ -97,7 +99,7 @@ tests/units.lks
 - A test that fails doesn't stop the others.
 - The exit code is `1` when a test failed or a file couldn't run, and `0` when every one passed.
 - `ferry test` says all of it on stderr, like the rest of what ferry says. `lks --test` writes the tests on stdout, and an error that stops the file on stderr.
-- A file whose tests all are left out by the filter isn't shown.
+- A file whose tests all are left out by the filter isn't shown. A filter that no test has in its name gets a note, since it picks tests by their names, not by their files. Whether it should also pick files isn't decided.
 - What a test prints is only shown when it fails, like cargo.
 
 ## How it's made

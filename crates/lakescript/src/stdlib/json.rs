@@ -32,7 +32,7 @@ fn convert_to(vm: &mut Interpreter, value: Value, target: &Value, path: &str, sp
     match target {
         Value::Class(class) => into_class(vm, value, class, path, span),
         Value::Type(t) => convert(vm, value, &t.0, &t.1, path, span),
-        other => error_as(TYPE_ERROR, format!("the type to read JSON into must be a type *(i.e. `User` or `list<User>`)*, not a {}", other.type_name()), span),
+        other => error_as(TYPE_ERROR, format!("the type to read JSON into must be a type (i.e. `User` or `list<User>`), not a {}", other.type_name()), span),
     }
 }
 

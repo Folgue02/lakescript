@@ -101,7 +101,7 @@ pub fn resolve(home: &Home, project: &Project, lock: &Lock) -> Result<(Vec<Depen
         }
         let dependency = Project::read(&dir).map_err(|e| format!("{package} {version}: {e}"))?;
         if dependency.id != id {
-            return Err(format!("{package} {version} says it's {}, not {id}", dependency.id).into());
+            return Err(package.wrong_id(&version, &dependency.id).into());
         }
         dependency.modules().map_err(|e| format!("{package} {version}: {e}"))?;
         let by = format!("{package} {version}");

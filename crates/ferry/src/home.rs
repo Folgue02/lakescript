@@ -101,7 +101,20 @@ impl Home {
             let said = String::from_utf8_lossy(&output.stderr);
             let said = said.trim();
             if said.contains(&tag) && said.contains("not found") {
-                return Err(format!("{package} has no version {version}: there's no tag {tag} in {url}").into());
+                let versions = match versions(&url).as_slice() {
+                    [] => "It has no versions yet: a version is a tag like `v1.0.0`".to_string(),
+                    found => format!("Its versions are: {}", found.join(", ")),
+                };
+                return Err(format!("{package} has no version {version}: there's no tag {tag} in {url}. {versions}").into());
+            }
+            // A repository that isn't there, or that's private: git can't ask for a password here
+            let missing = ["Repository not found", "could not read Username", "Authentication failed", "terminal prompts disabled", "does not appear to be a git repository"];
+            if missing.iter().any(|m| said.contains(m)) {
+                return Err(format!(
+                    "can't download {package} {version}: there's no repository at {url}, or it's private and needs a password, which ferry can't ask for. A private one can be reached through ssh, with a repository of its own in {}",
+                    self.dir.join("config.toml").display()
+                )
+                .into());
             }
             return Err(format!("can't download {package} {version} from {url}:\n{said}").into());
         }
@@ -118,6 +131,21 @@ impl Home {
         }
         Ok((dir, commit))
     }
+}
+
+/// The versions of the package at `url`, from its tags *(i.e. `v1.4.2` is
+/// `1.4.2`)*, oldest first. Empty when git can't list them.
+fn versions(url: &str) -> Vec<String> {
+    let Ok(output) = git(None).args(["ls-remote", "--tags", "--refs", url]).output() else { return Vec::new() };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut found: Vec<String> = text
+        .lines()
+        .filter_map(|line| line.rsplit_once("refs/tags/v").map(|(_, v)| v.to_string()))
+        .filter(|v| crate::project::check_version(v).is_ok())
+        .collect();
+    let key = |v: &String| v.split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    found.sort_by_key(key);
+    found
 }
 
 fn git(dir: Option<&Path>) -> Command {

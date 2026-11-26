@@ -235,7 +235,7 @@ fn run(args: &[String]) -> Result<ExitCode, Fail> {
             Ok(ExitCode::from(2))
         }
         Err(diagnostic) => {
-            eprintln!("{}", show(&diagnostic, &script));
+            eprintln!("{}", show_in(&project, &diagnostic, &script));
             Ok(ExitCode::FAILURE)
         }
     }
@@ -278,36 +278,46 @@ fn check() -> Result<ExitCode, Fail> {
 /// Type checks every command and every module of a project, and prints the
 /// errors. It returns how many different errors there were.
 fn check_project(project: &Project, dependencies: &[Dependency]) -> Result<usize, Fail> {
+    check_files(project, dependencies, true)
+}
+
+/// Checks the modules of the project, then its commands and, with `tests`,
+/// the files of `tests/`. Each file is checked on its own, so each one shows
+/// its first error. An error in a module is shown once, not once for every
+/// file that uses it. Gives how many were shown.
+fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> Result<usize, Fail> {
     let module_path = resolve::module_path(project, dependencies);
-    // An error in a module is shown once, not once for every file that uses it
     let mut shown = std::collections::HashSet::new();
-    let mut report = |text: String| {
+    let mut report = |diagnostic: &Diagnostic, script: &Path| {
+        let text = show_in(project, diagnostic, script);
         if shown.insert(text.clone()) {
             eprintln!("{text}\n");
         }
     };
-    for command in project.commands() {
-        let script = project.command_file(&command);
-        if let Err(diagnostic) = engine(&module_path).check_file(&script) {
-            report(show(&diagnostic, &script));
-        }
-    }
-    for file in project.test_files() {
-        if let Err(diagnostic) = engine(&module_path).check_file(&file) {
-            report(show_as(&diagnostic, &file, &relative(project, &file)));
-        }
-    }
-    // Modules no command uses are checked too
     let modules = project.modules()?;
-    let files = project.commands().into_iter().map(|c| project.command_file(&c)).chain(project.test_files()).chain(modules.iter().map(|m| project.src().join(format!("{m}.lks"))));
-    for file in files {
-        stale_comments(project, &file);
-    }
-    if !modules.is_empty() {
-        let source: String = modules.iter().enumerate().map(|(i, m)| format!("use {m} as module{i};\n")).collect();
-        if let Err(diagnostic) = engine(&module_path).check_source(&source) {
-            report(show(&diagnostic, &project.src()));
+    for module in &modules {
+        let file = project.src().join(format!("{module}.lks"));
+        if let Err(diagnostic) = engine(&module_path).check_source(&format!("use {module} as module;\n")) {
+            report(&diagnostic, &file);
         }
+    }
+    let test_files = if tests { project.test_files() } else { Vec::new() };
+    let scripts: Vec<PathBuf> = project.commands().into_iter().map(|c| project.command_file(&c)).chain(test_files).collect();
+    let mut waiting = Vec::new();
+    for script in &scripts {
+        if let Err(diagnostic) = engine(&module_path).check_file(script) {
+            report(&diagnostic, script);
+            // The checker stops at the first error, which here is in a module it uses
+            if let Some(file) = &diagnostic.file {
+                waiting.push((relative(project, script), relative(project, Path::new(file))));
+            }
+        }
+    }
+    for (script, module) in waiting {
+        note(&format!("{script} is checked once the error in {module}, which it uses, is fixed"));
+    }
+    for file in scripts.iter().cloned().chain(modules.iter().map(|m| project.src().join(format!("{m}.lks")))) {
+        stale_comments(project, &file);
     }
     Ok(shown.len())
 }
@@ -333,33 +343,40 @@ fn doc(args: &[String]) -> Result<ExitCode, Fail> {
     match targets.as_slice() {
         [] => doc_project(open),
         ["std"] => doc_std(open),
-        [spec] if spec.contains(":") && !spec.contains("::") => doc_package(spec, open),
+        [spec] if spec.contains(':') && !spec.contains("::") => doc_package(spec, open),
         [name] if !name.starts_with('-') => doc_name(name),
         _ => Ok(usage_error("`ferry doc` takes a package, `std` or a name, and maybe `--open`")),
     }
 }
 
 fn doc_project(open: bool) -> Result<ExitCode, Fail> {
-    let (home, project, dependencies) = open_project()?;
-    let errors = check_project(&project, &dependencies)?;
+    let (_, project, dependencies) = open_project()?;
+    // Only what the docs are made from: the tests aren't in them
+    let errors = check_files(&project, &dependencies, false)?;
     if errors > 0 {
         let what = if errors == 1 { "error" } else { "errors" };
         return Err(format!("{} has {errors} {what}, so its docs weren't made", project.id).into());
     }
     let mut site = ferry::doc::read(&project)?;
-    // The standard library's pages, which the project's link to and search
-    let std_index = std_docs(&home)?;
-    let std_base = format!("{}/", file_url(std_index.parent().expect("the pages are in a folder")));
-    site.std = Some((Box::new(ferry::doc::std_site()), std_base));
+    // The pages of the standard library and of the dependencies go in the
+    // same folder, so every link is relative and the folder works anywhere
+    site.std = Some((Box::new(ferry::doc::std_site()), "std/".to_string()));
     for dependency in &dependencies {
-        let index = package_docs(&home, &dependency.project, &dependency.package, &dependency.version)?;
-        site.dependencies.push((dependency.package.to_string(), dependency.version.clone(), Some(file_url(&index))));
+        let package = &dependency.package;
+        let base = format!("deps/{}/{}/{}/{}/", package.repository, package.author, package.name, dependency.version);
+        site.dependencies.push((package.to_string(), dependency.version.clone(), Some(format!("{base}index.html"))));
         // Its items, which the project's pages link to and search
-        let base = format!("{}/", file_url(index.parent().expect("the pages are in a folder")));
         site.packages.push((ferry::doc::read(&dependency.project)?, base));
     }
     let out = project.dir.join(".ferry").join("doc");
     let index = ferry::doc::write(&site, &out)?;
+    if let Some((std, base)) = &site.std {
+        ferry::doc::write(std, &out.join(base))?;
+    }
+    for ((package, version, _), (pages, base)) in site.dependencies.iter().zip(&site.packages) {
+        ferry::doc::write(pages, &out.join(base))?;
+        status("Documented", &format!("{package} {version}"));
+    }
     status("Documented", &format!("{} in {}", project.id, relative_to_here(&index)));
     if open {
         open_page(&index);
@@ -380,12 +397,19 @@ fn package_docs(home: &Home, project: &Project, package: &project::Package, vers
 }
 
 fn doc_package(spec: &str, open: bool) -> Result<ExitCode, Fail> {
-    let (package, version) = project::parse_spec(spec)?;
     let home = Home::open()?;
+    // Without a version, the one of the project's lock file *(i.e. `ferry doc github:acme/http`)*
+    let (package, version) = match project::parse_spec(spec) {
+        Ok(found) => found,
+        Err(e) => match locked(&project::Package::parse(spec)?.id())? {
+            Some(dependency) => (dependency.package, dependency.version),
+            None => return Err(e.into()),
+        },
+    };
     let (dir, _) = home.fetch(&package, &version)?;
     let project = Project::read(&dir)?;
     if project.id != package.id() {
-        return Err(format!("{package} {version} says it's {}, not {}", project.id, package.id()).into());
+        return Err(package.wrong_id(&version, &project.id).into());
     }
     let index = package_docs(&home, &project, &package, &version)?;
     if open {
@@ -394,6 +418,17 @@ fn doc_package(spec: &str, open: bool) -> Result<ExitCode, Fail> {
         println!("{}", index.display());
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// The dependency of the project in the current folder with the ID `id`
+/// *(i.e. `acme/http`)*, at the version of its lock file. `None` outside a
+/// project, or when it isn't one of its dependencies.
+fn locked(id: &str) -> Result<Option<Dependency>, Fail> {
+    if Project::find(&current_dir()?).is_err() {
+        return Ok(None);
+    }
+    let (_, _, dependencies) = open_project()?;
+    Ok(dependencies.into_iter().find(|d| d.package.id() == id))
 }
 
 /// The pages of the standard library, which ferry has inside, written to
@@ -424,23 +459,25 @@ fn doc_name(name: &str) -> Result<ExitCode, Fail> {
             None => Err(format!("there's nothing named `{name}` in the standard library").into()),
         };
     }
-    let (_, project, _) = open_project()?;
-    let site = ferry::doc::read(&project)?;
-    // The project's own first, then the standard library's
-    match ferry::doc::describe(&site, name).or_else(|| ferry::doc::describe(&ferry::doc::std_site(), name)) {
+    let (_, project, dependencies) = open_project()?;
+    // A dependency by its ID *(i.e. `ferry doc acme/http`)*: its pages
+    if let Some(dependency) = dependencies.iter().find(|d| d.package.id() == name) {
+        return doc_package(&format!("{}@{}", dependency.package, dependency.version), false);
+    }
+    // The project's own first, then its dependencies', then the standard library's
+    let mut found = ferry::doc::describe(&ferry::doc::read(&project)?, name);
+    for dependency in &dependencies {
+        if found.is_none() {
+            found = ferry::doc::describe(&ferry::doc::read(&dependency.project)?, name);
+        }
+    }
+    match found.or_else(|| ferry::doc::describe(&ferry::doc::std_site(), name)) {
         Some(text) => {
             print!("{text}");
             Ok(ExitCode::SUCCESS)
         }
-        None => Err(format!("there's nothing named `{name}` in the docs of {}", project.id).into()),
+        None => Err(format!("there's nothing named `{name}` in the docs of {}, its dependencies or the standard library", project.id).into()),
     }
-}
-
-fn file_url(path: &Path) -> String {
-    let path = lakescript::canonical(path).display().to_string().replace('\\', "/");
-    // `C:/x` on Windows is `file:///C:/x`
-    let slash = if path.starts_with('/') { "" } else { "/" };
-    format!("file://{slash}{path}")
 }
 
 fn relative_to_here(path: &Path) -> String {
@@ -495,11 +532,14 @@ fn test(filter: Option<&str>) -> Result<ExitCode, Fail> {
             }
             Err(diagnostic) => {
                 broken += 1;
-                eprintln!("{}\n", show_as(&diagnostic, file, &shown));
+                eprintln!("{}\n", show_in(&project, &diagnostic, file));
             }
         }
     }
     eprint!("{}", lakescript::render_summary(&results, start.elapsed().as_secs_f64(), paint()));
+    if let Some(filter) = filter.filter(|_| results.is_empty() && broken == 0) {
+        note(&format!("no test has `{filter}` in its name: the filter picks tests by their names, i.e. `testBytes`, not by their files"));
+    }
     if broken > 0 {
         let files = if broken == 1 { "file of tests" } else { "files of tests" };
         return Err(format!("{broken} {files} couldn't run").into());
@@ -509,25 +549,31 @@ fn test(filter: Option<&str>) -> Result<ExitCode, Fail> {
 
 /// A file as seen from the project's folder *(i.e. `tests/units.lks`)*.
 fn relative(project: &Project, file: &Path) -> String {
-    file.strip_prefix(&project.dir).unwrap_or(file).display().to_string()
-}
-
-/// `show`, naming the script `name` in the error.
-fn show_as(diagnostic: &Diagnostic, script: &Path, name: &str) -> String {
-    let file = diagnostic.file.clone().map(PathBuf::from).unwrap_or_else(|| script.to_path_buf());
-    match std::fs::read_to_string(&file) {
-        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(name, &source, paint()),
-        _ => diagnostic.render_painted(name, paint()),
+    if let Ok(short) = file.strip_prefix(&project.dir) {
+        return short.display().to_string();
+    }
+    // The paths of the engine are real ones *(i.e. `/private/tmp` for `/tmp` on macOS)*
+    let real = lakescript::canonical(file);
+    match real.strip_prefix(lakescript::canonical(&project.dir)) {
+        Ok(short) => short.display().to_string(),
+        Err(_) => file.display().to_string(),
     }
 }
 
-/// An error with the line of code it points to, read from the file it's in.
-fn show(diagnostic: &Diagnostic, script: &Path) -> String {
-    let name = script.display().to_string();
-    let file = diagnostic.file.clone().unwrap_or_else(|| name.clone());
-    match std::fs::read_to_string(&file) {
-        Ok(source) if diagnostic.span.line > 0 => diagnostic.render_with_source_painted(&name, &source, paint()),
-        _ => diagnostic.render_painted(&name, paint()),
+/// An error in a project, with every path in it as seen from the project's
+/// folder *(i.e. `src/me/app/math.lks`, `tests/math.lks`)*, the same for
+/// modules, scripts and the calls that led to it.
+fn show_in(project: &Project, diagnostic: &Diagnostic, script: &Path) -> String {
+    let source = diagnostic.file.clone().map(PathBuf::from).unwrap_or_else(|| script.to_path_buf());
+    let mut short = diagnostic.clone();
+    short.file = diagnostic.file.as_ref().map(|f| relative(project, Path::new(f)));
+    for call in &mut short.trace {
+        call.file = call.file.as_ref().map(|f| relative(project, Path::new(f)));
+    }
+    let name = relative(project, script);
+    match std::fs::read_to_string(&source) {
+        Ok(text) if short.span.line > 0 => short.render_with_source_painted(&name, &text, paint()),
+        _ => short.render_painted(&name, paint()),
     }
 }
 
@@ -536,6 +582,11 @@ fn add(spec: &str) -> Result<ExitCode, Fail> {
     let home = Home::open()?;
     home.knows(&package)?;
     let mut project = Project::find(&current_dir()?)?;
+    let before = project.dependencies.iter().find(|(p, _)| *p == package).map(|(_, v)| v.clone());
+    if before.as_deref() == Some(version.as_str()) {
+        note(&format!("{package} {version} is already a dependency"));
+        return Ok(ExitCode::SUCCESS);
+    }
     // Resolved with the new dependency first, so a clash leaves ferry.toml as it was
     project.dependencies.retain(|(p, _)| *p != package);
     project.dependencies.push((package.clone(), version.clone()));
@@ -545,7 +596,10 @@ fn add(spec: &str) -> Result<ExitCode, Fail> {
     let text = with_dependency(&text, &package.to_string(), &version);
     std::fs::write(&file, &text).map_err(|e| format!("can't write {}: {e}", file.display()))?;
     lock.write(&project.dir)?;
-    status("Added", &format!("{package} {version}"));
+    match before {
+        Some(old) => status("Changed", &format!("{package} from {old} to {version}")),
+        None => status("Added", &format!("{package} {version}")),
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -679,7 +733,7 @@ fn install_package(spec: &str) -> Result<ExitCode, Fail> {
     let (dir, _) = home.fetch(&package, &version)?;
     let project = Project::read(&dir)?;
     if project.id != package.id() {
-        return Err(format!("{package} {version} says it's {}, not {}", project.id, package.id()).into());
+        return Err(package.wrong_id(&version, &project.id).into());
     }
     application(&project)?;
     project.modules()?;

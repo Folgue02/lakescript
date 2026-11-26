@@ -78,6 +78,7 @@ pub class Order {
 - **The folder is the one of the module's own path**, looked for through the module path like any `use`. A standalone script's folder is a root, so the types next to it can be used without `use` too.
 - **It's the last place a name is looked for.** A type declared in the file, a type parameter, a `use` *(also of another type with the same name)* and the built-in types *(i.e. `ValueError`)* all come first. So adding a file to a folder never changes what code that already worked means, and a `use` wins, like a single-type import in Java.
 - A `use` of a type in the same folder still works, it just isn't needed.
+- The file is named exactly like the type, also on macOS and Windows, where `b.lks` is found as `B.lks` too. And the values of an enum of the file aren't types *(i.e. `B` in `enum E { A, B }`)*. Both were found in `v0.12.2`.
 - **It costs nothing to code that doesn't need it.** The folder is only looked in for a type name that nothing else gives, once per name, when the file is checked or loaded. The module is loaded the first time it's used, like with a `use`.
 - Editors don't write a `use` for them when completing *(see Importing types from completion in [tooling/lsp.md](../tooling/lsp.md))*.
 
@@ -167,7 +168,7 @@ src/folgue02/web/
 
 ## Rules
 
-- The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*.
+- The parts of a path can be reserved words, since they're names of folders and files *(i.e. `use text/case;`)*. A module with a reserved name needs an alias to be used *(i.e. `use text/case as c;`)*, since `case::x()` can't be written: a `use` of it without one is an error that says so. Importing things from it doesn't need one *(i.e. `use text/case::x;`)*.
 - Modules can import each other, directly or through other modules *(i.e. `Order` and `Customer`, each in its own file)*. This works because a module's top level only has declarations, and everything `pub` has its type written. How it works is in [classes.md](classes.md#circular-imports).
     - The checker reads the signatures of a module that's in the middle of being checked from its declarations, without checking its code, since everything `pub` has its type written.
     - When the script runs, a module that's still loading is given as far as it got to the modules it uses, and the names they import from it get their values when it finishes. So functions and classes can call each other freely.

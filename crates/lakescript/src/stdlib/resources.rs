@@ -68,7 +68,7 @@ fn where_they_are(ctx: &NativeContext) -> Result<Place, NativeError> {
 fn checked(name: &str) -> Result<String, NativeError> {
     let parts: Vec<&str> = name.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
     if name.starts_with('/') || name.contains('\\') || name.contains(':') || parts.contains(&"..") {
-        return Err(NativeError::new(VALUE_ERROR, format!("'{name}' isn't the name of a resource: it's a path inside resources/, with `/` *(i.e. 'templates/page.html')*")));
+        return Err(NativeError::new(VALUE_ERROR, format!("'{name}' isn't the name of a resource: it's a path inside resources/, with `/` (i.e. 'templates/page.html')")));
     }
     Ok(parts.join("/"))
 }

@@ -50,7 +50,7 @@ pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Resu
                             }
                             Ok(true)
                         }
-                        _ => Err("`list` takes one type parameter *(i.e. `list<string>`)*".into()),
+                        _ => Err("`list` takes one type parameter (i.e. `list<string>`)".into()),
                     }
                 }
                 "map" => {
@@ -65,7 +65,7 @@ pub fn matches(value: &Value, ty: &TypeExpr, classes: &[(&str, &Value)]) -> Resu
                             }
                             Ok(true)
                         }
-                        _ => Err("`map` takes two type parameters *(i.e. `map<string, number>`)*".into()),
+                        _ => Err("`map` takes two type parameters (i.e. `map<string, number>`)".into()),
                     }
                 }
                 "void" => Err("`void` isn't the type of any value".into()),

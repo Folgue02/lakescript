@@ -70,8 +70,8 @@ fn functions_and_calls() {
     assert!(rejected(&format!("{defs}greet(nope: 'x');")).contains("has no parameter named `nope`"));
     assert!(rejected(&format!("{defs}sum(1, 'two');")).contains("must be a number, but this is a string"));
     assert!(rejected("void f(number $a) {}\nf();").contains("needs a value for `$a`"));
-    assert!(rejected("number f() = 'x';").contains("returns a number, not a string"));
-    assert!(rejected("number f() { return 'x'; }").contains("returns a number, not a string"));
+    assert!(rejected("number f() = 'x';").contains("`f` returns a number, but this is a string"));
+    assert!(rejected("number f() { return 'x'; }").contains("this function returns a number, but this is a string"));
     assert!(rejected("number f(number $n) { if ($n > 0) return 1; }").contains("must return a number at the end"));
     assert!(rejected("void f() { return 1; }").contains("a `void` function can't return a value"));
     assert!(rejected("outln(missing());").contains("no function named `missing`"));
@@ -265,7 +265,7 @@ fn const_fields_narrow_like_variables() {
             .ends_with("`$a` isn't `const`, so checking `$a.name` for `null` doesn't narrow it: declare `$a` with `const`, or copy the field into a `const` variable first")
     );
     // Without a check, there's no hint
-    assert_eq!(rejected("class A {\n    ?string @name = null;\n    pub string show() = @name;\n}"), "`show` returns a string, not a ?string, which can be `null`");
+    assert_eq!(rejected("class A {\n    ?string @name = null;\n    pub string show() = @name;\n}"), "`show` returns a string, but this is a ?string, which can be `null`");
 }
 
 #[test]
