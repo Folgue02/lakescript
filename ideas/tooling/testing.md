@@ -49,6 +49,17 @@ assert failed: units::bytes('1.5 KB') == 1536
 ```
 
 - A value of several lines goes on under its first line, after its `'`, so both sides line up *(since `v0.12.2`)*.
+- **A message**, after a `,`, like Python's *(added in phase 13)*. It's made only when the condition is `false`, and it must be a string. It comes first, and the code of the condition goes under it *(chosen while building it)*:
+
+```
+assert $port > 0, f"no port in {$path}";
+```
+```
+assert failed: no port in config.toml
+  condition: $port > 0
+  left:  0
+  right: 0
+```
 
 - `$a.equals($b)` shows both sides too, since it's how lists and maps are compared by their values.
 - `==` compares lists and maps by reference *(see [operators.md](../language/operators.md))*, so `assert $list == [1, 2]` fails even when `$list` has those values. Then the message says so, and that `.equals()` compares the values.

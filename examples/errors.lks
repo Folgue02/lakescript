@@ -109,3 +109,23 @@ try {
         outln('  ' + $call.replaceMatches(%r"\(.*/", '('));
     }
 }
+
+// `unimplemented` stands for code that isn't written yet: it throws a
+// `NotImplemented`, and `lks --check` warns about each one that's left
+string exportAs(string $format) = switch ($format) {
+    case 'json' -> '{}';
+    default -> unimplemented f"exporting as {$format}";
+};
+try {
+    exportAs('xml');
+} catch (NotImplemented $e) {
+    outln($e.message());
+}
+
+// `assert` can say what went wrong, after a `,`
+const $retries = 0;
+try {
+    assert $retries > 0, 'there must be at least one retry';
+} catch (AssertionError $e) {
+    outln($e.message());
+}

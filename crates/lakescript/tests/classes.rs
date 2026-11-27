@@ -634,3 +634,29 @@ fn nullable_fields() {
     // Without the checker too
     assert!(fails(&format!("{class}const $n = null;\noutln($n?.value);\noutln($n.value);")).contains("null"));
 }
+
+/// `implements` in the signature, for interfaces whose methods all have a
+/// default, or that have none *(see Interfaces in ideas/language/classes.md)*.
+#[test]
+fn interfaces_named_in_the_signature() {
+    let i = "interface IMarker {}\ninterface IGreets {\n    string greeting() = 'hello';\n    string greet(string $who) = f\"{@greeting()}, {$who}\";\n}\n";
+    let script = format!(
+        "{i}class Base {{}}\nclass Plain extends Base implements IMarker, IGreets {{}}\nenum Mood implements IGreets {{ HAPPY }}\n\
+         class Mixed implements IMarker {{\n    implement IGreets {{ string greeting() = 'hey'; }}\n}}\n\
+         void hello(IGreets $g) {{ outln($g.greet('Ana')); }}\n\
+         hello(Plain());\nhello(Mood::HAPPY);\nhello(Mixed());\noutln([Plain().is(IMarker), Plain().is(Base), Mixed().is(IMarker)]);"
+    );
+    assert_eq!(run(&script), "hello, Ana\nhello, Ana\nhey, Ana\n[true, true, true]\n");
+    // A method without a default needs a block
+    assert_eq!(
+        rejected("interface INamed { string name(); }\nclass A implements INamed {}"),
+        "`A` implements `INamed`, but it has no method `name`: write it in an `implement INamed { ... }` block"
+    );
+    assert_eq!(
+        rejected(&format!("{i}class A implements IMarker {{ implement IMarker {{}} }}")),
+        "`IMarker` is in `implements` and has an `implement` block: with a block, leave it out of `implements`"
+    );
+    assert_eq!(rejected(&format!("{i}class A implements IMarker, IMarker {{}}")), "`IMarker` is in `implements` twice");
+    assert_eq!(rejected(&format!("{i}interface IMore implements IMarker {{}}")), "an interface doesn't implement other interfaces: it extends them, with `extends`");
+    assert_eq!(rejected("class B {}\nclass A implements B {}"), "a class can only implement interfaces, and a B isn't one");
+}

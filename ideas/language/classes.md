@@ -85,6 +85,10 @@ Point();                  // error: `x` has no value
 - `@super` is the object seen as its superclass: `@super(...)` calls its constructor, and `@super.sayHello()` calls the superclass's version of a method that's overridden. `super` can't be the name of a field.
 - Methods that replace the superclass's go in an `override { ... }` block, and the methods of an interface in an `implement Interface { ... }` block. So where a method is says where it comes from, and two interfaces with a method of the same name don't clash.
     - A class implements an interface when it has its `implement` block, so `.is(IEquals)` can be checked when the script runs.
+    - Or when its signature names it with `implements`, like in Java, for an interface it keeps as it is: one with no methods, or whose methods all have a default *(i.e. `class Note extends Item implements ITagged, IArchived { ... }`)*. It's the same as an empty `implement` block. Added in phase 13.
+        - `implements` comes after `extends`, and enums take it too *(i.e. `enum Mood implements IGreets { ... }`)*. An interface extends others instead, so `implements` on one is an error that says so.
+        - An interface without a default for a method needs its block, to write it: the error says so. With a block, it's left out of `implements`, so it's written once: an interface in both is an error.
+        - Editors and ferry see them like the interfaces of blocks: `lks-lsp` shows them on hover, goes to their definition and completes their names and methods, and `ferry doc` lists them under Implements.
 
 ## Generic classes
 

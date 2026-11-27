@@ -404,7 +404,7 @@ fn md_inline(text: &str) -> String {
     html.trim().strip_prefix("<p>").and_then(|h| h.strip_suffix("</p>")).map(str::to_string).unwrap_or(html)
 }
 
-const KEYWORDS: &[&str] = &["pub", "const", "static", "class", "interface", "enum", "extends", "null", "true", "false"];
+const KEYWORDS: &[&str] = &["pub", "const", "static", "class", "interface", "enum", "extends", "implements", "null", "true", "false"];
 const BUILT_IN: &[&str] = &["string", "number", "bool", "any", "void", "never", "list", "map", "range", "regex", "bytes", "result", "command", "exception"];
 
 /// A declaration with colors: keywords, types, parameters, and its own name

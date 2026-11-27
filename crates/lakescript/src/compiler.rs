@@ -602,7 +602,7 @@ impl<'a> Compiler<'a> {
                 self.expr(value)?;
                 self.emit_at(Op::Throw, stmt.span);
             }
-            StmtKind::Assert { cond, text } => self.stmt(&assertion(cond, text, stmt.span))?,
+            StmtKind::Assert { cond, text, message } => self.stmt(&assertion(cond, text, message.as_ref(), stmt.span))?,
             StmtKind::Use(decl) => self.use_decl(decl)?,
             StmtKind::Block(stmts) => self.block(stmts)?,
             StmtKind::Expr(expr) => self.expr_discard(expr)?,
@@ -1628,6 +1628,17 @@ impl<'a> Compiler<'a> {
                 self.expr(value)?;
                 self.emit_at(Op::Throw, span);
             }
+            // `throw NotImplemented('not implemented yet: ...')`
+            ExprKind::Unimplemented(what) => {
+                let at = |kind| Expr { kind, span };
+                let message = match what {
+                    None => at(ExprKind::Str(NOT_IMPLEMENTED.into())),
+                    Some(what) => at(ExprKind::Interpolated(vec![StringPart::Text(format!("{NOT_IMPLEMENTED}: ")), StringPart::Expr((**what).clone())])),
+                };
+                let callee = Box::new(at(ExprKind::Function("NotImplemented".into())));
+                self.expr(&at(ExprKind::Call { callee, args: vec![Arg { name: None, value: message, spread: false }] }))?;
+                self.emit_at(Op::Throw, span);
+            }
             ExprKind::Try(inner) => {
                 let push = self.emit(Op::PushTry(0));
                 self.f().handlers.push(Handler::TryExpr);
@@ -2088,14 +2099,19 @@ pub(crate) fn command_info(decl: &ClassDecl) -> (CommandInfo, Vec<&TypeExpr>) {
     (info, enums)
 }
 
-/// `assert $cond;` as the code that does it: `if (!$cond) __assertFailed('...');`.
+/// `assert $cond;` as the code that does it: `if (!$cond) __assertFailed('...', $message);`.
 /// For a comparison, both sides are kept in variables first, so its message
 /// can show them *(see `ideas/tooling/testing.md`)*.
-fn assertion(cond: &Expr, text: &str, span: Span) -> Stmt {
+/// The message of a `NotImplemented` that `unimplemented` throws.
+pub(crate) const NOT_IMPLEMENTED: &str = "not implemented yet";
+
+fn assertion(cond: &Expr, text: &str, message: Option<&Expr>, span: Span) -> Stmt {
     let at = |kind| Expr { kind, span };
     let stmt = |kind| Stmt { kind, span };
+    // The message is only made when it fails
+    let message = message.cloned().unwrap_or_else(|| at(ExprKind::Null));
     let fail = |args: Vec<Expr>| {
-        let mut all = vec![Arg { name: None, value: at(ExprKind::Str(text.to_string())), spread: false }];
+        let mut all = vec![Arg { name: None, value: at(ExprKind::Str(text.to_string())), spread: false }, Arg { name: None, value: message.clone(), spread: false }];
         all.extend(args.into_iter().map(|value| Arg { name: None, value, spread: false }));
         stmt(StmtKind::Expr(at(ExprKind::Call { callee: Box::new(at(ExprKind::Function("__assertFailed".into()))), args: all })))
     };
@@ -2270,7 +2286,12 @@ fn collect_stmt(stmt: &Stmt, inside: bool, out: &mut HashSet<String>) {
             }
         }
         StmtKind::Yield(e) | StmtKind::Throw(e) | StmtKind::Expr(e) => collect_expr(e, inside, out),
-        StmtKind::Assert { cond, .. } => collect_expr(cond, inside, out),
+        StmtKind::Assert { cond, message, .. } => {
+            collect_expr(cond, inside, out);
+            if let Some(m) = message {
+                collect_expr(m, inside, out);
+            }
+        }
         StmtKind::Switch(switch) => collect_switch(switch, inside, out),
         StmtKind::Try { body, catches, finally } => {
             collect_stmts(body, inside, out);
@@ -2351,6 +2372,7 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         | ExprKind::Type(_)
         | ExprKind::Bool(_)
         | ExprKind::Null
+        | ExprKind::Unimplemented(None)
         | ExprKind::ModuleFunction { .. }
         | ExprKind::ModuleConstant { .. } => {}
         ExprKind::This => {
@@ -2395,6 +2417,7 @@ fn collect_expr(expr: &Expr, inside: bool, out: &mut HashSet<String>) {
         | ExprKind::PathTest { path: e, .. }
         | ExprKind::Try(e)
         | ExprKind::Throw(e)
+        | ExprKind::Unimplemented(Some(e))
         | ExprKind::Increment { target: e, .. }
         | ExprKind::NonNull(e)
         | ExprKind::TypeCheck { receiver: e, .. } => collect_expr(e, inside, out),

@@ -41,6 +41,11 @@ mod token;
 mod types;
 mod value;
 
+/// The names of the built-in exceptions *(i.e. `ValueError`)*.
+pub fn exception_names() -> Vec<&'static str> {
+    exceptions::TREE.iter().map(|(name, _)| *name).collect()
+}
+
 pub use checker::complete::{Completion, Item as CompletionItem, ItemKind as CompletionKind};
 pub use checker::names::{Definition, Name};
 pub use diagnostic::{Call, Diagnostic, json_message, json_string};

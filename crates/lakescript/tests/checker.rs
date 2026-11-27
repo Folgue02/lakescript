@@ -588,3 +588,48 @@ fn switches_with_a_case_for_every_value() {
         "this `switch` has no case for `Color::GREEN`, `Color::BLUE`: add them, or a `default`"
     );
 }
+
+/// `unimplemented` *(see ideas/language/errors.md)*.
+#[test]
+fn unimplemented_throws_not_implemented() {
+    // A statement or an expression of any type, and a function that ends in it needs no `return`
+    let script = "\
+number area(number $_side) = unimplemented;
+string parse(string $_text) {
+    unimplemented 'parse the flags';
+}
+const ?string $name = null;
+try { outln($name ?? unimplemented); } catch (NotImplemented $e) { outln($e.message()); }
+try { parse('x'); } catch (Exception $e) { outln($e.toString()); }
+try { area(1); } catch (NotImplemented $e) { outln($e.is(Exception)); }
+try { throw NotImplemented('by hand'); } catch (NotImplemented $e) { outln($e.message()); }
+";
+    assert_eq!(ok(script), "not implemented yet\nNotImplemented: not implemented yet: parse the flags\ntrue\nby hand\n");
+    assert_eq!(rejected("unimplemented 5;"), "what `unimplemented` says must be a string, but this is a number");
+    // Each one is a warning
+    assert_eq!(
+        warnings("number area() = unimplemented;\nvoid f() {\n    unimplemented 'later';\n}\noutln(1);"),
+        [
+            "1: this isn't implemented yet: `unimplemented` throws a `NotImplemented` when it runs",
+            "3: this isn't implemented yet: `unimplemented` throws a `NotImplemented` when it runs",
+        ]
+    );
+}
+
+/// `assert $cond, 'message';` *(see ideas/tooling/testing.md)*.
+#[test]
+fn assert_with_a_message() {
+    let script = "\
+const $n = 3;
+try { assert $n > 5, f\"{$n} is too small\"; } catch (AssertionError $e) { outln($e.message()); }
+try { assert $n.even?(), 'odd'; } catch (AssertionError $e) { outln($e.message()); }
+// Made only when it fails
+string loud() { outln('made'); return 'x'; }
+assert $n == 3, loud();
+outln('passed');
+";
+    assert_eq!(ok(script), "assert failed: 3 is too small\n  condition: $n > 5\n  left:  3\n  right: 5\nassert failed: odd\n  condition: $n.even?()\npassed\n");
+    assert_eq!(rejected("const $n = 1;\nassert $n > 0, 5;"), "the message of `assert` must be a string, but this is a number");
+    // In the message, the condition is known to be false
+    assert_eq!(ok("const ?string $s = null;\ntry { assert $s != null, f\"{$s ?? 'nothing'} given\"; } catch (AssertionError $e) { outln($e.message()); }"), "assert failed: nothing given\n  condition: $s != null\n  left:  null\n  right: null\n");
+}

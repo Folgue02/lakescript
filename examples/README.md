@@ -30,10 +30,10 @@ target/debug/lks --message-format json --check examples/commands.lks
 | [strings.lks](strings.lks) | String literals, multi-line strings, slicing and string methods |
 | [collections.lks](collections.lks) | List and map methods: grouping, sorting (also with a comparison function), folding, counting, and `...` inside a list |
 | [patterns.lks](patterns.lks) | `-like`, regexes with `-match` and `.match()`, path tests |
-| [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result`, custom exceptions as classes |
+| [errors.lks](errors.lks) | Exceptions, `try`/`catch`/`finally`, `throw` (also as an expression), `try` returning a `result`, custom exceptions as classes, `unimplemented`, and `assert` with a message |
 | [types.lks](types.lks) | Types: inference, generics, nullable values, narrowing, `.as()` and `.is()`, function types, `let` and `for` variables with a type |
 | [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
-| [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
+| [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, `implements` in the signature for interfaces kept as they are, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
 | [nulls.lks](nulls.lks) | Values that can be `null`: checks that narrow, a `never` function that stops the script, `?? fail(...)`, `$x!` with its `NullError`, `!` on any value, and `??` with a nullable right side | |
 | [enums.lks](enums.lks) | Enums: values with fields, methods, a `switch` over every value, also as a statement that ends a function and with `case null`, `values()`, `from()` and `fromIgnoreCase()` |
 | [generics.lks](generics.lks) | Generic classes, `Stack<string>()`, and an interface implemented with several types |

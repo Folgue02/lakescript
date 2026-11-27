@@ -589,8 +589,13 @@ impl Engine {
                 Some(Value::Str(s)) => s.to_string(),
                 _ => String::new(),
             };
-            let mut message = format!("assert failed: {text}");
-            if let [_, left, right] = args.as_slice() {
+            // With a message, it comes first, and the condition under it
+            let mut message = match args.get(1) {
+                Some(Value::Null) | None => format!("assert failed: {text}"),
+                Some(Value::Str(m)) => format!("assert failed: {m}\n  condition: {text}"),
+                Some(other) => format!("assert failed: {}\n  condition: {text}", other.nested()),
+            };
+            if let [_, _, left, right] = args.as_slice() {
                 // A value of several lines goes on under its first one, after the `'`
                 let aligned = |v: &Value| v.nested().replace('\n', &format!("\n{}", " ".repeat(10)));
                 message.push_str(&format!("\n  left:  {}\n  right: {}", aligned(left), aligned(right)));

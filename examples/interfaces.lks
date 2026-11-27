@@ -58,3 +58,17 @@ outln([$square.is(ISolid), $square.is(IShape), $square.is(ICompare)]);
 outln($square.volume(10));
 
 outln([Circle(1).sameSize?(Circle(1)), Circle(1).differentSize?(Circle(2))]);
+
+// An interface whose methods all have a default, or that has none, can be
+// named in the signature with `implements`, when nothing in it is replaced
+interface ITagged {
+    string tag() = 'untitled';
+}
+interface IArchived {}
+
+class Note implements ITagged, IArchived {
+    pub string @text;
+}
+
+const $note = Note('buy milk');
+outln([$note.tag(), $note.is(IArchived)]);

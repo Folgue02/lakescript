@@ -600,3 +600,54 @@ fn a_file_its_own_modules_use_is_checked_as_a_module() {
     assert!(labels(&found).contains(&"upper".to_string()), "{found}");
     server.stop();
 }
+
+/// `implements` in a class's signature, in the editor: no errors, hover and
+/// definitions on its interfaces, and completion of them and of their methods.
+#[test]
+fn interfaces_named_in_the_signature() {
+    let dir = temp("implements");
+    let script = dir.join("main.lks");
+    let text = "/// Has a tag\ninterface ITagged {\n    string tag() = 'untitled';\n}\ninterface IArchived {}\nclass Note implements ITagged, IArchived {\n    pub string @text;\n}\noutln(Note('a').tag());\n";
+    let mut server = Server::start();
+    server.open(&script, text);
+    assert_eq!(server.diagnostics_for(&script), Vec::<Value>::new());
+    let hover = server.at("textDocument/hover", &script, 5, 25);
+    assert_eq!(hover["contents"]["value"], "```lakescript\ninterface ITagged\n```\n\nHas a tag", "{hover}");
+    let found = server.at("textDocument/definition", &script, 5, 34);
+    assert_eq!(found["range"]["start"], json!({ "line": 4, "character": 10 }), "{found}");
+    // The interface's methods are the object's
+    let typing = text.replace("outln(Note('a').tag());", "outln(Note('a').);");
+    server.change(&script, &typing, 2);
+    server.diagnostics_for(&script);
+    let found = server.at("textDocument/completion", &script, 8, 16);
+    assert!(labels(&found).contains(&"tag".to_string()), "{found}");
+    // While it's typed, the interfaces are completed
+    let typing = text.replace("class Note implements ITagged, IArchived {", "class Note implements ITa");
+    server.change(&script, &typing, 3);
+    server.diagnostics_for(&script);
+    let found = server.at("textDocument/completion", &script, 5, 25);
+    assert!(labels(&found).contains(&"ITagged".to_string()), "{found}");
+    server.stop();
+}
+
+/// `unimplemented` in the editor: a warning where it is, and completed as a
+/// keyword, with `NotImplemented` among the types.
+#[test]
+fn unimplemented_in_the_editor() {
+    let dir = temp("unimplemented");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    let text = "number area() = unimplemented 'the area';\nconst $n = 1;\nassert $n > 0, 'positive';\noutln(area());\n";
+    server.open(&script, text);
+    let found = server.diagnostics_for(&script);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!((found[0]["severity"].as_i64(), found[0]["range"]["start"].clone()), (Some(2), json!({ "line": 0, "character": 16 })), "{found:?}");
+    // While it's typed
+    server.change(&script, "number area() = unimp\n", 2);
+    server.diagnostics_for(&script);
+    assert!(labels(&server.at("textDocument/completion", &script, 0, 21)).contains(&"unimplemented".to_string()));
+    server.change(&script, "try { outln(1); } catch (NotImp\n", 3);
+    server.diagnostics_for(&script);
+    assert!(labels(&server.at("textDocument/completion", &script, 0, 31)).contains(&"NotImplemented".to_string()));
+    server.stop();
+}

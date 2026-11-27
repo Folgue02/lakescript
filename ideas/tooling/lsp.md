@@ -52,6 +52,7 @@ Each one is usable on its own, with tests that send real protocol messages to th
     - after `@`, in a class: its fields and methods, also the private ones;
     - after `name::`: the functions, constants and types of a module, or the static methods, static fields and values of a class *(`Self::` too)*, and the subcommands of a command *(i.e. `Else` after `Something::`, for `command Something { subcommand Else {} }`)*, added in phase 13;
     - after anything else: the variables, functions, classes and modules in scope, the reserved words and the built-in types.
+    - after `catch (` or a `|` in it: the built-in exceptions too, also while the line can't be read yet *(added in phase 13)*;
     - where an argument of a call starts: the names of its parameters not given yet, before the rest *(i.e. `times:` and `loud:` in `greet('a', |)`)*. Each one has its declaration as its detail *(i.e. `number $times = …`)*, and inserts `times: `. Not after a `name:`, where its value goes. The function is found like for signature help, or by its name when the line can't be read while it's being written *(i.e. a name started after a named argument)*. Added in phase 13;
     - Each one has its declaration as its detail *(i.e. `list<string> push(...string $values)`)*. It inserts the name only: the parentheses and arguments are written by hand.
     - The editor asks for it by itself after `.`, `$`, `@`, `:` and `/`. After a `/` that isn't in a `use` path *(i.e. a division)* there's nothing to complete.

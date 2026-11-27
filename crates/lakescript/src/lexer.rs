@@ -31,7 +31,8 @@ pub fn tokenize_file(source: &str, file: u32) -> Result<Vec<Token>, Diagnostic> 
 }
 
 /// `assert` keeps the code of its condition in `doc`, for its message when it
-/// fails *(see `ideas/tooling/testing.md`)*: what's between it and its `;`.
+/// fails *(see `ideas/tooling/testing.md`)*: what's between it and its `;`,
+/// or the `,` before its message.
 fn assert_texts(chars: &[char], tokens: &mut [Token]) {
     use crate::token::Keyword;
     for i in 0..tokens.len() {
@@ -44,7 +45,7 @@ fn assert_texts(chars: &[char], tokens: &mut [Token]) {
             match t.kind {
                 TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::QuestionBracket => depth += 1,
                 TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth -= 1,
-                TokenKind::Semicolon | TokenKind::Eof if depth <= 0 => break,
+                TokenKind::Semicolon | TokenKind::Comma | TokenKind::Eof if depth <= 0 => break,
                 _ => {}
             }
             end = t.span.end;

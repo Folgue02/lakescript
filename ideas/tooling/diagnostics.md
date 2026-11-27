@@ -35,6 +35,7 @@ error: $age is a number, can't assign a string
     - A command that's never run *(i.e. `%x"git pull";`, which only creates it)*.
     - A value or an operator *(i.e. `$a + 1;`, `$x == 2;`)*, but not `&&`, `||` and `??`, whose right side can be what's wanted, nor `<<`, which adds to a list.
 - **A comparison with `null` that's always the same**: `$x == null` or `!= null` when `$x` can't be `null` there, from its type or a check before it.
+- **`unimplemented`**, which throws a `NotImplemented` when it runs: code that isn't written yet *(see unimplemented in [errors.md](../language/errors.md))*.
 - **A name that starts with `_` never warns** *(`$_unused`, `$_`, `($_, $b) -> $b`)*, like in Rust and Python: it says it's unused on purpose.
 - **Where:** the editor, `lks --check` and `ferry check`, which show them before the errors, in yellow, with `warning:`, like the comments that don't match their code. As JSON, `"type":"warning"`. Not when a script runs with `lks`, `ferry run` or `ferry test`, where they'd be noise on every run. They never change the exit code.
 - A program that embeds Lakescript gets them with `Engine::warnings()` after a check.

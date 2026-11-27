@@ -1235,8 +1235,16 @@ impl<'a> Checker<'a> {
             }
             StmtKind::Throw(value) => self.thrown(value)?,
             // After it, the condition holds
-            StmtKind::Assert { cond, .. } => {
-                let (yes, _) = self.condition(cond)?;
+            StmtKind::Assert { cond, message, .. } => {
+                let (yes, no) = self.condition(cond)?;
+                // The message is made when the condition is false
+                if let Some(m) = message {
+                    let t = self.scoped(&no, |c| c.expr(m, Some(&Ty::Str)))?;
+                    if !self.assignable(&t, &Ty::Str) {
+                        let t = self.resolve(&t);
+                        return self.fail(format!("the message of `assert` must be a string, but this is {}", a(&t)), m.span);
+                    }
+                }
                 self.narrow_here(&yes);
             }
             StmtKind::Use(decl) => self.use_decl(decl, span)?,
@@ -1289,7 +1297,7 @@ impl<'a> Checker<'a> {
     pub(super) fn never_ends(&mut self, name: &str, body: &FunctionBody, span: Span) -> Check<()> {
         let ends = match body {
             FunctionBody::Block(stmts) => self.block_terminates(stmts),
-            FunctionBody::Expr(e) => matches!(e.kind, ExprKind::Throw(_)) || self.never_calls.contains(&(e.span.file, e.span.start, e.span.end)),
+            FunctionBody::Expr(e) => matches!(e.kind, ExprKind::Throw(_) | ExprKind::Unimplemented(_)) || self.never_calls.contains(&(e.span.file, e.span.start, e.span.end)),
         };
         if !ends {
             return self.fail(format!("`{name}` is `never`, so it can't reach its end: it must throw, call `exit()` or another `never` function"), span);
@@ -2287,6 +2295,21 @@ impl<'a> Checker<'a> {
                 let t = self.expr(inner, None)?;
                 Ty::Result(Box::new(t), Box::new(Ty::Exception(Rc::from("Exception"))))
             }
+            ExprKind::Unimplemented(what) => {
+                if let Some(what) = what {
+                    let t = self.expr(what, Some(&Ty::Str))?;
+                    if !self.assignable(&t, &Ty::Str) {
+                        let t = self.resolve(&t);
+                        return self.fail(format!("what `unimplemented` says must be a string, but this is {}", a(&t)), what.span);
+                    }
+                }
+                self.warn("this isn't implemented yet: `unimplemented` throws a `NotImplemented` when it runs", e.span);
+                // Like `throw`, it takes whatever type is expected there
+                match expected {
+                    Some(t) => self.non_null(t),
+                    None => self.fresh(),
+                }
+            }
             ExprKind::Throw(value) => {
                 self.thrown(value)?;
                 // It never gives a value, so it takes whatever type is expected
@@ -3197,7 +3220,7 @@ impl Checker<'_> {
     fn terminates(&self, stmt: &Stmt) -> bool {
         match &stmt.kind {
             StmtKind::Return(_) | StmtKind::Throw(_) | StmtKind::Break | StmtKind::Continue | StmtKind::Yield(_) => true,
-            StmtKind::Expr(e) => self.never_calls.contains(&(e.span.file, e.span.start, e.span.end)),
+            StmtKind::Expr(e) => matches!(e.kind, ExprKind::Unimplemented(_)) || self.never_calls.contains(&(e.span.file, e.span.start, e.span.end)),
             StmtKind::Block(stmts) => self.block_terminates(stmts),
             StmtKind::If { then, otherwise: Some(o), .. } => self.terminates(then) && self.terminates(o),
             StmtKind::While { cond: Expr { kind: ExprKind::Bool(true), .. }, body } => !contains_break(body),

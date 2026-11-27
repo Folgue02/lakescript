@@ -18,7 +18,8 @@ Exception
 ├── IndexError          // replacing `$list[$i]` past the end, `.removeAt()` and `.insert()` outside a list (reading `$list[$i]` past the end is `null`)
 ├── ArithmeticError     // % or .div() by zero
 ├── CommandFailed       // a shell command returned an error
-└── AssertionError      // an `assert` whose condition was false
+├── AssertionError      // an `assert` whose condition was false
+└── NotImplemented      // `unimplemented`: code that isn't written yet
 
 Interrupted             // Ctrl+C: beside Exception, not under it (see Ctrl+C below)
 ```
@@ -47,7 +48,27 @@ throw ConfigError('the port must be a number', file: 'app.json');
 
 ## assert
 
-`assert $condition;` throws an `AssertionError` when the condition is `false`. Its message has the code of the condition, and for a comparison the values of both sides *(i.e. `assert failed: $total == 10`, then `left: 9` and `right: 10`)*. It's what tests use, and any script can *(see [testing.md](../tooling/testing.md))*.
+`assert $condition;` throws an `AssertionError` when the condition is `false`. Its message has the code of the condition, and for a comparison the values of both sides *(i.e. `assert failed: $total == 10`, then `left: 9` and `right: 10`)*. It's what tests use, and any script can *(see [testing.md](../tooling/testing.md))*. `assert $condition, 'message';` gives it a message, like Python's *(added in phase 13)*.
+
+## unimplemented
+
+*Phase 13.* `unimplemented` is a keyword that throws a `NotImplemented`, for code that isn't written yet, like Rust's `todo!()` or Java's `throw new UnsupportedOperationException()`. It can say what's missing:
+
+```
+number area() = unimplemented;
+
+string parse(string $text) {
+    unimplemented 'parse the flags';
+}
+
+const $port = $config['port'] ?? unimplemented;
+```
+
+- Its message is `not implemented yet`, or `not implemented yet: parse the flags`. What it says must be a string, like the message of an exception.
+- It's a statement and an expression, like `throw`: it never gives a value, so it fits wherever one is expected, and a function that ends in it needs no `return`. Like `throw`, the expression after it is its message *(i.e. `unimplemented f"{$kind} files"`)*.
+- `NotImplemented` is a built-in exception under `Exception`, so it can be caught and thrown like the others *(i.e. `throw NotImplemented('...')`)*. It's named like `FileNotFound` and `CommandFailed`, after what happened.
+- Each `unimplemented` is a warning in the editor, `lks --check` and `ferry check`, like clippy's `todo` lint, so what's left to write shows up before it's released *(see Warnings in [diagnostics.md](../tooling/diagnostics.md))*. Not when it runs.
+- There's one keyword, not Rust's two *(`todo!()` and `unimplemented!()`)*: they only differ in what they mean.
 
 ## Catching
 

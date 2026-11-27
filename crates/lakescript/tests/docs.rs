@@ -109,3 +109,16 @@ fn a_comment_for_a_parameter_that_isnt_there_is_a_warning() {
     let mut engine = lakescript::Engine::with_output(lakescript::CapturedOutput::new());
     engine.run("/// $nope: gone\nvoid f() {}\nf();").unwrap();
 }
+
+/// Interfaces named with `implements` are implemented like those with a block.
+#[test]
+fn interfaces_named_in_the_signature() {
+    let module = module_doc(
+        "pub interface ITagged {\n    string tag() = 'untitled';\n}\npub interface IShape {\n    number area();\n}\n\
+         pub class Note implements ITagged {\n    pub string @text;\n    implement IShape {\n        number area() = 1;\n    }\n}\n",
+    )
+    .unwrap();
+    let note = module.items.iter().find(|i| i.name == "Note").unwrap();
+    assert_eq!(note.implements, ["ITagged", "IShape"]);
+    assert_eq!(note.code, "pub class Note");
+}

@@ -35,7 +35,7 @@
 | Declarations    | `let` `const` `class` `interface` `enum` |
 | Modules         | `use` `pub` |
 | Control flow    | `if` `else` `for` `in` `while` `switch` `case` `default` `break` `continue` `return` `yield` |
-| Errors          | `try` `catch` `finally` `throw` `assert` |
+| Errors          | `try` `catch` `finally` `throw` `assert` `unimplemented` |
 | Values          | `true` `false` `null` |
 | Built-in types  | `void` `any` `string` `number` `bool` `bytes` `type` `list` `map` `range` `regex` `result` `command` |
 

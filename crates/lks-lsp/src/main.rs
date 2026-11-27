@@ -676,6 +676,21 @@ impl Server {
                         });
                     }
                 }
+                // After `catch (`, the exceptions, also when the line can't be read yet
+                let before: String = chars[..start].iter().collect();
+                let before = before.trim_end();
+                if before.ends_with("catch (") || before.ends_with("catch(") || (before.ends_with('|') && before.contains("catch")) {
+                    let in_scope: HashSet<String> = items.iter().map(|i| i.label.clone()).collect();
+                    for name in lakescript::exception_names().into_iter().filter(|n| !in_scope.contains(*n)) {
+                        items.push(CompletionItem {
+                            label: name.to_string(),
+                            kind: Some(CompletionItemKind::CLASS),
+                            detail: Some(format!("exception {name}")),
+                            text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: range(start), new_text: name.to_string() })),
+                            ..Default::default()
+                        });
+                    }
+                }
                 for keyword in KEYWORDS {
                     items.push(CompletionItem {
                         label: keyword.to_string(),
@@ -727,8 +742,8 @@ enum Context {
 
 /// The reserved words, and the names of the built-in types.
 const KEYWORDS: &[&str] = &[
-    "let", "const", "if", "else", "for", "in", "while", "switch", "case", "default", "break", "continue", "return", "yield", "try", "catch", "finally", "throw", "assert",
-    "true", "false", "null", "use", "pub", "class", "interface", "enum", "command", "static", "new", "override", "implement", "extends", "any", "void", "never", "bool",
+    "let", "const", "if", "else", "for", "in", "while", "switch", "case", "default", "break", "continue", "return", "yield", "try", "catch", "finally", "throw", "assert", "unimplemented",
+    "true", "false", "null", "use", "pub", "class", "interface", "enum", "command", "static", "new", "override", "implement", "implements", "extends", "any", "void", "never", "bool",
     "number", "string", "bytes", "regex", "range", "list", "map", "result",
 ];
 

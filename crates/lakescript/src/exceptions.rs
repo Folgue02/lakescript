@@ -23,6 +23,8 @@ pub const TREE: &[(&str, Option<&str>)] = &[
     ("CommandFailed", Some("Exception")),
     // An `assert` whose condition was false
     ("AssertionError", Some("Exception")),
+    // `unimplemented`: code that isn't written yet
+    ("NotImplemented", Some("Exception")),
     // Ctrl+C: beside `Exception`, so `catch ($e)` doesn't catch it *(see ideas/language/errors.md)*
     ("Interrupted", None),
 ];

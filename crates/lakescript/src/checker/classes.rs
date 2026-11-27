@@ -101,7 +101,7 @@ impl Checker<'_> {
             match t {
                 Ty::Object(p, _) if p.0.interface => {
                     return self.fail(
-                        format!("`{}` is an interface: a class implements it with an `implement {} {{ ... }}` block, it doesn't extend it", p.0.name, p.0.name),
+                        format!("`{}` is an interface: a class implements it with `implements {}` or an `implement {} {{ ... }}` block, it doesn't extend it", p.0.name, p.0.name, p.0.name),
                         parent.span,
                     );
                 }
@@ -634,7 +634,10 @@ impl Checker<'_> {
                 for name in required {
                     let found = class.find(|b| b.methods.get(&name).filter(|m| m.has_body).cloned());
                     let Some((found, _)) = found else {
-                        return self.fail(format!("`{}` implements `{}`, but it has no method `{name}`", decl.name, i.0.name), decl.span);
+                        return self.fail(
+                            format!("`{}` implements `{}`, but it has no method `{name}`: write it in an `implement {} {{ ... }}` block", decl.name, i.0.name, i.0.name),
+                            decl.span,
+                        );
                     };
                     // Written in another interface's block, it must fit this one too
                     if class.0.body.borrow().overloads.contains_key(&name) {

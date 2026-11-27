@@ -422,8 +422,10 @@ impl Parser {
                 let text = self.peek().doc.clone().unwrap_or_default();
                 self.advance();
                 let cond = self.expression()?;
-                self.expect(&TokenKind::Semicolon, "after the condition of `assert`")?;
-                StmtKind::Assert { cond, text }
+                // `assert $cond, 'message';`
+                let message = if self.eat(&TokenKind::Comma) { Some(self.expression()?) } else { None };
+                self.expect(&TokenKind::Semicolon, if message.is_some() { "after the message of `assert`" } else { "after the condition of `assert`" })?;
+                StmtKind::Assert { cond, text, message }
             }
             TokenKind::Keyword(k @ (Keyword::Catch | Keyword::Finally)) => {
                 return self.error_here(format!("`{}` must come after a `try` block", k.as_str()));
@@ -527,7 +529,7 @@ impl Parser {
 
     // ---- Classes ----
 
-    /// `class Name<T> extends Base { ... }`, an `interface` or an `enum`.
+    /// `class Name<T> extends Base implements IA, IB { ... }`, an `interface` or an `enum`.
     fn class_decl(&mut self, kind: ClassKind, start: Span) -> Result<ClassDecl> {
         let doc = self.peek().doc.clone();
         self.advance();
@@ -556,11 +558,37 @@ impl Parser {
                 return Err(Diagnostic::new("an enum can't extend anything", self.span_from(start)));
             }
         }
+        // `implements IA, IB`: interfaces whose methods all have a default, kept as they are
+        let mut listed: Vec<TypeExpr> = Vec::new();
+        if matches!(&self.peek().kind, TokenKind::Ident(w) if w == "implements") {
+            if kind == ClassKind::Interface {
+                return self.error_here("an interface doesn't implement other interfaces: it extends them, with `extends`");
+            }
+            self.advance();
+            loop {
+                let ty = self.parse_type()?;
+                if listed.iter().any(|t| t.kind == ty.kind) {
+                    return Err(Diagnostic::new(format!("`{ty}` is in `implements` twice"), ty.span));
+                }
+                listed.push(ty);
+                if !self.eat(&TokenKind::Comma) {
+                    break;
+                }
+            }
+        }
         self.expect(&TokenKind::LBrace, &format!("to start the {word}"))?;
         let values = if kind == ClassKind::Enum { self.enum_values()? } else { Vec::new() };
         let mut members = Vec::new();
-        let mut implements = Vec::new();
-        self.members(kind, Origin::Own, &mut members, &mut implements)?;
+        let mut blocks = Vec::new();
+        self.members(kind, Origin::Own, &mut members, &mut blocks)?;
+        // An interface with a block is written once: its block says it's implemented
+        if let Some(ty) = blocks.iter().find(|b| listed.iter().any(|l| l.kind == b.kind)) {
+            return Err(Diagnostic::new(
+                format!("`{ty}` is in `implements` and has an `implement` block: with a block, leave it out of `implements`"),
+                ty.span,
+            ));
+        }
+        let implements: Vec<TypeExpr> = listed.into_iter().chain(blocks).collect();
         Ok(ClassDecl { kind, name, generics, extends, implements, members, values, subcommands: Vec::new(), optional_subcommand: false, doc, span: self.span_from(start) })
     }
 
@@ -1593,6 +1621,12 @@ impl Parser {
                 // Like `try`, `throw` applies to the whole expression after it
                 ExprKind::Throw(Box::new(self.expression()?))
             }
+            // `unimplemented`, or `unimplemented 'parse the flags'`
+            TokenKind::Keyword(Keyword::Unimplemented) => {
+                self.advance();
+                let message = if can_start_expression(&self.peek().kind) { Some(Box::new(self.expression()?)) } else { None };
+                ExprKind::Unimplemented(message)
+            }
             other => return self.error_here(format!("expected an expression, found {other}")),
         };
         Ok(Expr { kind, span: self.span_from(start) })
@@ -1922,7 +1956,7 @@ fn can_start_expression(kind: &TokenKind) -> bool {
         Int(_) | Float(_) | Str(_) | FStr(_) | Regex { .. } | Bytes(_) | Command(_) | WordList(_)
         | Variable(_) | Field(_) | At | Ident(_) | LParen | LBracket | LBrace | Lt | Minus | Plus | Bang | Tilde | PlusPlus
         | MinusMinus => true,
-        Keyword(k) => matches!(k, self::Keyword::True | self::Keyword::False | self::Keyword::Null | self::Keyword::If | self::Keyword::Switch | self::Keyword::Try),
+        Keyword(k) => matches!(k, self::Keyword::True | self::Keyword::False | self::Keyword::Null | self::Keyword::If | self::Keyword::Switch | self::Keyword::Try | self::Keyword::Unimplemented),
         TestOp(name) => path_test_op(name).is_some(),
         _ => false,
     }

@@ -87,6 +87,8 @@ pub enum ExprKind {
     /// `throw expr` used as a value *(i.e. `$x ?? throw ValueError('...')`)*.
     /// It never gives a value, so it fits wherever a value of any type goes.
     Throw(Box<Expr>),
+    /// `unimplemented`, with what isn't written yet: throws a `NotImplemented`.
+    Unimplemented(Option<Box<Expr>>),
     /// `paths::load`: a function of an imported module.
     ModuleFunction { module: String, name: String },
     /// `paths::$defaultPath`: a constant of an imported module.
@@ -242,8 +244,8 @@ pub enum StmtKind {
     Switch(Box<Switch>),
     Try { body: Vec<Stmt>, catches: Vec<Catch>, finally: Option<Vec<Stmt>> },
     Throw(Expr),
-    /// `assert $cond;`, with the code of the condition, for its message.
-    Assert { cond: Expr, text: String },
+    /// `assert $cond;` or `assert $cond, 'message';`, with the code of the condition, for its message.
+    Assert { cond: Expr, text: String, message: Option<Expr> },
     /// `use a/b/c;`, `use a/b/c::name;`, `use a/b/c::{x, $y};`
     Use(UseDecl),
     /// `pub` before a function, a `const`, a class, an interface or an enum.
@@ -589,6 +591,8 @@ impl fmt::Display for Expr {
             Switch(switch) => write!(f, "{switch}"),
             Try(inner) => write!(f, "(try {inner})"),
             Throw(inner) => write!(f, "(throw {inner})"),
+            Unimplemented(None) => write!(f, "(unimplemented)"),
+            Unimplemented(Some(what)) => write!(f, "(unimplemented {what})"),
             ModuleFunction { module, name } => write!(f, "{module}::{name}"),
             ModuleConstant { module, name } => write!(f, "{module}::${name}"),
             TypeArgs { name, args } => write!(f, "{name}<{}>", join(args, ", ")),
@@ -696,7 +700,8 @@ impl fmt::Display for Stmt {
             }
             Yield(e) => write!(f, "(yield {e})"),
             Throw(e) => write!(f, "(throw {e})"),
-            Assert { cond, .. } => write!(f, "(assert {cond})"),
+            Assert { cond, message: None, .. } => write!(f, "(assert {cond})"),
+            Assert { cond, message: Some(m), .. } => write!(f, "(assert {cond} {m})"),
             Pub(inner) => write!(f, "(pub {inner})"),
             Class(decl) => write!(f, "{decl}"),
             Use(decl) => {

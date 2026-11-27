@@ -50,16 +50,24 @@ fn every_example_is_listed_and_tested() {
     }
 }
 
-/// `lks --check` passes every example without running it, and says nothing.
+/// `lks --check` passes every example without running it, and says nothing,
+/// but for the `unimplemented` that `errors.lks` shows, which warns.
 #[test]
 fn every_example_checks_without_running() {
     for entry in std::fs::read_dir(root().join("examples")).unwrap() {
         let path = entry.unwrap().path();
         if path.extension().is_some_and(|e| e == "lks") {
             let script = format!("examples/{}", path.file_name().unwrap().to_string_lossy());
-            let output = lks(&["--check", &script], None);
-            assert!(output.status.success(), "{script}: {}", String::from_utf8_lossy(&output.stderr));
-            assert!(output.stdout.is_empty() && output.stderr.is_empty(), "{script} said something");
+            let output = lks(&["--color", "never", "--check", &script], None);
+            let said = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{script}: {said}");
+            let warnings: Vec<&str> = said.lines().filter(|l| l.starts_with("warning:") || l.starts_with("error:")).collect();
+            let expected: &[&str] = if script == "examples/errors.lks" {
+                &["warning: this isn't implemented yet: `unimplemented` throws a `NotImplemented` when it runs"]
+            } else {
+                &[]
+            };
+            assert!(output.stdout.is_empty() && warnings == expected, "{script} said something:\n{said}");
         }
     }
 }
@@ -88,6 +96,7 @@ fn language_examples() {
         ("examples/operators.lks", "['1 EUR', '3 EUR', '5 EUR']"),
         ("examples/operators.lks", "[true, true]"),
         ("examples/interfaces.lks", "a square with sides of 3"),
+        ("examples/interfaces.lks", "['untitled', true]"),
         ("examples/control_flow.lks", "['child', 'teenager', 'adult']"),
         ("examples/control_flow.lks", "1. Ana, 30\n2. Bo, 25\nLima is at -12, -77\nOslo is at 60, 11\n"),
         ("examples/strings.lks", "['userAccountName', 'user_account_name', 'user-account-name', 'User Account Name']"),
@@ -98,6 +107,8 @@ fn language_examples() {
         ("examples/errors.lks", "ConfigError: the port must be a number"),
         ("examples/errors.lks", "Bad port '99999': 99999 isn't a valid port"),
         ("examples/errors.lks", "https\ntrue"),
+        ("examples/errors.lks", "not implemented yet: exporting as xml"),
+        ("examples/errors.lks", "assert failed: there must be at least one retry\n  condition: $retries > 0\n  left:  0\n  right: 0"),
         ("examples/errors.lks", "'eighty' isn't a number, through 3 calls:\n  at the script (errors.lks:104:5)\n  at portOf (errors.lks:101:46)\n  at portNumber (errors.lks:100:36)\n"),
         ("examples/types.lks", "the string 'hi'"),
         ("examples/types.lks", "Longest: Ana"),
