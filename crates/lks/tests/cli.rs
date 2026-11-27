@@ -232,7 +232,7 @@ fn errors_as_json() {
     std::fs::write(dir.join("types.lks"), "outln(1);\nconst number $age = 'old';\n").unwrap();
     assert_eq!(
         run(&["--check", "types.lks"]),
-        (Some(1), "{\"type\":\"error\",\"message\":\"`$age` is a number, but its value is a string\",\"exception\":null,\"file\":\"types.lks\",\"line\":2,\"column\":21,\"length\":5,\"trace\":[]}\n".to_string())
+        (Some(1), "{\"type\":\"error\",\"message\":\"`$age` is a number, but its value is a string\",\"exception\":null,\"file\":\"types.lks\",\"line\":2,\"column\":21,\"length\":5,\"trace\":[],\"suggestion\":null}\n".to_string())
     );
     // An uncaught exception, its type and its calls, and a message that needs escaping
     std::fs::write(dir.join("throws.lks"), "void f() {\n    throw ValueError(\"a \\\"b\\\"\\n\\tc\");\n}\nf();\n").unwrap();
@@ -240,13 +240,13 @@ fn errors_as_json() {
         run(&["throws.lks"]),
         (
             Some(1),
-            "{\"type\":\"error\",\"message\":\"ValueError: a \\\"b\\\"\\n\\tc\",\"exception\":\"ValueError\",\"file\":\"throws.lks\",\"line\":2,\"column\":5,\"length\":33,\"trace\":[{\"function\":\"the script\",\"file\":\"throws.lks\",\"line\":4,\"column\":1,\"times\":1}]}\n".to_string()
+            "{\"type\":\"error\",\"message\":\"ValueError: a \\\"b\\\"\\n\\tc\",\"exception\":\"ValueError\",\"file\":\"throws.lks\",\"line\":2,\"column\":5,\"length\":33,\"trace\":[{\"function\":\"the script\",\"file\":\"throws.lks\",\"line\":4,\"column\":1,\"times\":1}],\"suggestion\":null}\n".to_string()
         )
     );
     // What isn't at a place in the code
     let (code, said) = run(&["missing.lks"]);
     assert_eq!(code, Some(1));
-    assert!(said.starts_with("{\"type\":\"error\",\"message\":\"can't read missing.lks") && said.contains("\"line\":null,\"column\":null,\"length\":null,\"trace\":[]}"), "{said}");
+    assert!(said.starts_with("{\"type\":\"error\",\"message\":\"can't read missing.lks") && said.contains("\"line\":null,\"column\":null,\"length\":null,\"trace\":[],\"suggestion\":null}"), "{said}");
     let (code, said) = run(&["--nope", "types.lks"]);
     assert_eq!(code, Some(2));
     assert!(said.contains("\"message\":\"unknown option `--nope`. Usage: lks [options] <script> [arguments for the script...]\""), "{said}");
@@ -284,6 +284,47 @@ fn every_type_error_at_once() {
     // Only the first syntax error, outside an editor
     std::fs::write(dir.join("syntax.lks"), "outln(1\nconst string $s = 2;\nlet $x = ;\n").unwrap();
     let said = stderr(&run(&["--color", "never", "--check", "syntax.lks"]));
+    assert_eq!(said.matches("error:").count(), 1, "{said}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn warnings_only_when_checking() {
+    let dir = std::env::temp_dir().join(format!("lks-warnings-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("w.lks"), "use std/fs;\nconst $unused = 1;\noutln('ran');\n").unwrap();
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_lks")).args(args).current_dir(&dir).output().unwrap();
+    let out = run(&["--color", "never", "--check", "w.lks"]);
+    assert!(out.status.success(), "warnings never fail a check");
+    let said = stderr(&out);
+    assert!(said.starts_with("warning: `fs` is imported but never used\n --> w.lks:1:1"), "{said}");
+    assert!(said.contains("warning: `$unused` is never used. If that's on purpose, call it `$_unused`\n --> w.lks:2:1"), "{said}");
+    // Not when it runs
+    let out = run(&["--color", "never", "w.lks"]);
+    assert_eq!((stdout(&out), stderr(&out)), ("ran\n".to_string(), String::new()));
+    // As JSON, a `warning`
+    let said = stderr(&run(&["--message-format", "json", "--check", "w.lks"]));
+    assert!(said.lines().all(|l| l.starts_with("{\"type\":\"warning\"")), "{said}");
+    assert_eq!(said.lines().count(), 2, "{said}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A file that the modules it uses load back *(i.e. `store/Customer.lks`,
+/// whose `Order` has a `Customer`)* is checked as that module: as a script,
+/// its class would be another type than the module's.
+#[test]
+fn a_file_its_modules_use_is_checked_as_a_module() {
+    let out = lks(&["--color", "never", "--check", "examples/shop/store/Customer.lks"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+    let dir = std::env::temp_dir().join(format!("lks-used-back-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("store")).unwrap();
+    std::fs::write(dir.join("store/Customer.lks"), "pub class Customer {\n    pub string @name;\n\n    pub number twice() = @name * 2;\n    pub Order order() = Order(@);\n}\n").unwrap();
+    std::fs::write(dir.join("store/Order.lks"), "pub class Order {\n    pub Customer @customer;\n}\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_lks")).args(["--color", "never", "--check", "store/Customer.lks"]).current_dir(&dir).output().unwrap();
+    let said = stderr(&out);
+    // Its errors name it as it was given
+    assert!(said.starts_with("error: `*` needs numbers, but got a string and a number\n --> store/Customer.lks:4:26"), "{said}");
     assert_eq!(said.matches("error:").count(), 1, "{said}");
     std::fs::remove_dir_all(&dir).unwrap();
 }

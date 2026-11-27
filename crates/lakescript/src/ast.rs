@@ -397,6 +397,8 @@ pub struct Param {
     pub variadic: bool,
     /// `new(@name)`: stored in the field `name`, whose type it takes.
     pub field: bool,
+    /// Where its name is.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -20,7 +20,7 @@ if (!terminal::confirm(f"A {$size} {$drink}, {$name}?", true)) {
 // The bar is drawn on stderr, and only for a person at a terminal
 const $steps = ['Boiling water', 'Brewing', 'Pouring'];
 const $bar = terminal::progress($steps.length(), 'Making it');
-for ($step in $steps) {
+for ($_step in $steps) {
     $bar.advance();
 }
 $bar.finish();

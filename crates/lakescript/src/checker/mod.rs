@@ -7,6 +7,7 @@
 //! elements of `[]`)*.
 
 mod classes;
+mod suggest;
 pub mod complete;
 pub mod names;
 pub mod prelude;
@@ -52,6 +53,8 @@ pub struct Modules<'a> {
     /// Every error of every module checked, where they're in: a file that
     /// uses one gets only its first error, and these are all of them.
     pub errors: &'a mut Vec<Diagnostic>,
+    /// The warnings of every module checked, but the standard library's.
+    pub warnings: &'a mut Vec<Diagnostic>,
 }
 
 #[derive(Default, Clone)]
@@ -81,6 +84,17 @@ struct VarInfo {
     place: Option<names::Place>,
     /// What it is, for editors *(i.e. "A parameter of `greet`.")*.
     about: Option<String>,
+    /// Set when it's used, for the warning about one that never is. `None`
+    /// for the ones that never warn *(see `track`)*.
+    used: Option<Rc<std::cell::Cell<bool>>>,
+}
+
+/// A variable or parameter that warns if it's never used.
+struct Tracked {
+    used: Rc<std::cell::Cell<bool>>,
+    name: String,
+    parameter: bool,
+    span: Span,
 }
 
 /// The class whose method or constructor is being checked.
@@ -139,6 +153,13 @@ pub struct Checker<'a> {
     /// The calls of functions that never return *(`never`)*, by where they are:
     /// a statement that's one of them ends its block, like `return`.
     never_calls: HashSet<(u32, usize, usize)>,
+    /// The calls of built-in methods that don't change their value, by where
+    /// they are, with the name of the type *(i.e. `"string"`)*: one that's a
+    /// statement of its own is a result thrown away.
+    pure_calls: HashMap<(u32, usize, usize), &'static str>,
+    /// The `switch` statements without a `default` that have a case for
+    /// every value, by where their subject is.
+    exhaustive: HashSet<(u32, usize, usize)>,
     /// How many `@super(...)` calls were checked, so a constructor knows whether it has one.
     super_calls: usize,
     /// The errors of the statements that were skipped: the checker goes on
@@ -148,6 +169,16 @@ pub struct Checker<'a> {
     /// The functions whose signature had an error, by where they are: their
     /// error is kept, and their body isn't checked.
     broken: HashSet<(u32, usize)>,
+    /// Things that aren't wrong but likely are, or are left over *(see
+    /// Warnings in ideas/tooling/diagnostics.md)*.
+    warnings: Vec<Diagnostic>,
+    /// The variables and parameters that warn if they're never used.
+    tracked: Vec<Tracked>,
+    /// Inside a `pub` declaration, whose name the files that use it read.
+    in_pub: bool,
+    /// Whether the parameters of the function being checked warn when unused:
+    /// not in methods that implement an interface or override a parent's.
+    warn_params: bool,
 }
 
 /// Where the checker was before a statement, to go back to after its error.
@@ -157,6 +188,8 @@ struct Mark {
     loop_depth: usize,
     this: usize,
     super_calls: usize,
+    tracked: usize,
+    warnings: usize,
 }
 
 type Check<T> = Result<T, Diagnostic>;
@@ -207,15 +240,21 @@ impl<'a> Checker<'a> {
             unnarrowed: HashMap::new(),
             unnarrowed_uses: HashMap::new(),
             never_calls: HashSet::new(),
+            pure_calls: HashMap::new(),
+            exhaustive: HashSet::new(),
             super_calls: 0,
             errors: Vec::new(),
             broken: HashSet::new(),
+            warnings: Vec::new(),
+            tracked: Vec::new(),
+            in_pub: false,
+            warn_params: true,
         }
     }
 
     /// Checks a whole script. The globals it declares are kept for the next run.
-    /// Gives every error, in the order of the code, or none.
-    pub fn check_program(mut self, program: &[Stmt]) -> Vec<Diagnostic> {
+    /// Gives every error and every warning, in the order of the code.
+    pub fn check_program(mut self, program: &[Stmt]) -> (Vec<Diagnostic>, Vec<Diagnostic>) {
         let result = self.block(program);
         self.finish_names();
         self.finish_completion();
@@ -223,11 +262,137 @@ impl<'a> Checker<'a> {
         self.state.globals = globals;
         let mut errors = std::mem::take(&mut self.errors);
         errors.extend(result.err());
-        in_order(errors)
+        let warnings = self.finish_warnings();
+        (in_order(errors), warnings)
+    }
+
+    /// The warnings, with one for each variable and parameter never used.
+    fn finish_warnings(&mut self) -> Vec<Diagnostic> {
+        let mut warnings = std::mem::take(&mut self.warnings);
+        for t in std::mem::take(&mut self.tracked) {
+            if t.used.get() {
+                continue;
+            }
+            let what = if t.parameter { format!("the parameter `${}`", t.name) } else { format!("`${}`", t.name) };
+            let mut d = Diagnostic::new(format!("{what} is never used. If that's on purpose, call it `$_{}`", t.name), t.span);
+            d.file = self.file.clone();
+            warnings.push(d);
+        }
+        in_order(warnings)
+    }
+
+    /// Makes the variable just declared in this scope warn if it's never
+    /// used, unless its name starts with `_`.
+    fn track(&mut self, name: &str, span: Span, parameter: bool) {
+        if name.starts_with('_') {
+            return;
+        }
+        let used = Rc::new(std::cell::Cell::new(false));
+        if let Some(info) = self.scopes.last_mut().unwrap().vars.get_mut(name) {
+            info.used = Some(used.clone());
+            self.tracked.push(Tracked { used, name: name.to_string(), parameter, span });
+        }
+    }
+
+    /// Notes that the variable `name` sees is used.
+    fn mark_used(&self, name: &str) {
+        if let Some(info) = self.scopes.iter().rev().find_map(|s| s.vars.get(name))
+            && let Some(used) = &info.used
+        {
+            used.set(true);
+        }
+    }
+
+    fn warn(&mut self, message: impl Into<String>, span: Span) {
+        let mut d = Diagnostic::new(message, span);
+        d.file = self.file.clone();
+        self.warnings.push(d);
+    }
+
+    /// Warns about a statement whose value is never used, when making it
+    /// does nothing else *(i.e. `$name.trim();`, `$a + 1;`, `%x"ls";`)*.
+    fn thrown_away(&mut self, e: &Expr, ty: &Ty) {
+        let ty = self.resolve(ty);
+        if matches!(ty, Ty::Void | Ty::Never) {
+            return;
+        }
+        match &e.kind {
+            ExprKind::MethodCall { receiver, method, .. } => {
+                let Some(&key) = self.pure_calls.get(&(e.span.file, e.span.start, e.span.end)) else { return };
+                let changed = match &receiver.kind {
+                    ExprKind::Variable(v) => format!(", and it doesn't change `${v}`"),
+                    ExprKind::Field { target, name, .. } if matches!(target.kind, ExprKind::This) => format!(", and it doesn't change `@{name}`"),
+                    _ => String::new(),
+                };
+                let mut message = format!("the result of `.{method}()` is never used{changed}");
+                let mut suggestion = None;
+                if let Some((other, why)) = changing_version(key, method) {
+                    message.push_str(&format!(". Did you mean `.{other}()`, {why}?"));
+                    suggestion = Some(other.to_string());
+                }
+                let mut d = Diagnostic::new(message, e.span);
+                d.file = self.file.clone();
+                d.suggestion = suggestion;
+                self.warnings.push(d);
+            }
+            ExprKind::Command(_) => self.warn("this command never runs: call `.run()` on it, or `.output()` for what it prints", e.span),
+            ExprKind::Int(_)
+            | ExprKind::Float(_)
+            | ExprKind::Str(_)
+            | ExprKind::Interpolated(_)
+            | ExprKind::Regex { .. }
+            | ExprKind::Bytes(_)
+            | ExprKind::Bool(_)
+            | ExprKind::Null
+            | ExprKind::List { .. }
+            | ExprKind::Map { .. }
+            | ExprKind::Variable(_)
+            | ExprKind::Function(_)
+            | ExprKind::Unary { .. }
+            | ExprKind::PathTest { .. }
+            | ExprKind::Range { .. }
+            | ExprKind::TypeCheck { .. }
+            | ExprKind::Index { .. }
+            | ExprKind::Lambda(_)
+            | ExprKind::ModuleFunction { .. }
+            | ExprKind::ModuleConstant { .. }
+            | ExprKind::This
+            | ExprKind::Field { .. }
+            | ExprKind::Static { .. } => self.warn("the value of this is never used", e.span),
+            // `&&`, `||` and `??` can be used for what their right side does *(i.e. `$verbose && log('...')`)*,
+            // and `<<` adds to a list *(`$names << 'Ana';`)*
+            ExprKind::Binary { op, .. } if !matches!(op, BinaryOp::And | BinaryOp::Or | BinaryOp::Coalesce | BinaryOp::Shl) => {
+                self.warn("the value of this is never used", e.span)
+            }
+            _ => {}
+        }
+    }
+
+    /// Warns about `$x == null` when `$x` can't be `null` there.
+    fn never_null(&mut self, op: BinaryOp, value: &Expr, ty: &Ty, span: Span) {
+        let ty = self.resolve(ty);
+        if matches!(ty, Ty::Nullable(_) | Ty::Null | Ty::Any | Ty::Var(_) | Ty::Param(_) | Ty::Never) {
+            return;
+        }
+        let what = match &value.kind {
+            ExprKind::Variable(v) => format!("`${v}`"),
+            ExprKind::Field { target, name, nullable: false } if matches!(target.kind, ExprKind::This) => format!("`@{name}`"),
+            _ => "this".to_string(),
+        };
+        let always = if op == BinaryOp::Eq { "false" } else { "true" };
+        self.warn(format!("{what} is never `null` here, since it's {}: this is always {always}", a(&ty)), span);
     }
 
     fn mark(&self) -> Mark {
-        Mark { scopes: self.scopes.len(), returns: self.returns.len(), loop_depth: self.loop_depth, this: self.this.len(), super_calls: self.super_calls }
+        Mark {
+            scopes: self.scopes.len(),
+            returns: self.returns.len(),
+            loop_depth: self.loop_depth,
+            this: self.this.len(),
+            super_calls: self.super_calls,
+            tracked: self.tracked.len(),
+            warnings: self.warnings.len(),
+        }
     }
 
     /// Back to where the checker was before a statement with an error.
@@ -237,7 +402,10 @@ impl<'a> Checker<'a> {
         self.this.truncate(mark.this);
         self.loop_depth = mark.loop_depth;
         self.super_calls = mark.super_calls;
+        self.tracked.truncate(mark.tracked);
+        self.warnings.truncate(mark.warnings);
         self.callee = None;
+        self.in_pub = false;
     }
 
     /// What a statement with an error would have declared, with any type,
@@ -245,7 +413,7 @@ impl<'a> Checker<'a> {
     fn skipped(&mut self, stmt: &Stmt) {
         let declare = |c: &mut Self, name: &str, constant: bool| {
             let scope = c.scopes.last_mut().unwrap();
-            scope.vars.entry(name.to_string()).or_insert(VarInfo { ty: Ty::Any, constant, place: None, about: None });
+            scope.vars.entry(name.to_string()).or_insert(VarInfo { ty: Ty::Any, constant, place: None, about: None, used: None });
         };
         match &stmt.kind {
             StmtKind::Pub(inner) => self.skipped(inner),
@@ -272,6 +440,63 @@ impl<'a> Checker<'a> {
         let mut d = Diagnostic::new(message, span);
         d.file = self.file.clone();
         Err(d)
+    }
+
+    /// An error about a name that isn't there, with "Did you mean" at its end
+    /// when a name that is there is likely the one meant. `without` is what
+    /// the message says after it when there's none *(i.e. how to import it)*.
+    fn fail_unknown<T>(&mut self, message: String, without: &str, suggestion: Option<(String, String)>, span: Span) -> Check<T> {
+        match suggestion {
+            Some((name, shown)) => {
+                let mut d = Diagnostic::new(format!("{message}. Did you mean {shown}?"), span);
+                d.file = self.file.clone();
+                d.suggestion = Some(name);
+                Err(d)
+            }
+            None => self.fail(format!("{message}{without}"), span),
+        }
+    }
+
+    /// The variables in scope, by name without `$`.
+    fn variable_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.scopes.iter().flat_map(|s| s.vars.keys().cloned()).collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// The functions and classes in scope, the built-in ones too.
+    fn function_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.scopes.iter().flat_map(|s| s.funcs.keys().chain(s.types.keys()).cloned()).collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// The types in scope, the built-in ones and the exceptions too.
+    fn type_names(&self) -> Vec<String> {
+        const BUILT_IN: &[&str] = &["any", "bool", "bytes", "command", "list", "map", "never", "number", "range", "regex", "result", "string", "void"];
+        let mut names: Vec<String> = self.scopes.iter().flat_map(|s| s.types.keys().chain(s.generics.iter()).cloned()).collect();
+        names.extend(BUILT_IN.iter().map(|s| s.to_string()));
+        names.extend(exceptions::TREE.iter().map(|(n, _)| n.to_string()));
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn module_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.scopes.iter().flat_map(|s| s.modules.keys().cloned()).collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// The method of a value of this type to suggest for `method`, written `.name()`.
+    fn suggest_method(&self, ty: &Ty, method: &str) -> Option<(String, String)> {
+        let accessible: Vec<_> = self.this.iter().map(|t| t.class.clone()).collect();
+        let members = self.members_of(ty, &accessible)?;
+        let methods: Vec<String> = members.into_iter().filter(|i| i.kind == complete::ItemKind::Method).map(|i| i.label).collect();
+        suggest::suggest(method, suggest::Kind::Method, &methods).map(|m| (m.clone(), format!("`.{m}()`")))
     }
 
     // ---- Type variables ----
@@ -461,6 +686,7 @@ impl<'a> Checker<'a> {
     }
 
     fn lookup_var(&self, name: &str) -> Option<Ty> {
+        self.mark_used(name);
         for scope in self.scopes.iter().rev() {
             if let Some(ty) = scope.narrowed.get(name) {
                 return Some(ty.clone());
@@ -509,7 +735,7 @@ impl<'a> Checker<'a> {
             let show = names::Show::Var { constant, name: name.to_string(), ty: ty.clone() };
             self.note(at, at.start, "", &place.needle.clone(), show, None, Some(place.clone()));
         }
-        self.scopes.last_mut().unwrap().vars.insert(name.to_string(), VarInfo { ty, constant, place, about: None });
+        self.scopes.last_mut().unwrap().vars.insert(name.to_string(), VarInfo { ty, constant, place, about: None, used: None });
         Ok(())
     }
 
@@ -578,10 +804,17 @@ impl<'a> Checker<'a> {
                     n if n.contains("::") => {
                         let (module, member) = n.split_once("::").unwrap();
                         match self.scopes.iter().rev().find_map(|s| s.modules.get(module)) {
-                            None => return self.fail(format!("there's no module named `{module}` here: import it with `use`"), ty.span),
+                            None => {
+                                let found = suggest::suggest(module, suggest::Kind::Module, &self.module_names()).map(|n| (n.clone(), format!("`{n}`")));
+                                return self.fail_unknown(format!("there's no module named `{module}` here"), ": import it with `use`", found, ty.span);
+                            }
                             Some(m) => match m.types.get(member) {
                                 Some(t) => t.clone(),
-                                None => return self.fail(format!("`{}` has no `pub` type named `{member}`", m.path), ty.span),
+                                None => {
+                                    let there: Vec<String> = m.types.keys().cloned().collect();
+                                    let found = suggest::suggest(member, suggest::Kind::Type, &there).map(|n| (n.clone(), format!("`{module}::{n}`")));
+                                    return self.fail_unknown(format!("`{}` has no `pub` type named `{member}`", m.path), "", found, ty.span);
+                                }
                             },
                         }
                     }
@@ -612,7 +845,8 @@ impl<'a> Checker<'a> {
                             }
                             Ty::Param(Rc::from(n))
                         } else {
-                            return self.fail(format!("unknown type `{n}`"), ty.span);
+                            let found = suggest::suggest(n, suggest::Kind::Type, &self.type_names()).map(|t| (t.clone(), format!("`{t}`")));
+                            return self.fail_unknown(format!("unknown type `{n}`"), "", found, ty.span);
                         }
                     }
                 }
@@ -655,14 +889,24 @@ impl<'a> Checker<'a> {
             }
         }
         // Each statement on its own: one with an error is skipped, and the next one checked
+        let mut left = false;
+        let mut warned = false;
         for (i, stmt) in stmts.iter().enumerate() {
-            if !early.contains(&i) {
-                let mark = self.mark();
-                if let Err(error) = self.stmt(stmt) {
-                    self.restore(mark);
-                    self.skipped(stmt);
-                    self.errors.push(error);
-                }
+            if early.contains(&i) {
+                continue;
+            }
+            // After a statement that always leaves: once a block, at the first one that isn't a declaration
+            if left && !warned && !is_declaration(stmt) {
+                self.warn("this code never runs: the code before it always leaves (`return`, `throw`, `break`, `continue`, `yield` or `exit()`)", stmt.span);
+                warned = true;
+            }
+            let mark = self.mark();
+            if let Err(error) = self.stmt(stmt) {
+                self.restore(mark);
+                self.skipped(stmt);
+                self.errors.push(error);
+            } else if self.terminates(stmt) {
+                left = true;
             }
         }
         Ok(())
@@ -779,6 +1023,9 @@ impl<'a> Checker<'a> {
                     None => value_ty,
                 };
                 self.declare(name, var_ty, *constant, span)?;
+                if !self.in_pub {
+                    self.track(name, span, false);
+                }
             }
             StmtKind::LetList { constant, names, rest, value } => {
                 let value_ty = self.expr(value, None)?;
@@ -789,9 +1036,11 @@ impl<'a> Checker<'a> {
                 };
                 for n in names {
                     self.declare(n, elem.clone(), *constant, span)?;
+                    self.track(n, span, false);
                 }
                 if let Some(r) = rest {
                     self.declare(r, Ty::List(Box::new(elem)), *constant, span)?;
+                    self.track(r, span, false);
                 }
             }
             StmtKind::Function(decl) => self.function(decl, span)?,
@@ -906,6 +1155,7 @@ impl<'a> Checker<'a> {
                 let result = self.scoped(&Vec::new(), |c| {
                     for (name, ty) in vars {
                         c.declare_at(&name, ty, false, iterable.span, span)?;
+                        c.track(&name, span, false);
                     }
                     match &body.kind {
                         StmtKind::Block(stmts) => c.block(stmts),
@@ -990,10 +1240,16 @@ impl<'a> Checker<'a> {
                 self.narrow_here(&yes);
             }
             StmtKind::Use(decl) => self.use_decl(decl, span)?,
-            StmtKind::Pub(inner) => self.stmt(inner)?,
+            StmtKind::Pub(inner) => {
+                let outer = std::mem::replace(&mut self.in_pub, true);
+                let result = self.stmt(inner);
+                self.in_pub = outer;
+                result?
+            }
             StmtKind::Block(stmts) => self.scoped(&Vec::new(), |c| c.block(stmts))?,
             StmtKind::Expr(e) => {
-                self.expr(e, None)?;
+                let ty = self.expr(e, None)?;
+                self.thrown_away(e, &ty);
             }
         }
         Ok(())
@@ -1091,7 +1347,11 @@ impl<'a> Checker<'a> {
                 let show = names::Show::Var { constant: false, name: p.name.clone(), ty: ty.clone() };
                 self.note(span, span.start, "", &place.needle.clone(), show, Some(about.clone()), Some(place.clone()));
             }
-            self.scopes.last_mut().unwrap().vars.insert(p.name.clone(), VarInfo { ty, constant: false, place, about: Some(about) });
+            self.scopes.last_mut().unwrap().vars.insert(p.name.clone(), VarInfo { ty, constant: false, place, about: Some(about), used: None });
+            // Anonymous functions' parameters are the caller's to decide
+            if self.warn_params && !(decl.name.is_empty() || decl.name == "anonymous") {
+                self.track(&p.name, p.span, true);
+            }
         }
         if self.around_cursor(span) {
             self.snapshot();
@@ -1250,7 +1510,8 @@ impl<'a> Checker<'a> {
             d
         };
         let source = self.modules.loader.read(file).map_err(|e| Diagnostic::new(format!("can't read the module '{shown}': {e}"), Span::default()))?;
-        let (program, _) = crate::parse_in(&source, u32::MAX, self.stack_budget, self.modules.loader, Some(file), false).map_err(located)?;
+        // While the code is written, what can be read of it, like `check_module`
+        let (program, _) = crate::parse_in(&source, u32::MAX, self.stack_budget, self.modules.loader, Some(file), self.modules.recover).map_err(located)?;
         let mut sig = ModuleSig { path: shown.clone(), ..Default::default() };
         let public_classes = program.iter().filter_map(|s| match &s.kind {
             StmtKind::Pub(inner) => match &inner.kind {
@@ -1294,6 +1555,7 @@ impl<'a> Checker<'a> {
             complete: None,
             recover: self.modules.recover,
             errors: &mut *self.modules.errors,
+            warnings: &mut *self.modules.warnings,
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1382,6 +1644,7 @@ impl<'a> Checker<'a> {
             complete: self.modules.complete.as_deref_mut(),
             recover: self.modules.recover,
             errors: &mut *self.modules.errors,
+            warnings: &mut *self.modules.warnings,
         };
         let host_functions = self.host_functions.clone();
         let mut checker = Checker::new(self.prelude, modules, &mut state, &host_functions);
@@ -1420,8 +1683,25 @@ impl<'a> Checker<'a> {
         let result = checker.block(&program);
         checker.finish_names();
         checker.finish_completion();
-        // A syntax error comes first, when the code is checked while it's written
+        // Its warnings, with its `use` lines never used; none for the standard library's own code
+        if !shown.starts_with(crate::stdlib::EMBEDDED) {
+            let mut warnings = checker.finish_warnings();
+            warnings.extend(crate::unused_imports(&source, u32::MAX, &program));
+            checker.modules.warnings.extend(warnings.into_iter().map(located));
+        }
+        // A syntax error comes first, when the code is checked while it's written, and
+        // `Modules::errors` has every syntax error, one per place, and then the type errors
         if let Some(error) = syntax {
+            let mut places = HashSet::new();
+            let all: Vec<Diagnostic> = crate::parse_in(&source, u32::MAX, self.stack_budget, self.modules.loader, Some(file), true)
+                .map(|(_, errors)| errors)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|d| places.insert(d.span.start))
+                .chain(in_order(std::mem::take(&mut checker.errors)))
+                .map(located)
+                .collect();
+            checker.modules.errors.extend(all);
             return Err(located(error));
         }
         result.map_err(located)?;
@@ -1791,7 +2071,10 @@ impl<'a> Checker<'a> {
                     }
                     t
                 }
-                None => return self.fail(format!("`${name}` isn't declared"), span),
+                None => {
+                    let found = suggest::suggest(name, suggest::Kind::Variable, &self.variable_names()).map(|n| (format!("${n}"), format!("`${n}`")));
+                    return self.fail_unknown(format!("`${name}` isn't declared"), "", found, span);
+                }
             },
             // A class where a type is expected *(i.e. `User` in `json::parse($text, User)`)*
             ExprKind::Function(name)
@@ -1836,13 +2119,22 @@ impl<'a> Checker<'a> {
                 None if self.class_named(name).is_some_and(|c| c.0.is_enum) => {
                     return self.fail(format!("`{name}` is an enum: its values are created where it's declared (i.e. `{name}::...`)"), span);
                 }
-                None => return self.fail(format!("there's no function named `{name}`. Functions must be defined before they're used"), span),
+                None => {
+                    let there = self.function_names();
+                    let found = match suggest::suggest(name, suggest::Kind::Function, &there) {
+                        Some(f) => Some((f.clone(), format!("`{f}`"))),
+                        // `len($x)`: a method in Lakescript
+                        None => suggest::method_for_function(name).map(|m| (m.to_string(), format!("the method `.{m}()` (i.e. `$list.{m}()`)"))),
+                    };
+                    return self.fail_unknown(format!("there's no function named `{name}`"), ". Functions must be defined before they're used", found, span);
+                }
             },
             // `fs::` while it's being written
             ExprKind::ModuleFunction { name, .. } if name.is_empty() => Ty::Any,
             ExprKind::ModuleFunction { module, name } => {
                 let Some(m) = self.lookup_module(module) else {
-                    return self.fail(format!("there's no module named `{module}`. Import it with `use`"), span);
+                    let found = suggest::suggest(module, suggest::Kind::Module, &self.module_names()).map(|n| (n.clone(), format!("`{n}`")));
+                    return self.fail_unknown(format!("there's no module named `{module}`"), ". Import it with `use`", found, span);
                 };
                 self.note_module(module, &m, span);
                 match m.functions.get(name) {
@@ -1854,12 +2146,17 @@ impl<'a> Checker<'a> {
                         }
                         Ty::Func(f.clone())
                     }
-                    None => return self.fail(format!("`{}` has no `pub` function named `{name}`", m.path), span),
+                    None => {
+                        let there: Vec<String> = m.functions.keys().cloned().collect();
+                        let found = suggest::suggest(name, suggest::Kind::Member, &there).map(|n| (n.clone(), format!("`{module}::{n}()`")));
+                        return self.fail_unknown(format!("`{}` has no `pub` function named `{name}`", m.path), "", found, span);
+                    }
                 }
             }
             ExprKind::ModuleConstant { module, name } => {
                 let Some(m) = self.lookup_module(module) else {
-                    return self.fail(format!("there's no module named `{module}`. Import it with `use`"), span);
+                    let found = suggest::suggest(module, suggest::Kind::Module, &self.module_names()).map(|n| (n.clone(), format!("`{n}`")));
+                    return self.fail_unknown(format!("there's no module named `{module}`"), ". Import it with `use`", found, span);
                 };
                 self.note_module(module, &m, span);
                 match m.constants.get(name) {
@@ -1871,7 +2168,11 @@ impl<'a> Checker<'a> {
                         }
                         t.clone()
                     }
-                    None => return self.fail(format!("`{}` has no `pub` constant named `${name}`", m.path), span),
+                    None => {
+                        let there: Vec<String> = m.constants.keys().cloned().collect();
+                        let found = suggest::suggest(name, suggest::Kind::Member, &there).map(|n| (format!("${n}"), format!("`{module}::${n}`")));
+                        return self.fail_unknown(format!("`{}` has no `pub` constant named `${name}`", m.path), "", found, span);
+                    }
                 }
             }
             ExprKind::Unary { op, operand } => {
@@ -2038,53 +2339,56 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// A `switch` used as a value without a `default` must have a case for
-    /// every value: both bools, or every value of an enum.
-    fn covers_every_value(&mut self, switch: &Switch, subject: &Ty) -> Check<()> {
-        let bools = |b: bool| switch.cases.iter().any(|c| c.patterns.iter().any(|p| matches!(p, Pattern::Value(Expr { kind: ExprKind::Bool(v), .. }) if *v == b)));
-        if bools(true) && bools(false) {
-            return Ok(());
+    /// What a `switch` without a `default` has no case for, as the error
+    /// to give: `null` when the subject can be it, a bool, a value of an
+    /// enum or a subcommand. `None` when it matches every value.
+    fn uncovered(&mut self, switch: &Switch, subject: &Ty, as_value: bool) -> Option<String> {
+        let has = |c: &Switch, f: &dyn Fn(&Expr) -> bool| c.cases.iter().any(|c| c.patterns.iter().any(|p| matches!(p, Pattern::Value(v) if f(v))));
+        let bools = |b: bool| has(switch, &|v| matches!(v.kind, ExprKind::Bool(x) if x == b));
+        let subject = self.resolve(subject);
+        let mut missing: Vec<String> = Vec::new();
+        if matches!(subject, Ty::Nullable(_) | Ty::Null) && !has(switch, &|v| matches!(v.kind, ExprKind::Null)) {
+            missing.push("`null`".into());
         }
-        let Ty::Object(class, _) = self.non_null(subject) else {
-            return self.fail("a `switch` used as a value must match every value: add a `default`", switch.subject.span);
-        };
-        let subcommands = class.0.body.borrow().subcommands.clone();
-        if !subcommands.is_empty() {
-            // A case for each subcommand
-            let mut missing: Vec<ClassRef> = subcommands;
-            for case in &switch.cases {
-                for pattern in &case.patterns {
-                    if let Pattern::Type(t) = pattern {
-                        if let Ok(Ty::Object(c, _)) = self.ty(t) {
-                            missing.retain(|m| *m != c);
+        let every = "a `switch` used as a value must match every value: add a `default`".to_string();
+        match self.non_null(&subject) {
+            Ty::Bool => missing.extend([true, false].into_iter().filter(|b| !bools(*b)).map(|b| format!("`{b}`"))),
+            // What could be any value: both bools are enough, as they always were
+            Ty::Any | Ty::Var(_) if as_value && bools(true) && bools(false) => {}
+            Ty::Object(class, _) if !class.0.body.borrow().subcommands.is_empty() => {
+                // A case for each subcommand
+                let mut subs: Vec<ClassRef> = class.0.body.borrow().subcommands.clone();
+                for case in &switch.cases {
+                    for pattern in &case.patterns {
+                        if let Pattern::Type(t) = pattern
+                            && let Ok(Ty::Object(c, _)) = self.ty(t)
+                        {
+                            subs.retain(|m| *m != c);
                         }
                     }
                 }
+                missing.extend(subs.iter().map(|m| format!("`{}`", m.0.name)));
             }
-            if missing.is_empty() {
-                return Ok(());
-            }
-            let names: Vec<String> = missing.iter().map(|m| format!("`{}`", m.0.name)).collect();
-            return self.fail(format!("this `switch` has no case for {}: add them, or a `default`", names.join(", ")), switch.subject.span);
-        }
-        if !class.0.is_enum {
-            return self.fail("a `switch` used as a value must match every value: add a `default`", switch.subject.span);
-        }
-        let mut missing: Vec<String> = class.0.body.borrow().values.clone();
-        for case in &switch.cases {
-            for pattern in &case.patterns {
-                if let Pattern::Value(Expr { kind: ExprKind::Static { class: c, name, variable: false }, .. }) = pattern {
-                    if self.class_named(c).is_some_and(|c| c == class) {
-                        missing.retain(|m| m != name);
+            Ty::Object(class, _) if class.0.is_enum => {
+                let mut values: Vec<String> = class.0.body.borrow().values.clone();
+                for case in &switch.cases {
+                    for pattern in &case.patterns {
+                        if let Pattern::Value(Expr { kind: ExprKind::Static { class: c, name, variable: false }, .. }) = pattern
+                            && self.class_named(c).is_some_and(|c| c == class)
+                        {
+                            values.retain(|m| m != name);
+                        }
                     }
                 }
+                missing.extend(values.iter().map(|m| format!("`{}::{m}`", class.0.name)));
             }
+            _ => return Some(every),
         }
         if missing.is_empty() {
-            return Ok(());
+            return None;
         }
-        let names: Vec<String> = missing.iter().map(|m| format!("`{}::{m}`", class.0.name)).collect();
-        self.fail(format!("this `switch` has no case for {}: add them, or a `default`", names.join(", ")), switch.subject.span)
+        let them = if missing.len() == 1 { "add it" } else { "add them" };
+        Some(format!("this `switch` has no case for {}: {them}, or a `default`", missing.join(", ")))
     }
 
     fn switch(&mut self, switch: &Switch, as_value: bool) -> Check<Ty> {
@@ -2129,8 +2433,13 @@ impl<'a> Checker<'a> {
         }
         if let Some(d) = &switch.default {
             bodies.push((Vec::new(), d));
-        } else if as_value {
-            self.covers_every_value(switch, &subject)?;
+        } else if let Some(message) = self.uncovered(switch, &subject, as_value) {
+            if as_value {
+                return self.fail(message, switch.subject.span);
+            }
+        } else {
+            // A statement with a case for every value ends its block when each case does
+            self.exhaustive.insert((switch.subject.span.file, switch.subject.span.start, switch.subject.span.end));
         }
         for (facts, body) in bodies {
             let t = self.scoped(&facts, |c| match body {
@@ -2342,7 +2651,8 @@ impl<'a> Checker<'a> {
                 // The methods every exception has
                 Some(kind) => r = Ty::Exception(kind),
                 None if !matches!(method, "toString" | "typeName" | "equals" | "same?") => {
-                    return self.fail(format!("`{}` has no method `.{method}()`", class.0.name), span);
+                    let found = self.suggest_method(&r, method);
+                    return self.fail_unknown(format!("`{}` has no method `.{method}()`", class.0.name), "", found, span);
                 }
                 None => {}
             }
@@ -2371,7 +2681,8 @@ impl<'a> Checker<'a> {
             any.methods.get(method).cloned().map(|m| (m, Vec::new()))
         });
         let Some((sig, names)) = found else {
-            return self.fail(format!("{} has no method `.{method}()`", a(&self.resolve(&r))), span);
+            let suggestion = self.suggest_method(&r, method);
+            return self.fail_unknown(format!("{} has no method `.{method}()`", a(&self.resolve(&r))), "", suggestion, span);
         };
         // Only the methods of classes take named arguments
         if let Some(arg) = args.iter().find(|a| a.name.is_some()) {
@@ -2410,6 +2721,9 @@ impl<'a> Checker<'a> {
             self.note(span, receiver_expr.span.end, "", method, show, Some(format!("A method of `{key}`.")), None);
         }
         let ret = self.call(&sig, &map, args, &format!(".{method}()"), span)?;
+        if !changes_its_value(key, method) {
+            self.pure_calls.insert((span.file, span.start, span.end), key);
+        }
         Ok(if nullable { ret.nullable() } else { ret })
     }
 
@@ -2493,6 +2807,13 @@ impl<'a> Checker<'a> {
         // The right side of `??` can be nullable too, like Kotlin's `?:`: then so is the result
         let expected = if matches!(op, Coalesce) { Some(self.non_null(&l).nullable()) } else { None };
         let r = self.expr(right, expected.as_ref())?;
+        if matches!(op, Eq | NotEq) {
+            match (&left.kind, &right.kind) {
+                (_, ExprKind::Null) => self.never_null(op, left, &l, span),
+                (ExprKind::Null, _) => self.never_null(op, right, &r, span),
+                _ => {}
+            }
+        }
         let (ls, rs) = (self.shallow(&l), self.shallow(&r));
         // Objects get their operators from interfaces *(i.e. `IAdd`)*
         if matches!(op, Eq | NotEq) && (matches!(ls, Ty::Object(..)) || matches!(rs, Ty::Object(..))) {
@@ -2628,8 +2949,10 @@ impl<'a> Checker<'a> {
     fn assign(&mut self, op: Option<BinaryOp>, target: &Expr, value: &Expr, span: Span) -> Check<Ty> {
         let target_ty = match &target.kind {
             ExprKind::Variable(name) => {
+                self.mark_used(name);
                 let Some(info) = self.declared_var(name) else {
-                    return self.fail(format!("`${name}` isn't declared. Declare it with `let ${name} = ...;`"), target.span);
+                    let found = suggest::suggest(name, suggest::Kind::Variable, &self.variable_names()).map(|n| (format!("${n}"), format!("`${n}`")));
+                    return self.fail_unknown(format!("`${name}` isn't declared"), &format!(". Declare it with `let ${name} = ...;`"), found, target.span);
                 };
                 if self.recording() {
                     let show = names::Show::Var { constant: info.constant, name: name.clone(), ty: info.ty.clone() };
@@ -2776,7 +3099,56 @@ fn plural(ty: &Ty) -> String {
     }
 }
 
+/// Functions, classes and `use` lines, which are declared before the block runs.
+fn is_declaration(stmt: &Stmt) -> bool {
+    match &stmt.kind {
+        StmtKind::Pub(inner) => is_declaration(inner),
+        StmtKind::Function(_) | StmtKind::Class(_) | StmtKind::Use(_) => true,
+        _ => false,
+    }
+}
+
 /// Errors in the order of the code, each one once.
+/// `true` for the built-in methods that change the value they're called on
+/// *(i.e. `$list.push()`)*, or do something else *(a command's)*.
+fn changes_its_value(key: &str, method: &str) -> bool {
+    match key {
+        "command" => true,
+        "list" => matches!(
+            method,
+            "push" | "prepend" | "insert" | "extend" | "removeFirst" | "removeLast" | "removeAt" | "remove" | "removeAll"
+                | "removeWhere" | "clear" | "sort" | "sortBy" | "sortWith" | "reverse" | "shuffle"
+        ),
+        "map" => matches!(method, "getOrSet" | "set" | "update" | "remove" | "removeWhere" | "merge" | "clear" | "sortByKey" | "sortBy"),
+        "result" => method == "throw",
+        _ => false,
+    }
+}
+
+/// The method that does what a method thrown away was probably meant to:
+/// the one that changes the value, or `.each()` for `.map()`.
+fn changing_version(key: &str, method: &str) -> Option<(&'static str, &'static str)> {
+    let itself = match key {
+        "list" => "which changes the list itself",
+        "map" => "which changes the map itself",
+        _ => "",
+    };
+    let other = match (key, method) {
+        ("list" | "map" | "range", "map") => return Some(("each", "which runs a function for each value")),
+        ("list", "sorted") => "sort",
+        ("list", "sortedBy") => "sortBy",
+        ("list", "sortedWith") => "sortWith",
+        ("list", "reversed") => "reverse",
+        ("list", "shuffled") => "shuffle",
+        ("list", "concat") => "extend",
+        ("map", "merged") => "merge",
+        ("map", "sortedByKey") => "sortByKey",
+        ("map", "sortedBy") => "sortBy",
+        _ => return None,
+    };
+    Some((other, itself))
+}
+
 pub(crate) fn in_order(mut errors: Vec<Diagnostic>) -> Vec<Diagnostic> {
     errors.sort_by_key(|d| (d.span.file, d.span.start, d.span.end));
     errors.dedup_by(|a, b| a.message == b.message && a.span == b.span && a.file == b.file);
@@ -2830,7 +3202,11 @@ impl Checker<'_> {
             StmtKind::If { then, otherwise: Some(o), .. } => self.terminates(then) && self.terminates(o),
             StmtKind::While { cond: Expr { kind: ExprKind::Bool(true), .. }, body } => !contains_break(body),
             StmtKind::Switch(s) => {
-                s.default.as_ref().is_some_and(|d| self.case_terminates(d)) && s.cases.iter().all(|c| self.case_terminates(&c.body))
+                let every = match &s.default {
+                    Some(d) => self.case_terminates(d),
+                    None => self.exhaustive.contains(&(s.subject.span.file, s.subject.span.start, s.subject.span.end)),
+                };
+                every && s.cases.iter().all(|c| self.case_terminates(&c.body))
             }
             StmtKind::Try { body, catches, finally } => {
                 finally.as_ref().is_some_and(|f| self.block_terminates(f))

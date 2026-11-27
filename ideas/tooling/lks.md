@@ -34,6 +34,8 @@ lks [options] <script> [arguments for the script...]
 *In phase 13, see [roadmap.md](../roadmap.md).* `lks --check script.lks` checks the syntax and types of a script and the modules it uses without running it, and says nothing when there's no error, like `ferry check` for a project. A script's whole job is often to delete files or run commands, so checking it shouldn't need running it.
 
 - The exit code is `0` with no error and `1` with any. Like running, it shows every type error, or the first syntax error *(see Every error at once in [lsp.md](lsp.md))*.
+- Unlike running, it also shows the warnings, before the errors: names never used and code that never runs, in the script and the modules it uses *(see Warnings in [diagnostics.md](diagnostics.md))*. They never change the exit code.
+- A file that the modules it uses load back *(i.e. a class's file, whose classes use it)* is checked as that module *(see Rules in [modules.md](../language/modules.md))*.
 - It takes only the script: arguments after it, `--test` or `--no-type-check` with it, or a bundle *(which `ferry bundle` checked)* are a wrong command line, code `2`.
 - With `--message-format json` the error is JSON *(see Errors as JSON in [diagnostics.md](diagnostics.md))*.
 

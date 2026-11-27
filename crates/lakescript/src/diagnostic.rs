@@ -15,6 +15,9 @@ pub struct Diagnostic {
     /// For an exception that wasn't caught, its type *(i.e. `ValueError`)*,
     /// which the message starts with. `None` for a syntax or type error.
     pub exception: Option<String>,
+    /// The name a "Did you mean" suggests *(i.e. `$name`)*, also at the end
+    /// of the message *(see Did you mean in ideas/tooling/diagnostics.md)*.
+    pub suggestion: Option<String>,
 }
 
 /// A call that led to an error.
@@ -50,7 +53,7 @@ impl Diagnostic {
     }
 
     pub fn new(message: impl Into<String>, span: Span) -> Self {
-        Diagnostic { message: message.into(), span, file: None, trace: Vec::new(), exception: None }
+        Diagnostic { message: message.into(), span, file: None, trace: Vec::new(), exception: None, suggestion: None }
     }
 
     /// The simple first version from the notes: `file:line:column: error: message`.
@@ -88,11 +91,28 @@ impl Diagnostic {
 
     /// `render_with_source`, with colors when `paint` has them, like Rust's.
     pub fn render_with_source_painted(&self, path: &str, source: &str, paint: Paint) -> String {
+        self.render_as(false, path, source, paint)
+    }
+
+    /// Like `render_with_source_painted`, for a warning: `warning:` and its
+    /// marker in yellow *(see Warnings in ideas/tooling/diagnostics.md)*.
+    pub fn render_warning_painted(&self, path: &str, source: Option<&str>, paint: Paint) -> String {
+        match source {
+            Some(source) if self.span.line > 0 => self.render_as(true, path, source, paint),
+            _ => {
+                let file = self.file.as_deref().unwrap_or(path);
+                format!("{file}:{}:{}: {} {}", self.span.line, self.span.column, paint.warning("warning:"), paint.bold(&self.message))
+            }
+        }
+    }
+
+    fn render_as(&self, warning: bool, path: &str, source: &str, paint: Paint) -> String {
+        let label = |text: &str| if warning { paint.warning(text) } else { paint.error(text) };
         let script = path;
         let path = self.file.as_deref().unwrap_or(path);
         let line_no = self.span.line as usize;
         let Some(line) = source.lines().nth(line_no.saturating_sub(1)) else {
-            return self.render_painted(script, paint);
+            return if warning { self.render_warning_painted(script, None, paint) } else { self.render_painted(script, paint) };
         };
         let column = (self.span.column as usize).max(1);
         let length = self.marked(line);
@@ -103,13 +123,13 @@ impl Diagnostic {
         let calls = self.calls(script, paint);
         format!(
             "{calls}{} {}\n{gutter}{} {path}:{}:{}\n{gutter} {bar}\n{} {bar} {line}\n{gutter} {bar} {padding}{}",
-            paint.error("error:"),
+            label(if warning { "warning:" } else { "error:" }),
             paint.bold(&self.message),
             paint.frame("-->"),
             self.span.line,
             self.span.column,
             paint.frame(&line_no.to_string()),
-            paint.error(&"^".repeat(length))
+            label(&"^".repeat(length))
         )
     }
 
@@ -153,7 +173,7 @@ impl Diagnostic {
             })
             .collect();
         format!(
-            "{{\"type\":{},\"message\":{},\"exception\":{},\"file\":{},\"line\":{},\"column\":{},\"length\":{},\"trace\":[{}]}}",
+            "{{\"type\":{},\"message\":{},\"exception\":{},\"file\":{},\"line\":{},\"column\":{},\"length\":{},\"trace\":[{}],\"suggestion\":{}}}",
             json_string(level),
             json_string(&self.message),
             self.exception.as_deref().map_or("null".to_string(), json_string),
@@ -161,7 +181,8 @@ impl Diagnostic {
             number(placed.then_some(self.span.line as usize)),
             number(placed.then_some(self.span.column as usize)),
             number(length),
-            trace.join(",")
+            trace.join(","),
+            self.suggestion.as_deref().map_or("null".to_string(), json_string)
         )
     }
 }
@@ -171,7 +192,7 @@ impl Diagnostic {
 /// note of ferry)*. `file` is the file it's about, if any.
 pub fn json_message(level: &str, message: &str, file: Option<&str>) -> String {
     format!(
-        "{{\"type\":{},\"message\":{},\"exception\":null,\"file\":{},\"line\":null,\"column\":null,\"length\":null,\"trace\":[]}}",
+        "{{\"type\":{},\"message\":{},\"exception\":null,\"file\":{},\"line\":null,\"column\":null,\"length\":null,\"trace\":[],\"suggestion\":null}}",
         json_string(level),
         json_string(message),
         file.map_or("null".to_string(), json_string)

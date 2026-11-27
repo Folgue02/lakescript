@@ -845,12 +845,14 @@ impl Parser {
     fn param(&mut self) -> Result<Param> {
         if let TokenKind::Field(name) = self.peek().kind.clone() {
             // `new(@name)`: stored in the field, with the field's type
+            let span = self.peek().span;
             self.advance();
             let default = if self.eat(&TokenKind::Eq) { Some(self.expression()?) } else { None };
-            return Ok(Param { name, ty: None, default, variadic: false, field: true });
+            return Ok(Param { name, ty: None, default, variadic: false, field: true, span });
         }
         let variadic = self.eat(&TokenKind::Ellipsis);
         let ty = if matches!(self.peek().kind, TokenKind::Variable(_)) { None } else { Some(self.parse_type()?) };
+        let span = self.peek().span;
         let name = self.expect_variable("for the parameter")?;
         let default = if self.eat(&TokenKind::Eq) {
             if variadic {
@@ -860,7 +862,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Param { name, ty, default, variadic, field: false })
+        Ok(Param { name, ty, default, variadic, field: false, span })
     }
 
     fn block(&mut self) -> Result<Vec<Stmt>> {
@@ -1453,6 +1455,17 @@ impl Parser {
                 self.advance();
                 ExprKind::Null
             }
+            // `$v -> ...`: one parameter without a type needs no parentheses, except in a
+            // `case` pattern, where the arrow is the case's
+            TokenKind::Variable(name) if !self.in_case_pattern && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Arrow)) => {
+                let span = self.peek().span;
+                self.advance();
+                self.advance();
+                let body = if self.check(&TokenKind::LBrace) { FunctionBody::Block(self.block()?) } else { FunctionBody::Expr(self.expression()?) };
+                let params = vec![Param { name, ty: None, default: None, variadic: false, field: false, span }];
+                let decl = FunctionDecl { name: "anonymous".into(), generics: Vec::new(), params, ret: None, body };
+                ExprKind::Lambda(Rc::new(decl))
+            }
             TokenKind::Variable(name) => {
                 self.advance();
                 ExprKind::Variable(name)
@@ -1672,11 +1685,12 @@ impl Parser {
                 _ => return self.error_here(format!("expected `case`, `default` or `}}`, found {}", self.peek().kind)),
             }
         }
-        // A `switch` on an enum can have a case for every value instead, which the checker sees
-        // or of a command's subcommands *(i.e. `case Git::Push ->`)*
+        // A `switch` on an enum can have a case for every value instead, which the checker sees,
+        // or for every subcommand of a command *(i.e. `case Git::Push ->`)*
         let enum_cases = cases.iter().all(|c| {
             c.patterns.iter().all(|p| match p {
-                Pattern::Value(Expr { kind: ExprKind::Static { variable: false, .. }, .. }) => true,
+                // `case null`, when the subject can be `null`
+                Pattern::Value(Expr { kind: ExprKind::Static { variable: false, .. } | ExprKind::Null, .. }) => true,
                 Pattern::Type(TypeExpr { kind: TypeKind::Named { name, .. }, .. }) => name.split_once("::").is_some_and(|(l, _)| is_type_name(l)),
                 _ => false,
             })

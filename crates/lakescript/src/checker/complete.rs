@@ -167,7 +167,7 @@ impl Checker<'_> {
     }
 
     /// The fields and methods of a value of this type. `None` when the type isn't known.
-    fn members_of(&self, ty: &Ty, accessible: &[ClassRef]) -> Option<Vec<Item>> {
+    pub(super) fn members_of(&self, ty: &Ty, accessible: &[ClassRef]) -> Option<Vec<Item>> {
         let mut items = Vec::new();
         let mut seen = HashSet::new();
         let builtin = |items: &mut Vec<Item>, seen: &mut HashSet<String>, key: &str, args: Vec<Ty>| {

@@ -249,7 +249,10 @@ fn run() -> ExitCode {
             problem(&format!("{script} is a bundle, which `ferry bundle` checked when it made it: `lks --check` checks a script"));
             return ExitCode::from(2);
         }
-        return match engine.check_file(Path::new(&script)) {
+        let result = engine.check_file(Path::new(&script));
+        // Warnings first, which never change the exit code
+        show_warnings(&engine, &script);
+        return match result {
             Ok(()) => ExitCode::SUCCESS,
             Err(diagnostic) => {
                 show_all(&engine, diagnostic, &script);
@@ -330,6 +333,21 @@ fn show_all(engine: &Engine, diagnostic: lakescript::Diagnostic, script: &str) {
     let errors = if engine.errors().is_empty() { vec![diagnostic] } else { engine.errors().to_vec() };
     let shown: Vec<String> = errors.iter().map(|d| show(d, script)).collect();
     eprintln!("{}", shown.join(if json() { "\n" } else { "\n\n" }));
+}
+
+/// The warnings of a check *(see Warnings in ideas/tooling/diagnostics.md)*:
+/// only `lks --check` shows them, never a run.
+fn show_warnings(engine: &Engine, script: &str) {
+    for warning in engine.warnings() {
+        let file = warning.file.as_deref().unwrap_or(script);
+        if json() {
+            let source = std::fs::read_to_string(file).ok();
+            eprintln!("{}", warning.render_json("warning", script, source.as_deref()));
+        } else {
+            let source = std::fs::read_to_string(file).ok();
+            eprintln!("{}\n", warning.render_warning_painted(script, source.as_deref(), paint()));
+        }
+    }
 }
 
 /// An error about a file, not at a place in it *(i.e. it can't be read)*.

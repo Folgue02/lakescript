@@ -16,6 +16,8 @@ outln($describe('Daniel', 23));
 const $fruits = %w[apple banana cherry];
 outln($fruits.map(($f) -> $f.capitalize()).join(', '));
 outln($fruits.filter(($f) -> $f.contains('an')));
+// One parameter without a type needs no parentheses
+outln(f"{$fruits.map($f -> $f.length()).sum()} letters in all");
 
 // Closures keep the variables they use, like in JavaScript
 (() -> number) makeCounter() {

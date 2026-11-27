@@ -134,3 +134,7 @@ tests/units.lks
 ## Later
 
 - Running a test from an editor, through `lks-lsp`.
+
+## Not doing for now
+
+- Doc tests, running the code blocks of `///` comments and `module.md` with `ferry test`. Suggested after phase 13, and not important enough.

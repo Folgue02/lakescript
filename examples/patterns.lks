@@ -16,7 +16,7 @@ const $parts = 'release-2026-11-19'.match(%r"(\d{4})-(\d{2})-(\d{2})");
 outln($parts);
 if ($parts != null) {
     // Inside here the checker knows $parts isn't null
-    const [$whole, $year, $month, $day] = $parts;
+    const [$_whole, $year, $month, $day] = $parts;
     outln(f"Year {$year}, month {$month}, day {$day}");
 }
 

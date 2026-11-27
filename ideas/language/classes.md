@@ -160,7 +160,7 @@ outln(PersonStatus::fromIgnoreCase('sick'));
 
 - Values are written in SCREAMING_CASE and reached with `::` *(i.e. `PersonStatus::SICK`)*. Inside the enum, `@` is the value itself.
 - The `;` after the values is only needed when fields or methods follow them, so an enum of only values fits in one line *(i.e. `enum Align { LEFT, RIGHT, CENTER }`)*.
-- A `switch` with a case for every value doesn't need a `default`.
+- A `switch` with a case for every value doesn't need a `default`, whether it's used as a value or not. As a statement, it ends a function when each of its cases does *(i.e. each one has a `return`)*. When the value can be `null`, `case null` is one of the cases it needs *(see [flow_control.md](../language/flow_control.md))*.
 - Printing a value shows its enum and its name *(i.e. `PersonStatus::SICK`)*.
 - Values are created once, in order, when the enum is declared, and calling the enum is an error. Two values are `==` only if they're the same value.
 - `from()` and `fromIgnoreCase()` throw a `ValueError` that lists the values when there's no value with that name.

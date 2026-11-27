@@ -12,7 +12,7 @@ Or build once with `cargo build -p lks` and use `target/debug/lks examples/hello
 
 Every example is type checked before it runs, like any script. `lks --no-type-check` skips it.
 
-To check one without running it, for one that deletes files or runs commands, there's `lks --check`, which says nothing when there's no error. For a tool or an agent, `--message-format json` gives each error as one line of JSON on stderr, in `lks` and `ferry`:
+To check one without running it, for one that deletes files or runs commands, there's `lks --check`, which says nothing when there's no error. It shows every error at once, with the name likely meant for one that isn't there ("Did you mean `.length()`?"), and warnings for names never used, code that never runs and results thrown away *(i.e. `$name.trim();` on its own)*. For a tool or an agent, `--message-format json` gives each error as one line of JSON on stderr, in `lks` and `ferry`:
 
 ```
 target/debug/lks --check examples/commands.lks
@@ -25,7 +25,7 @@ target/debug/lks --message-format json --check examples/commands.lks
 |---------|-------|
 | [hello.lks](hello.lks) | Constants, a one-line function, a `for` over a range, f-strings |
 | [features.lks](features.lks) | Phase 1: FizzBuzz, primes, maps, default and named arguments, varargs, numbers |
-| [closures.lks](closures.lks) | Anonymous functions with `->`, closures, functions as values, functions that call each other |
+| [closures.lks](closures.lks) | Anonymous functions with `->` *(also `$f -> ...` with one parameter)*, closures, functions as values, functions that call each other |
 | [control_flow.lks](control_flow.lks) | `if` and `switch` as values, `yield`, cases by type, loops, destructuring, also with the index or the key |
 | [strings.lks](strings.lks) | String literals, multi-line strings, slicing and string methods |
 | [collections.lks](collections.lks) | List and map methods: grouping, sorting (also with a comparison function), folding, counting, and `...` inside a list |
@@ -35,7 +35,7 @@ target/debug/lks --message-format json --check examples/commands.lks
 | [classes.lks](classes.lks) | Classes: fields, the constructor that takes every field, `new`, methods, static members, `extends`, `override` and `@super` |
 | [interfaces.lks](interfaces.lks) | Interfaces: `implement` blocks, default methods, `Self`, interfaces that extend others, `.is()` with interfaces |
 | [nulls.lks](nulls.lks) | Values that can be `null`: checks that narrow, a `never` function that stops the script, `?? fail(...)`, `$x!` with its `NullError`, `!` on any value, and `??` with a nullable right side | |
-| [enums.lks](enums.lks) | Enums: values with fields, methods, a `switch` over every value, `values()`, `from()` and `fromIgnoreCase()` |
+| [enums.lks](enums.lks) | Enums: values with fields, methods, a `switch` over every value, also as a statement that ends a function and with `case null`, `values()`, `from()` and `fromIgnoreCase()` |
 | [generics.lks](generics.lks) | Generic classes, `Stack<string>()`, and an interface implemented with several types |
 | [operators.lks](operators.lks) | Operators on objects through `IAdd`, `IMul`, `IEquals`, `IOrdered`, `IIndex` and `IContains`, and sorting objects |
 

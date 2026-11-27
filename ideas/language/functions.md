@@ -61,6 +61,7 @@ $fruits.map(($fruit) -> $fruit.upper());
 - When an anonymous function is passed where a function type is expected, the parameters without a type take the types from it. In `$fruits.map(($fruit) -> ...)`, `$fruit` is a `string` because `$fruits` is a `list<string>`. Otherwise they're `any`.
 - One-line anonymous functions use `->`, and named functions use `=`, like in Kotlin *(`fun f(x) = ...` and `{ x -> ... }`)*: `($x) -> $x + 1` and `() -> 42` are anonymous functions, `number inc(number $x) = $x + 1;` is a named one. `($x) = ...` would read like an assignment, especially next to another `=` *(i.e. `const $f = ($x) = $x + 1;`)*, so it's an error that points to `->`.
 - `(...)` followed by `{` or `->` in an expression is an anonymous function.
+- **One parameter without a type can go without parentheses**, like Java's and Kotlin's: `$v -> $v * 2` is `($v) -> $v * 2`, and `$v -> { ... }` takes a block. A parameter with a type keeps them *(`(number $v) -> ...`)*, and so do none or several. In a `case` pattern, `$v ->` is still the value `$v` and the arrow of the case. Added in phase 13.
 - `=>` can't be used for this, since map literals and `for ($k => $v in ...)` already use it.
 - Like named functions, they can use the variables around them *(i.e. `$fruits.filter(($f) -> $f -like $pattern)`)*. This works like closures in JavaScript:
     - They use the variable itself, not a copy of its value, so they see later changes, and changes they make are seen outside.

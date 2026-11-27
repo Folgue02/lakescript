@@ -46,3 +46,14 @@ try {
 for ($planet in Planet::values()) {
     outln(f"{$planet.name()}: a year is {$planet.yearInDays()} days, mass {$planet.mass}");
 }
+
+// A `switch` statement with a case for every value ends the function too,
+// and `case null` is one of them when there may be no value
+string loudness(?Level $setting) {
+    switch ($setting) {
+        case Level::DEBUG, Level::INFO -> { return 'quiet'; }
+        case Level::WARNING, Level::ERROR -> { return 'loud'; }
+        case null -> { return 'not set'; }
+    }
+}
+outln([loudness(Level::INFO), loudness(Level::ERROR), loudness(null)]);

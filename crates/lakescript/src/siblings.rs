@@ -4,6 +4,9 @@
 //! module, gets a `use` of it, as if it were written. So the checker, the
 //! compiler and the editor see an ordinary `use`, and the module is loaded
 //! the first time it's used, like any other.
+//!
+//! A lowercase module also sees the types in the folder named like it,
+//! after its own folder *(i.e. `config.lks` sees `config/AppConfig.lks`)*.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -123,22 +126,30 @@ impl Loader {
     }
 
     /// Adds a `use` for each type of `names` that nothing in `program` gives
-    /// and whose type module is in the folder of `file`'s module.
+    /// and whose type module is in the folder of `file`'s module, or, for a
+    /// lowercase module, in the folder named like it.
     pub fn add_siblings(&self, program: &mut Vec<Stmt>, names: Vec<(String, Span)>, file: &Path) {
         if names.is_empty() {
             return;
         }
-        let Some(mut folder) = self.module_name(file) else { return };
-        folder.pop();
+        let Some(module) = self.module_name(file) else { return };
+        let mut folder = module.clone();
+        let own = folder.pop().unwrap_or_default();
+        // `config.lks` and its `config/`; a type module's folder isn't its parts
+        let named = (!crate::parser::is_type_name(&own)).then_some(module);
         let given = given(program);
         let mut uses = Vec::new();
         for (name, span) in names {
             if given.contains(&name) || crate::exceptions::is_exception_type(&name) {
                 continue;
             }
-            let mut path = folder.clone();
-            path.push(name);
-            if self.has_module(&path) {
+            // Next to it first, so adding the folder never changes what it found
+            let found = [Some(&folder), named.as_ref()].into_iter().flatten().map(|f| {
+                let mut path = f.clone();
+                path.push(name.clone());
+                path
+            });
+            if let Some(path) = found.into_iter().find(|p| self.has_module(p)) {
                 let item = UseItem { name: path.last().cloned().unwrap_or_default(), variable: false, alias: None };
                 let decl = UseDecl { path, items: UseItems::Items(vec![item]), type_module: true };
                 uses.push(Stmt { kind: StmtKind::Use(decl), span });

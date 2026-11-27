@@ -55,9 +55,13 @@ pub struct Engine {
     check_state: crate::checker::State,
     /// Every error of the last check, when it had any *(see `errors`)*.
     errors: Vec<Diagnostic>,
+    /// The warnings of the last check *(see `warnings`)*.
+    warnings: Vec<Diagnostic>,
     check_cache: HashMap<PathBuf, Result<crate::checker::prelude::ModuleSig, Diagnostic>>,
     check_classes: HashMap<(PathBuf, String), crate::checker::types::ClassRef>,
     check_declared: HashMap<PathBuf, crate::checker::prelude::ModuleSig>,
+    /// Whether the last check was of the script as a module *(see `check`)*.
+    checked_as_module: bool,
     /// Functions registered by the program embedding Lakescript. The checker knows nothing about their types.
     host_functions: Vec<String>,
     builtins_ready: bool,
@@ -146,9 +150,11 @@ impl Engine {
             prelude: None,
             check_state: Default::default(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             check_cache: HashMap::new(),
             check_classes: HashMap::new(),
             check_declared: HashMap::new(),
+            checked_as_module: false,
             host_functions: Vec::new(),
             builtins_ready: false,
             record_names: false,
@@ -254,6 +260,7 @@ impl Engine {
     /// kept, so the next `run` can use them.
     pub fn run(&mut self, source: &str) -> Result<Outcome, Diagnostic> {
         self.errors.clear();
+        self.warnings.clear();
         let path = self.host.state.script_path.clone();
         let (program, _) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), false)?;
         if self.check_types {
@@ -311,18 +318,23 @@ impl Engine {
     pub fn check_source(&mut self, source: &str) -> Result<(), Diagnostic> {
         self.found.clear();
         self.errors.clear();
+        self.warnings.clear();
         if self.record_names {
             self.checked_source = source.to_string();
         }
         let path = self.host.state.script_path.clone();
         if !self.editing() {
             let (program, _) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), false)?;
-            return self.check(&program).map_err(|d| self.locate(d));
+            let result = self.check(&program).map_err(|d| self.locate(d));
+            self.add_unused_imports(source, &program);
+            return result;
         }
         // For an editor, the code is checked also after a syntax error, for its names
         let (program, syntax) = crate::parse_in(source, 0, self.stack_budget, &self.host.loader, path.as_deref(), true)?;
         let result = self.check(&program).map_err(|d| self.locate(d));
-        if syntax.is_empty() {
+        self.add_unused_imports(source, &program);
+        // Checked as a module, its syntax errors are already the module's
+        if syntax.is_empty() || self.checked_as_module {
             return result;
         }
         // Every syntax error, then the type errors of what could be read. One
@@ -333,6 +345,19 @@ impl Engine {
         let syntax: Vec<Diagnostic> = syntax.into_iter().filter(|d| places.insert((d.span.file, d.span.start))).map(|d| self.locate(d)).collect();
         self.errors = syntax.into_iter().chain(types).collect();
         Err(first)
+    }
+
+    /// The script's `use` lines that are never used, with the other warnings.
+    fn add_unused_imports(&mut self, source: &str, program: &[crate::ast::Stmt]) {
+        // Checked as a module, whose check found them
+        if self.checked_as_module {
+            return;
+        }
+        let unused = crate::unused_imports(source, 0, program);
+        if !unused.is_empty() {
+            let all = std::mem::take(&mut self.warnings).into_iter().chain(unused).collect();
+            self.warnings = crate::checker::in_order(all);
+        }
     }
 
     /// Whether the checks are for an editor: they go on after syntax errors.
@@ -451,8 +476,51 @@ impl Engine {
         self.host.state.command_name = Some(name.to_string());
     }
 
+    /// Checks a script. When what it uses loads the script itself as a
+    /// module *(i.e. `store/Customer.lks`, whose `Order` uses `Customer`)*,
+    /// it's checked again as that module, like `ferry check` does: as a
+    /// script, its classes would be other types than the module's.
     fn check(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {
+        self.checked_as_module = false;
+        let result = self.check_once(program);
+        let Some(script) = self.host.state.script_path.clone() else { return result };
+        if !(self.check_cache.contains_key(&script) || self.check_declared.contains_key(&script)) {
+            return result;
+        }
+        let Some(stem) = script.file_stem().and_then(|s| s.to_str()) else { return result };
+        let Ok((module, _)) = crate::parse_in(&format!("use {stem} as _module;\n"), 0, self.stack_budget, &self.host.loader, Some(&script), false) else {
+            return result;
+        };
+        self.check_cache.clear();
+        self.check_classes.clear();
+        self.check_declared.clear();
+        self.found.clear();
+        // What an editor wants is now in that module
+        if let Some(request) = self.completion.as_mut()
+            && request.file.is_none()
+        {
+            request.file = Some(script.display().to_string());
+            request.result = None;
+        }
+        self.checked_as_module = true;
+        // The script's file is named as it was given, not as the module's path
+        let full = Some(script.display().to_string());
+        let given = self.host.loader.files[0].clone();
+        let rename = |mut d: Diagnostic| {
+            if d.file == full {
+                d.file = Some(given.clone());
+            }
+            d
+        };
+        let result = self.check_once(&module).map_err(rename);
+        self.errors = std::mem::take(&mut self.errors).into_iter().map(rename).collect();
+        self.warnings = std::mem::take(&mut self.warnings).into_iter().map(rename).collect();
+        result
+    }
+
+    fn check_once(&mut self, program: &[crate::ast::Stmt]) -> Result<(), Diagnostic> {
         let mut module_errors = Vec::new();
+        let mut module_warnings = Vec::new();
         let prelude = self.prelude.get_or_insert_with(crate::checker::prelude::Prelude::shared).clone();
         let recover = self.editing();
         let modules = crate::checker::Modules {
@@ -466,10 +534,13 @@ impl Engine {
             complete: self.completion.as_mut(),
             recover,
             errors: &mut module_errors,
+            warnings: &mut module_warnings,
         };
         let mut checker = crate::checker::Checker::new(&prelude, modules, &mut self.check_state, &self.host_functions);
         checker.stack_budget = self.stack_budget;
-        let mut errors = checker.check_program(program);
+        let (mut errors, mut warnings) = checker.check_program(program);
+        warnings.extend(module_warnings);
+        self.warnings = crate::checker::in_order(warnings).into_iter().map(|d| self.locate(d)).collect();
         // The rest of the errors of a module with one, after the first, which the script has
         if !errors.is_empty() {
             errors.extend(module_errors);
@@ -481,6 +552,14 @@ impl Engine {
             Some(error) => Err(error),
             None => Ok(()),
         }
+    }
+
+    /// The warnings of the last check, in the order of the code: names never
+    /// used and code that never runs *(see Warnings in
+    /// ideas/tooling/diagnostics.md)*, in the script and the modules it uses,
+    /// but not in the standard library. They never make a check fail.
+    pub fn warnings(&self) -> &[Diagnostic] {
+        &self.warnings
     }
 
     /// Every error of the last check or run that failed on its types, in

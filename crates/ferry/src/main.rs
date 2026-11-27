@@ -441,11 +441,33 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
             report(&text);
         }
     };
+    // The warnings of the project's own files, each one once *(see Warnings in ideas/tooling/diagnostics.md)*
+    let mut warned = std::collections::HashSet::new();
+    let mut warnings = |checker: &Engine, script: Option<&Path>| {
+        for w in checker.warnings() {
+            let file = match (&w.file, script) {
+                (Some(file), _) => PathBuf::from(file),
+                (None, Some(script)) => script.to_path_buf(),
+                // The line that uses a module, which isn't a file of the project
+                (None, None) => continue,
+            };
+            let real = lakescript::canonical(&file);
+            if !real.starts_with(lakescript::canonical(&project.dir)) {
+                continue;
+            }
+            let shown = relative(project, &file);
+            if warned.insert((shown.clone(), w.span.line, w.span.column, w.message.clone())) {
+                warning(&w.message, Some((&shown, w.span.line, w.span.column)));
+            }
+        }
+    };
     let modules = project.modules()?;
     for module in &modules {
         let file = project.src().join(format!("{module}.lks"));
         let mut checker = engine(&module_path);
-        if let Err(diagnostic) = checker.check_source(&format!("use {module} as module;\n")) {
+        let result = checker.check_source(&format!("use {module} as _module;\n"));
+        warnings(&checker, None);
+        if let Err(diagnostic) = result {
             for error in all_errors(&checker, diagnostic) {
                 report(&error, &file);
             }
@@ -463,7 +485,9 @@ fn check_files(project: &Project, dependencies: &[Dependency], tests: bool) -> R
     let mut waiting = Vec::new();
     for script in &scripts {
         let mut checker = engine(&module_path);
-        if let Err(diagnostic) = checker.check_file(script) {
+        let result = checker.check_file(script);
+        warnings(&checker, Some(script));
+        if let Err(diagnostic) = result {
             // A module it uses that has an error stops its check: its own code is checked once that's fixed
             if let Some(file) = &diagnostic.file {
                 waiting.push((relative(project, script), relative(project, Path::new(file))));

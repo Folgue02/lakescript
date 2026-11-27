@@ -128,3 +128,25 @@ fn enum_values_and_files_named_in_another_case_arent_types() {
     let err = Engine::with_output(CapturedOutput::new()).run_file(&script).unwrap_err().message;
     assert!(err.contains("`B`"), "{err}");
 }
+
+/// A lowercase module also sees the types in the folder named like it, after
+/// its own folder *(i.e. `config.lks` and `config/AppConfig.lks`)*.
+#[test]
+fn a_module_sees_the_types_in_its_own_folder() {
+    let dir = TempDir::new("named-folder");
+    dir.file("something/else/config/AppConfig.lks", "pub class AppConfig {\n    pub string @name = 'app';\n    pub Level @level = Level::LOW;\n}\n");
+    dir.file("something/else/config/Level.lks", "pub enum Level { LOW, HIGH }\n");
+    dir.file("something/else/config.lks", "pub AppConfig load() = AppConfig();\npub Level level() = load().level;\n");
+    assert_eq!(run(&dir, "use something/else/config;\noutln([config::load().name, config::level()]);\n"), "['app', Level::LOW]\n");
+    // The folder next to it first: a type there is the one it means
+    dir.file("something/else/Level.lks", "pub enum Level { NEXT }\n");
+    dir.file("something/else/config.lks", "pub Level level() = Level::NEXT;\n");
+    assert_eq!(run(&dir, "use something/else/config;\noutln(config::level());\n"), "Level::NEXT\n");
+    // A type module's folder isn't its parts
+    dir.file("shop/Order.lks", "pub class Order { pub Line @line = Line(); }\n");
+    dir.file("shop/Order/Line.lks", "pub class Line {}\n");
+    assert!(error(&dir, "use shop/Order;\noutln(Order());\n").contains("unknown type `Line`"));
+    // And a standalone script, with the folder named like it
+    dir.file("main/Point.lks", "pub class Point { pub number @x = 1; }\n");
+    assert_eq!(run(&dir, "outln(Point().x);\n"), "1\n");
+}

@@ -132,7 +132,20 @@ switch ($value) {
 
 ## Switch as an expression
 
-A switch can return a value. Then it must be exhaustive: every possible value must match a case, which in practice means it needs a `default` *(except for a `bool`, if both `true` and `false` have a case)*.
+A switch can return a value. Then it must be exhaustive: every possible value must match a case. That's a `default`, or a case for every value: both `true` and `false` for a `bool`, every value of an enum, or every subcommand of a command.
+
+- When the value can be `null` *(i.e. a `?Color`)*, `case null` is one of them. Before phase 13, a `switch` without it was accepted and threw when the value was `null`.
+- A `switch` statement doesn't need to be exhaustive. When it is, it ends a function when each of its cases does, so the function needs no `return` after it:
+
+```
+number code(Color $c) {
+    switch ($c) {
+        case Color::RED -> { return 1; }
+        case Color::GREEN -> { return 2; }
+        case Color::BLUE -> { return 3; }
+    }
+}
+```
 
 ```
 const $label = switch ($age) {

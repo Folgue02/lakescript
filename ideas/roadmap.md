@@ -107,7 +107,14 @@ Found by writing two packages with ferry, `folgue02/text` and `folgue02/table`, 
 - **`std/crypto`**, a family of modules *(see [stdlib/planned.md](stdlib/planned.md))*: `std/crypto/hash` for hashes and HMAC, which give hexadecimal text, and `bytes::fromHex()` the bytes; `std/crypto/random` for tokens and keys; `std/crypto/seal` to seal and open data with a key; and `std/crypto/password` for Argon2.
 - **`.env` files** in `std/env` *(i.e. `env::load('.env')`, see [stdlib/planned.md](stdlib/planned.md))*.
 
-- Found with `lks-lsp`: a block that gives a value without a `yield` on every way through it is a type error, not only an error when it runs *(see [language/flow_control.md](language/flow_control.md))*, and `Command::` completes its subcommands.
+- Found with `lks-lsp`: a block that gives a value without a `yield` on every way through it is a type error, not only an error when it runs *(see [language/flow_control.md](language/flow_control.md))*, `Command::` completes its subcommands, and the start of an argument completes the names of the parameters *(see [tooling/lsp.md](tooling/lsp.md))*.
+- A lowercase module sees the types in the folder named like it without `use` *(i.e. `config.lks` and `config/AppConfig.lks`, see Types in the same folder in [language/modules.md](language/modules.md))*.
+- **"Did you mean"**, from the backlog: an error about a name that isn't there suggests the closest one, or Lakescript's for a name of another language *(see Did you mean in [tooling/diagnostics.md](tooling/diagnostics.md))*.
+- **Warnings** for unused variables, parameters and `use` lines, and for code that never runs, in the editor, `lks --check` and `ferry check`; `_` at the start of a name says it's unused on purpose *(see Warnings in [tooling/diagnostics.md](tooling/diagnostics.md))*.
+- **Warnings for a result that's thrown away** *(i.e. `$name.trim();`, `%x"git pull";`)* and for a comparison with `null` that's always the same *(see Warnings in [tooling/diagnostics.md](tooling/diagnostics.md))*.
+- **A `switch` statement with a case for every value ends a function** when each case does, and a `switch` on a value that can be `null` needs `case null` or a `default` *(see [language/flow_control.md](language/flow_control.md))*.
+- Fixed: a file checked on its own that the modules it uses load back *(i.e. `lks --check store/Customer.lks`)* is checked as that module, so its class is one type, in `lks` and in the editor. In the editor, a module's declarations are read after a syntax error, and a module keeps its type errors after one *(see Rules in [language/modules.md](language/modules.md))*.
+- **One-parameter anonymous functions without parentheses**: `$v -> $v * 2` *(see [language/functions.md](language/functions.md))*.
 - **Every error at once**, from milestone 4 of `lks-lsp`: the checker goes on after a type error, so the editor, `lks` and `ferry check` show all of them, not only the first one *(see Every error at once in [tooling/lsp.md](tooling/lsp.md))*.
 - **`lks --check script.lks`**, which checks a script without running it, and **`--message-format json`** in `lks` and `ferry`, for tools and agents: one object on each line of stderr, for every error, warning and note *(see [tooling/lks.md](tooling/lks.md) and Errors as JSON in [tooling/diagnostics.md](tooling/diagnostics.md))*. They were in the backlog.
 
@@ -132,9 +139,7 @@ Found by writing two packages with ferry, `folgue02/text` and `folgue02/table`, 
 
 ### Backlog
 
-Decided, without a phase yet. From how well Lakescript suits an LLM, or any tool, that writes it and fixes it from what `lks` says:
-
-- **"Did you mean"**: a name that isn't there suggests the closest one *(i.e. `.lenght()` → `.length()`)*, and the names of other languages suggest Lakescript's *(i.e. `.toUpper()` → `.upper()`, `len($l)` → `$l.length()`, `fs::exists` → `fs::exists?`, `print` → `outln`)* *(see [tooling/diagnostics.md](tooling/diagnostics.md))*.
+Decided, without a phase yet. Empty: "did you mean", `lks --check` and errors as JSON, the ones that were here, went into phase 13.
 
 ### Before `1.0.0`
 

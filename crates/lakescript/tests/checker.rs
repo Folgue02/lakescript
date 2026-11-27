@@ -345,7 +345,7 @@ outln(Point(1).x + 1);
         every_error(source),
         [
             "1: `$a` is a number, but its value is a string",
-            "3: unknown type `Strng`",
+            "3: unknown type `Strng`. Did you mean `string`?",
             "6: `+` joins two strings, but got a number and a string. Use an f-string instead (i.e. f\"Age: {$age}\")",
             "8: `$y` is a string, but its value is a number",
             "10: `$missing` isn't declared",
@@ -392,4 +392,199 @@ fn every_error_while_it_is_written() {
     assert_eq!(lines.len(), 4, "{:?}", engine.errors().iter().map(|e| &e.message).collect::<Vec<_>>());
     assert!(engine.errors()[2].message.contains("`$a` is a number"), "{}", engine.errors()[2].message);
     assert!(engine.errors()[3].message.contains("`$s` is a string"), "{}", engine.errors()[3].message);
+}
+
+/// An error about a name that isn't there says the one likely meant
+/// *(see Did you mean in ideas/tooling/diagnostics.md)*.
+#[test]
+fn did_you_mean() {
+    for (source, said) in [
+        ("const $name = 'ana';\noutln($nmae);", "`$nmae` isn't declared. Did you mean `$name`?"),
+        ("let $count = 1;\n$cont = 2;", "`$cont` isn't declared. Did you mean `$count`?"),
+        ("outln('a'.lenght());", "a string has no method `.lenght()`. Did you mean `.length()`?"),
+        ("outln('a'.toUpperCase());", "a string has no method `.toUpperCase()`. Did you mean `.upper()`?"),
+        ("outln([1].size());", "a list<number> has no method `.size()`. Did you mean `.length()`?"),
+        ("print('hi');", "there's no function named `print`. Did you mean `outln`?"),
+        ("outln(len([1]));", "there's no function named `len`. Did you mean the method `.length()` (i.e. `$list.length()`)?"),
+        ("use std/fs;\noutln(fs::exists('x'));", "`<std>/fs.lks` has no `pub` function named `exists`. Did you mean `fs::exists?()`?"),
+        ("use std/fs;\noutln(fz::read('x'));", "there's no module named `fz`. Did you mean `fs`?"),
+        ("const strng $s = 'a';", "unknown type `strng`. Did you mean `string`?"),
+        ("const int $i = 1;", "unknown type `int`. Did you mean `number`?"),
+        ("class Point { pub number @x = 1; }\noutln(Pont());", "there's no function named `Pont`. Did you mean `Point`?"),
+        ("class Point { pub number @total = 1; }\noutln(Point().totl);", "`Point` has no field named `totl`. Did you mean `.total`?"),
+        ("class Point { pub number sum() = 1; }\noutln(Point().summ());", "`Point` has no method `.summ()`. Did you mean `.sum()`?"),
+    ] {
+        assert_eq!(rejected(source), said, "{source}");
+    }
+    // Nothing close: no guess
+    assert_eq!(rejected("outln('a'.zzz());"), "a string has no method `.zzz()`");
+    assert_eq!(rejected("class Point { pub number @x = 1; }\noutln(Point().y);"), "`Point` has no field named `y`");
+    assert_eq!(rejected("outln(nothingLikeIt());"), "there's no function named `nothingLikeIt`. Functions must be defined before they're used");
+    // The name alone, for tools
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    let error = engine.check_source("const $name = 1;\noutln($nmae);").unwrap_err();
+    assert_eq!(error.suggestion.as_deref(), Some("$name"));
+}
+
+/// One parameter without a type can go without parentheses.
+#[test]
+fn anonymous_functions_with_one_parameter() {
+    let out = ok("const $xs = [1, 2, 3];\n\
+        outln($xs.map($v -> $v * 2));\n\
+        outln($xs.filter($v -> { return $v > 1; }));\n\
+        outln($xs.map($v -> $v.toString().length()));\n\
+        const $add = $x -> $y -> $x + $y;\n\
+        outln($add(1)(2));\n\
+        const $n = 2;\n\
+        outln(switch ($n) { case $n -> 'the case'; default -> 'other'; });\n");
+    assert_eq!(out, "[2, 4, 6]\n[2, 3]\n[1, 1, 1]\n3\nthe case\n");
+    // Its type comes from where it's passed, like `($v) -> ...`
+    assert_eq!(rejected("const $xs = ['a'];\noutln($xs.map($v -> $v * 2));"), "`*` needs numbers, but got a string and a number");
+}
+
+/// The warnings of a check, as `line: message`.
+fn warnings(source: &str) -> Vec<String> {
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    if let Err(e) = engine.check_source(source) {
+        eprintln!("the check failed: {}", e.message);
+    }
+    engine.warnings().iter().map(|w| format!("{}: {}", w.span.line, w.message)).collect()
+}
+
+/// Names never used and code that never runs *(see Warnings in ideas/tooling/diagnostics.md)*.
+#[test]
+fn warnings_for_what_is_never_used() {
+    let source = "\
+use std/fs;
+use std/path;
+use std/time::{Date};
+const $unused = 1;
+const $_quiet = 2;
+let $assigned = 1;
+$assigned = 2;
+number twice(number $n, number $extra) = $n * 2;
+outln(twice(2, 3));
+for ($i in 0..2) { outln('x'); }
+for ($_ in 0..2) { outln('y'); }
+outln([1, 2].map(($a) -> 1));
+outln(path::join('a', 'b'));
+void f() {
+    return;
+    outln('never');
+    outln('again');
+}
+f();
+class Base { pub void hello(string $who) { outln($who); } }
+class Child extends Base {
+    override { pub void hello(string $who) { outln('child'); } }
+}
+Child().hello('x');
+try { throw ValueError('x'); } catch (ValueError $e) { outln('caught'); }
+const [$first, $_second] = [1, 2];
+pub const number $shared = 3;
+";
+    assert_eq!(
+        warnings(source),
+        [
+            "1: `fs` is imported but never used",
+            "3: `Date` is imported but never used",
+            "4: `$unused` is never used. If that's on purpose, call it `$_unused`",
+            "8: the parameter `$extra` is never used. If that's on purpose, call it `$_extra`",
+            "10: `$i` is never used. If that's on purpose, call it `$_i`",
+            "16: this code never runs: the code before it always leaves (`return`, `throw`, `break`, `continue`, `yield` or `exit()`)",
+            "26: `$first` is never used. If that's on purpose, call it `$_first`",
+        ]
+    );
+    // Warnings never make a check fail, and a clean script has none
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    assert!(engine.check_source("const $x = 1;\noutln($x);").is_ok() && engine.warnings().is_empty());
+    let mut engine = Engine::with_output(CapturedOutput::new());
+    assert!(engine.check_source("const $x = 1;").is_ok());
+    assert_eq!(engine.warnings().len(), 1);
+    // A function declared after a `return` isn't code that never runs
+    assert!(warnings("void f() {\n    return;\n    void g() {}\n}\nf();").iter().all(|w| !w.contains("never runs")), "{:?}", warnings("void f() {\n    return;\n    void g() {}\n}\nf();"));
+    // A method that implements an interface keeps its parameters
+    assert!(warnings("class Size {\n    pub number @n;\n    implement IEquals {\n        pub bool equals?(Self $other) = true;\n    }\n}\noutln(Size(1).equals?(Size(2)));").is_empty());
+}
+
+/// A statement whose value is never used, and a comparison with `null` that's
+/// always the same *(see Warnings in ideas/tooling/diagnostics.md)*.
+#[test]
+fn warnings_for_results_thrown_away() {
+    let source = "\
+const $name = ' Ana ';
+const $list = [3, 1];
+const map<string, number> $ages = {};
+$name.trim();
+$list.sorted();
+$list.map($x -> outln($x));
+$ages.merged({'b' => 2});
+%x\"git status\";
+$name + '!';
+if ($name == null) { outln('never'); }
+if ($list != null) { outln('always'); }
+";
+    assert_eq!(
+        warnings(source),
+        [
+            "4: the result of `.trim()` is never used, and it doesn't change `$name`",
+            "5: the result of `.sorted()` is never used, and it doesn't change `$list`. Did you mean `.sort()`, which changes the list itself?",
+            "6: the result of `.map()` is never used, and it doesn't change `$list`. Did you mean `.each()`, which runs a function for each value?",
+            "7: the result of `.merged()` is never used, and it doesn't change `$ages`. Did you mean `.merge()`, which changes the map itself?",
+            "8: this command never runs: call `.run()` on it, or `.output()` for what it prints",
+            "9: the value of this is never used",
+            "10: `$name` is never `null` here, since it's a string: this is always false",
+            "11: `$list` is never `null` here, since it's a list<number>: this is always true",
+        ]
+    );
+    // What changes its value, calls of functions and methods of classes, `<<`, `&&` and nullable values never warn
+    let quiet = "\
+let $list = [3, 1];
+$list.sort();
+$list.push(2);
+$list << 4;
+const map<string, number> $ages = {};
+$ages.set('a', 1);
+number twice(number $n) = $n * 2;
+twice(2);
+class Counter { pub number @n = 0; pub number add() { @n += 1; return @n; } }
+const $c = Counter();
+$c.add();
+const $verbose = true;
+$verbose && $list.empty?();
+let ?string $maybe = null;
+if ($maybe == null) { outln('none'); }
+outln($list);
+";
+    assert_eq!(warnings(quiet), Vec::<String>::new());
+}
+
+/// A `switch` with a case for every value, as a statement too, and `case null`
+/// *(see ideas/language/flow_control.md)*.
+#[test]
+fn switches_with_a_case_for_every_value() {
+    let colors = "enum Color { RED, GREEN, BLUE }\n";
+    // As a statement, it ends a function when each case does
+    let full = format!(
+        "{colors}number code(Color $c) {{\n    switch ($c) {{\n        case Color::RED -> {{ return 1; }}\n        case Color::GREEN -> {{ return 2; }}\n        case Color::BLUE -> {{ return 3; }}\n    }}\n}}\noutln(code(Color::BLUE));"
+    );
+    assert_eq!(ok(&full), "3\n");
+    let bools = "string yes(bool $b) {\n    switch ($b) {\n        case true -> { return 'y'; }\n        case false -> { return 'n'; }\n    }\n}\noutln(yes(false));";
+    assert_eq!(ok(bools), "n\n");
+    // One that misses a value doesn't
+    let half = format!("{colors}number code(Color $c) {{\n    switch ($c) {{\n        case Color::RED -> {{ return 1; }}\n    }}\n}}\noutln(code(Color::RED));");
+    assert_eq!(rejected(&half), "`code` must return a number at the end");
+    // A value that can be `null` needs `case null`
+    let nullable = format!("{colors}string name(?Color $c) = switch ($c) {{\n    case Color::RED, Color::GREEN -> 'warm';\n    case Color::BLUE -> 'cold';\n}};\noutln(name(null));");
+    assert_eq!(rejected(&nullable), "this `switch` has no case for `null`: add it, or a `default`");
+    let with_null = format!("{colors}string name(?Color $c) = switch ($c) {{\n    case Color::RED, Color::GREEN -> 'warm';\n    case Color::BLUE -> 'cold';\n    case null -> 'none';\n}};\noutln(name(null));");
+    assert_eq!(ok(&with_null), "none\n");
+    assert_eq!(
+        rejected("const ?bool $b = null;\noutln(switch ($b) { case true -> 'y'; case false -> 'n'; });"),
+        "this `switch` has no case for `null`: add it, or a `default`"
+    );
+    assert_eq!(
+        rejected(&format!("{colors}const $c = Color::RED;\noutln(switch ($c) {{ case Color::RED -> 1; }});")),
+        "this `switch` has no case for `Color::GREEN`, `Color::BLUE`: add them, or a `default`"
+    );
 }

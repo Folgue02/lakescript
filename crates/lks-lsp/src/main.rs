@@ -143,7 +143,17 @@ impl Server {
                     });
                 }
             }
-            let (errors, names) = self.check(path);
+            let (errors, warnings, names) = self.check(path);
+            if let Some(text) = self.documents.get(path) {
+                let list = found.entry(path.clone()).or_default();
+                for w in &warnings {
+                    let mut diagnostic = to_lsp(w, Some(text));
+                    diagnostic.severity = Some(DiagnosticSeverity::WARNING);
+                    if !list.contains(&diagnostic) {
+                        list.push(diagnostic);
+                    }
+                }
+            }
             // A file that doesn't parse has no names: the last ones stay, for hover while it's being written
             if !names.is_empty() || errors.is_empty() {
                 self.names.insert(path.clone(), names);
@@ -177,13 +187,23 @@ impl Server {
     }
 
     /// Checks one file, and returns what was found about its names.
-    fn check(&self, path: &Path) -> (Vec<Diagnostic>, Vec<Name>) {
+    fn check(&self, path: &Path) -> (Vec<Diagnostic>, Vec<Diagnostic>, Vec<Name>) {
         let mut engine = Engine::with_output(CapturedOutput::new());
         engine.set_stack_budget(STACK_SIZE - 16 * 1024 * 1024);
         engine.set_names(true);
         let text = self.documents.get(path).cloned().unwrap_or_default();
         let (result, as_module) = self.run_check(&mut engine, path, &text, None);
         let shown = path.display().to_string();
+        // The file's own warnings: a module's, when it was checked by using it
+        let warnings: Vec<Diagnostic> = engine
+            .warnings()
+            .iter()
+            .filter(|w| match &w.file {
+                None => !as_module,
+                Some(file) => lakescript::canonical(Path::new(file)) == lakescript::canonical(path),
+            })
+            .cloned()
+            .collect();
         let names = engine
             .names()
             .into_iter()
@@ -202,7 +222,7 @@ impl Server {
                 Some(name)
             })
             .collect();
-        (result, names)
+        (result, warnings, names)
     }
 
     /// Every error of a check that failed: the checker goes on after one
@@ -253,7 +273,7 @@ impl Server {
                 engine.set_completion(Some(path.display().to_string()), offset);
             }
             let module: Vec<String> = relative.with_extension("").iter().map(|p| p.to_string_lossy().into_owned()).collect();
-            let errors = match engine.check_source(&format!("use {} as module;\n", module.join("/"))) {
+            let errors = match engine.check_source(&format!("use {} as _module;\n", module.join("/"))) {
                 Ok(()) => Vec::new(),
                 Err(first) => Self::all_errors(engine, first),
             };
@@ -370,6 +390,59 @@ impl Server {
         let documentation = (!doc.text.is_empty()).then(|| lsp_types::Documentation::MarkupContent(MarkupContent { kind: MarkupKind::Markdown, value: doc.text.clone() }));
         let signature = SignatureInformation { label, documentation, parameters: Some(parameters), active_parameter: Some(active as u32) };
         Some(SignatureHelp { signatures: vec![signature], active_signature: Some(0), active_parameter: Some(active as u32) })
+    }
+
+    /// The named arguments a call can still take, when the cursor is where an
+    /// argument starts *(i.e. `parameter: ` in `f(par|)`)*: the parameters of
+    /// the function before its `(`, without the ones the arguments before it
+    /// already give, by position or by name.
+    fn named_arguments(&self, path: &Path, chars: &[char], start: usize, cursor: usize, range: &dyn Fn(usize) -> Range) -> Vec<CompletionItem> {
+        let Some(call) = open_call(chars, cursor) else { return Vec::new() };
+        let Some(names) = self.names.get(path) else { return Vec::new() };
+        // The name right before the `(`, or, when the line can't be read while it's written
+        // *(i.e. a name started after a named argument)*, a function of that name the file knows
+        let word: String = {
+            let mut s = call.paren;
+            while s > 0 && (chars[s - 1].is_alphanumeric() || chars[s - 1] == '_') {
+                s -= 1;
+            }
+            chars[s..call.paren].iter().collect()
+        };
+        let declared = |code: &str| code.split('(').next().and_then(|head| head.rsplit([' ', ':']).next()).is_some_and(|n| n == word);
+        let at = names.iter().filter(|n| n.end == call.paren && n.code.ends_with(')')).min_by_key(|n| n.end - n.start);
+        let Some(function) = at.or_else(|| names.iter().find(|n| !word.is_empty() && n.code.ends_with(')') && declared(&n.code))) else { return Vec::new() };
+        let Some((params, label)) = signature_params(&function.code) else { return Vec::new() };
+        let arguments = arguments_before(chars, call.paren, start);
+        // Only where an argument starts: not in the middle of one, or after `name:`
+        let Some(current) = arguments.last() else { return Vec::new() };
+        if !current.trim().is_empty() {
+            return Vec::new();
+        }
+        let given = &arguments[..arguments.len() - 1];
+        let positional = given.iter().take_while(|a| argument_name(a).is_none()).count();
+        let named: Vec<String> = given.iter().filter_map(|a| argument_name(a)).collect();
+        let label: Vec<char> = label.chars().collect();
+        let utf16_slice = |from: u32, to: u32| -> String {
+            let mut at = 0;
+            label.iter().filter(|c| {
+                let here = at;
+                at += c.len_utf16() as u32;
+                here >= from && here < to
+            }).collect()
+        };
+        params
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| *i >= positional && !named.contains(&p.name))
+            .map(|(i, p)| CompletionItem {
+                label: format!("{}:", p.name),
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some(utf16_slice(p.start, p.end)),
+                sort_text: Some(format!("!{i:03}")),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit { range: range(start), new_text: format!("{}: ", p.name) })),
+                ..Default::default()
+            })
+            .collect()
     }
 
     /// A folder in a `use` path *(i.e. `api` in `use folgue02/web/api/users;`)*:
@@ -556,23 +629,28 @@ impl Server {
             // The `$` is replaced too
             Context::Variable => found.scope.iter().filter(|i| i.label.starts_with('$')).map(|i| item(i, start - 1)).collect(),
             Context::Word => {
-                let mut items: Vec<CompletionItem> = found.scope.iter().map(|i| item(i, start)).collect();
+                // At the start of an argument: the names of the parameters not given yet, first
+                let mut items: Vec<CompletionItem> = self.named_arguments(&path, &chars, start, cursor, &range);
+                items.extend(found.scope.iter().map(|i| item(i, start)));
                 // Types that aren't imported yet, with the `use` line that imports them
                 let typed: String = chars[start..cursor].iter().collect();
                 if typed.starts_with(|c: char| c.is_ascii_uppercase()) {
                     let in_scope: HashSet<&str> = found.scope.iter().map(|i| i.label.as_str()).collect();
                     let roots = self.module_roots(&path);
-                    // The folder of the file's module: its types need no `use`
-                    let folder: Option<String> = roots.iter().find_map(|root| path.strip_prefix(root).ok()).map(|relative| {
-                        let parent = relative.parent().unwrap_or(Path::new(""));
-                        parent.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("/")
-                    });
+                    // The folder of the file's module: its types need no `use`. Nor, for a
+                    // lowercase module, the ones in the folder named like it *(`config.lks` and `config/`)*
+                    let relative = roots.iter().find_map(|root| path.strip_prefix(root).ok());
+                    let joined = |p: &Path| p.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
+                    let folder: Option<String> = relative.map(|r| joined(r.parent().unwrap_or(Path::new(""))));
+                    let named: Option<String> = relative
+                        .filter(|r| r.file_stem().is_some_and(|s| !s.to_string_lossy().starts_with(|c: char| c.is_ascii_uppercase())))
+                        .map(|r| joined(&r.with_extension("")));
                     for t in self.index.types(&roots, &self.documents, &path) {
                         if in_scope.contains(t.name.as_str()) {
                             continue;
                         }
                         let module_folder = t.module.rsplit_once('/').map_or("", |(folder, _)| folder);
-                        let same_folder = t.type_module && folder.as_deref() == Some(module_folder);
+                        let same_folder = t.type_module && (folder.as_deref() == Some(module_folder) || named.as_deref() == Some(module_folder));
                         let edits = if same_folder {
                             None
                         } else {
@@ -863,6 +941,59 @@ fn open_call(chars: &[char], cursor: usize) -> Option<OpenCall> {
     let after = &arg[word.len()..];
     let named = (!word.is_empty() && after.trim_start().starts_with(':') && !after.trim_start().starts_with("::")).then_some(word);
     Some(OpenCall { paren, index, named })
+}
+
+/// The arguments of the call whose `(` is at `paren`, up to `end`, split
+/// at its commas: the last one is the one being written. Strings and
+/// brackets inside an argument are kept whole.
+fn arguments_before(chars: &[char], paren: usize, end: usize) -> Vec<String> {
+    let mut arguments = vec![String::new()];
+    let mut depth = 0;
+    let mut i = paren + 1;
+    while i < end {
+        let c = chars[i];
+        match c {
+            '\'' | '"' => {
+                let quote = c;
+                arguments.last_mut().unwrap().push(c);
+                i += 1;
+                while i < end && chars[i] != quote {
+                    if chars[i] == '\\' {
+                        arguments.last_mut().unwrap().push(chars[i]);
+                        i += 1;
+                    }
+                    if i < end {
+                        arguments.last_mut().unwrap().push(chars[i]);
+                    }
+                    i += 1;
+                }
+                if i < end {
+                    arguments.last_mut().unwrap().push(chars[i]);
+                }
+                i += 1;
+                continue;
+            }
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                arguments.push(String::new());
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        arguments.last_mut().unwrap().push(c);
+        i += 1;
+    }
+    arguments
+}
+
+/// The name of a named argument *(i.e. `all` in `all: true`)*, not of `a::b`.
+fn argument_name(argument: &str) -> Option<String> {
+    let text = argument.trim_start();
+    let word: String = text.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+    let after = text[word.len()..].trim_start();
+    (!word.is_empty() && after.starts_with(':') && !after.starts_with("::")).then_some(word)
 }
 
 /// A parameter in the label of a signature: its name, and where it is in

@@ -5,7 +5,6 @@
 //   lks examples/shop/main.lks
 
 use store/Customer;
-use store/Order;
 
 const $ana = Customer('Ana');
 const $book = $ana.order('book', 1999);

@@ -29,6 +29,7 @@ mod paths;
 #[cfg(feature = "bundle")]
 mod bundle;
 mod siblings;
+mod unused;
 mod small_alloc;
 mod patterns;
 mod stack;
@@ -77,6 +78,15 @@ pub fn parse_file(source: &str, file: u32) -> Result<Vec<ast::Stmt>, Diagnostic>
 /// Like `parse_file`, with the stack budget of the engine.
 pub(crate) fn parse_budgeted(source: &str, file: u32, stack_budget: usize) -> Result<Vec<ast::Stmt>, Diagnostic> {
     parser::parse_with_budget(lexer::tokenize_file(source, file)?, stack_budget)
+}
+
+/// The `use` lines of `program` that are never used, as warnings, from the
+/// text of its file *(see `unused`)*.
+pub(crate) fn unused_imports(source: &str, file: u32, program: &[ast::Stmt]) -> Vec<Diagnostic> {
+    match lexer::tokenize_file(source, file) {
+        Ok(tokens) => unused::imports(program, &tokens),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Like `parse_budgeted`, for the file at `path`: the types of its folder

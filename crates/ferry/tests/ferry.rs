@@ -839,10 +839,10 @@ fn messages_as_json() {
     assert_eq!(out.status.code(), Some(1));
     let this = env!("CARGO_PKG_VERSION");
     for line in [
-        format!("{{\"type\":\"warning\",\"message\":\"me/lib needs Lakescript 99.0.0 or newer, and this is ferry {this}: it may use what this one doesn't have\",\"exception\":null,\"file\":null,\"line\":null,\"column\":null,\"length\":null,\"trace\":[]}}"),
-        "{\"type\":\"error\",\"message\":\"`$n` is a number, but its value is a string\",\"exception\":null,\"file\":\"tests/broken.lks\",\"line\":1,\"column\":19,\"length\":5,\"trace\":[]}".to_string(),
-        "{\"type\":\"warning\",\"message\":\"`m::a` is `pub`, and has no `///` comment\",\"exception\":null,\"file\":\"src/me/lib/m.lks\",\"line\":1,\"column\":1,\"length\":1,\"trace\":[]}".to_string(),
-        "{\"type\":\"error\",\"message\":\"me/lib has 1 error\",\"exception\":null,\"file\":null,\"line\":null,\"column\":null,\"length\":null,\"trace\":[]}".to_string(),
+        format!("{{\"type\":\"warning\",\"message\":\"me/lib needs Lakescript 99.0.0 or newer, and this is ferry {this}: it may use what this one doesn't have\",\"exception\":null,\"file\":null,\"line\":null,\"column\":null,\"length\":null,\"trace\":[],\"suggestion\":null}}"),
+        "{\"type\":\"error\",\"message\":\"`$n` is a number, but its value is a string\",\"exception\":null,\"file\":\"tests/broken.lks\",\"line\":1,\"column\":19,\"length\":5,\"trace\":[],\"suggestion\":null}".to_string(),
+        "{\"type\":\"warning\",\"message\":\"`m::a` is `pub`, and has no `///` comment\",\"exception\":null,\"file\":\"src/me/lib/m.lks\",\"line\":1,\"column\":1,\"length\":1,\"trace\":[],\"suggestion\":null}".to_string(),
+        "{\"type\":\"error\",\"message\":\"me/lib has 1 error\",\"exception\":null,\"file\":null,\"line\":null,\"column\":null,\"length\":null,\"trace\":[],\"suggestion\":null}".to_string(),
     ] {
         assert!(said.lines().any(|l| l == line), "{line}\n{said}");
     }
@@ -892,6 +892,37 @@ fn check_shows_every_error_of_a_file() {
     let run = w.ferry(&dir, &["--color", "never", "run"]);
     let said = stderr(&run);
     assert!(said.contains(" --> bin/app.lks:2:") && said.contains(" --> bin/app.lks:4:"), "{said}");
+}
+
+#[test]
+fn check_warns_about_what_is_never_used() {
+    let w = World::new();
+    // A dependency's own leftovers aren't the project's to fix
+    w.publish("acme", "util", "1.0.0", "", &[("src/acme/util/m.lks", "pub number one() {\n    const $left = 1;\n    return 1;\n}\n")]);
+    let dir = w.project(
+        "app",
+        &app("\"local:acme/util\" = \"1.0.0\"\n"),
+        &[
+            ("src/me/app/m.lks", "use std/fs;\npub number two(number $n) = 2;\n"),
+            ("bin/app.lks", "use acme/util/m as util;\nuse me/app/m;\nconst $unused = util::one();\noutln(m::two(1));\n"),
+        ],
+    );
+    let out = w.ferry(&dir, &["--color", "never", "check"]);
+    let said = stderr(&out);
+    assert!(out.status.success(), "{said}");
+    for line in [
+        "warning: `fs` is imported but never used\n --> src/me/app/m.lks:1:1",
+        "warning: the parameter `$n` is never used. If that's on purpose, call it `$_n`\n --> src/me/app/m.lks:2:23",
+        "warning: `$unused` is never used. If that's on purpose, call it `$_unused`\n --> bin/app.lks:3:1",
+    ] {
+        assert!(said.contains(line), "{line}\n{said}");
+    }
+    // Each once, though two files check the module, and none of the dependency's or of the line that uses a module
+    assert_eq!(said.matches("`fs` is imported").count(), 1, "{said}");
+    assert!(!said.contains("$left") && !said.contains("_module"), "{said}");
+    // As JSON, with their place
+    let out = w.ferry(&dir, &["--message-format", "json", "check"]);
+    assert!(stderr(&out).contains("{\"type\":\"warning\",\"message\":\"`fs` is imported but never used\",\"exception\":null,\"file\":\"src/me/app/m.lks\",\"line\":1,\"column\":1"), "{}", stderr(&out));
 }
 
 #[test]

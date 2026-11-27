@@ -128,7 +128,7 @@ fn errors_follow_what_is_typed() {
     assert_eq!(errors[0]["range"]["start"], json!({ "line": 1, "character": 12 }));
     assert_eq!(errors[0]["severity"], 1);
     // Fixed: the error goes away
-    server.change(&script, "const $x = 1;\nnumber $n = $x;\n", 2);
+    server.change(&script, "const $x = 1;\nnumber $n = $x;\noutln($n);\n", 2);
     assert!(server.diagnostics_for(&script).is_empty());
     server.stop();
 }
@@ -320,7 +320,7 @@ fn projects_that_cannot_be_used_say_why() {
     std::fs::write(dir.join("ferry.toml"), format!("{manifest}\"github:bob/strings\" = \"1.0.0\"\n")).unwrap();
     std::fs::create_dir_all(dir.join("bin")).unwrap();
     let script = dir.join("bin/demo.lks");
-    let text = "use bob/strings/pad;\noutln(1);\n";
+    let text = "use bob/strings/pad;\noutln(pad::left('a'));\n";
     std::fs::write(&script, text).unwrap();
     let mut server = Server::start();
     // A dependency that isn't downloaded: lks-lsp never downloads, so it says what does
@@ -366,7 +366,7 @@ fn a_comment_for_a_parameter_that_isnt_there_is_a_warning() {
     let dir = temp("stale");
     let script = dir.join("main.lks");
     let mut server = Server::start();
-    server.open(&script, "/// $nme: who\nvoid hi(string $name) {}\n");
+    server.open(&script, "/// $nme: who\nvoid hi(string $name) { outln($name); }\n");
     let found = server.diagnostics_for(&script);
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0]["severity"], 2);
@@ -503,5 +503,100 @@ fn every_error_of_a_module_of_a_project() {
     let errors = server.diagnostics_for(&module);
     let lines: Vec<&Value> = errors.iter().map(|e| &e["range"]["start"]["line"]).collect();
     assert_eq!(lines, [&json!(0), &json!(2)], "{errors:?}");
+    server.stop();
+}
+
+/// The names of the parameters, at the start of an argument *(i.e. `times:` in `greet('a', |)`)*.
+#[test]
+fn named_arguments_are_completed() {
+    let dir = temp("named-arguments");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    let decl = "string greet(string $name, number $times = 1, bool $loud = false) = $loud ? $name.upper().repeat($times) : $name.repeat($times);\n";
+    let complete = |server: &mut Server, call: &str| -> Vec<String> {
+        let text = format!("{decl}outln({call});\n");
+        server.change(&script, &text, 2);
+        let _ = server.diagnostics_for(&script);
+        let column = "outln(".len() + call.find('|').unwrap();
+        let text = text.replacen('|', "", 1);
+        server.change(&script, &text, 3);
+        let _ = server.diagnostics_for(&script);
+        let result = server.at("textDocument/completion", &script, 1, column as u32);
+        labels(&result).into_iter().filter(|l| l.ends_with(':')).collect()
+    };
+    server.open(&script, &format!("{decl}outln(greet('a'));\n"));
+    assert!(server.diagnostics_for(&script).is_empty());
+    // After a positional argument, the ones after it
+    assert_eq!(complete(&mut server, "greet('a', |)"), ["times:", "loud:"]);
+    // Without the ones already named, and with the start of a name written
+    assert_eq!(complete(&mut server, "greet('a', loud: true, t|)"), ["times:"]);
+    assert_eq!(complete(&mut server, "greet(|)"), ["name:", "times:", "loud:"]);
+    // Not after `name:`, where its value goes, and not outside a call
+    assert!(complete(&mut server, "greet('a', times: |)").is_empty());
+    assert!(complete(&mut server, "greet('a') + |").is_empty());
+    server.stop();
+}
+
+/// A lowercase module's folder, named like it, needs no `use` for its types *(i.e. `config.lks` and `config/AppConfig.lks`)*.
+#[test]
+fn completion_needs_no_use_for_the_folder_named_like_the_module() {
+    let dir = temp("named-folder");
+    std::fs::create_dir_all(dir.join("config")).unwrap();
+    std::fs::write(dir.join("config/AppConfig.lks"), "pub class AppConfig {\n    pub string @name = 'app';\n}\n").unwrap();
+    std::fs::create_dir_all(dir.join("people")).unwrap();
+    std::fs::write(dir.join("people/Person.lks"), "pub class Person {\n    pub string @name;\n}\n").unwrap();
+    let module = dir.join("config.lks");
+    let mut server = Server::start();
+    server.open(&module, "pub AppConfig load() = AppConfig();\nconst $p = App\n");
+    server.diagnostics_for(&module);
+    let found = server.at("textDocument/completion", &module, 1, 14);
+    let item = |label: &str| found.as_array().unwrap().iter().find(|i| i["label"] == label).cloned().unwrap_or_else(|| panic!("no {label} in {found}"));
+    assert!(item("AppConfig")["additionalTextEdits"].is_null(), "{}", item("AppConfig"));
+    // Another folder still gets its `use`
+    assert_eq!(item("Person")["additionalTextEdits"][0]["newText"], "use people/Person;\n\n");
+    server.stop();
+}
+
+/// What's never used is a warning in the editor, with errors in the same list.
+#[test]
+fn warnings_for_what_is_never_used() {
+    let dir = temp("warnings");
+    let script = dir.join("main.lks");
+    let mut server = Server::start();
+    server.open(&script, "use std/fs;\nconst $unused = 1;\nconst number $bad = 'x';\noutln($bad);\n");
+    let found = server.diagnostics_for(&script);
+    let shown: Vec<(i64, i64)> = found.iter().map(|d| (d["range"]["start"]["line"].as_i64().unwrap(), d["severity"].as_i64().unwrap())).collect();
+    assert!(shown.contains(&(0, 2)) && shown.contains(&(1, 2)) && shown.contains(&(2, 1)), "{found:?}");
+    server.change(&script, "const $_unused = 1;\n", 2);
+    assert!(server.diagnostics_for(&script).is_empty());
+    server.stop();
+}
+
+/// A file that what it uses loads back *(i.e. `Customer.lks`, whose `Order`
+/// has a `Customer`)* is checked as that module, so its class is one type.
+#[test]
+fn a_file_its_own_modules_use_is_checked_as_a_module() {
+    let dir = temp("used-back");
+    let customer = dir.join("Customer.lks");
+    let text = "/// Who buys\npub class Customer {\n    pub string @name;\n\n    pub Order order(string $item) = Order($item, @);\n}\n";
+    std::fs::write(&customer, text).unwrap();
+    std::fs::write(dir.join("Order.lks"), "pub class Order {\n    pub string @item;\n    pub Customer @customer;\n}\n").unwrap();
+    let mut server = Server::start();
+    server.open(&customer, text);
+    assert_eq!(server.diagnostics_for(&customer), Vec::<Value>::new());
+    let hover = server.at("textDocument/hover", &customer, 4, 38);
+    assert!(hover["contents"]["value"].as_str().unwrap().contains("class Order"), "{hover}");
+    // Its errors are still in the file, and completion works in it
+    let broken = "pub class Customer {\n    pub string @name;\n\n    pub number twice() = @name * 2;\n    pub Order order(string $item) = Order($item, @);\n}\n";
+    server.change(&customer, broken, 2);
+    let errors = server.diagnostics_for(&customer);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0]["message"].as_str().unwrap().contains("`*` needs numbers"), "{errors:?}");
+    assert_eq!(errors[0]["range"]["start"], json!({ "line": 3, "character": 25 }));
+    let typing = "pub class Customer {\n    pub string @name;\n\n    pub Order order(string $item) = Order($item, @);\n    pub string shout() = @name.\n}\n";
+    server.change(&customer, typing, 3);
+    server.diagnostics_for(&customer);
+    let found = server.at("textDocument/completion", &customer, 4, 31);
+    assert!(labels(&found).contains(&"upper".to_string()), "{found}");
     server.stop();
 }

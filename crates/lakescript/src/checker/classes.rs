@@ -480,7 +480,10 @@ impl Checker<'_> {
                     }
                     self.check_override(decl, &class, member, method)?;
                     self.this.push(This { class: class.clone(), self_param: false, is_static: member.is_static, constructor: false });
+                    // A method that implements an interface or overrides one keeps its parameters, used or not
+                    let outer = std::mem::replace(&mut self.warn_params, member.origin == Origin::Own && !class.0.interface);
                     let result = self.method_body(method, &sig, member.span);
+                    self.warn_params = outer;
                     self.this.pop();
                     result?;
                 }
@@ -843,7 +846,16 @@ impl Checker<'_> {
                     if class.find(|b| b.methods.get(name).cloned()).is_some() {
                         return self.fail(format!("`{name}` is a method of `{}`: call it with `.{name}()`", class.0.name), span);
                     }
-                    return self.fail(format!("`{}` has no field named `{name}`", class.0.name), span);
+                    let accessible: Vec<_> = self.this.iter().map(|t| t.class.clone()).collect();
+                    let fields: Vec<String> = self
+                        .members_of(&Ty::Object(class.clone(), args.clone()), &accessible)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter(|i| i.kind == super::complete::ItemKind::Field)
+                        .map(|i| i.label)
+                        .collect();
+                    let found = super::suggest::closest(name, &fields).map(|f| (f.clone(), format!("`.{f}`")));
+                    return self.fail_unknown(format!("`{}` has no field named `{name}`", class.0.name), "", found, span);
                 };
                 self.check_access(field.public, &owner, &format!("the field `{name}`"), span)?;
                 let ty = field.ty.substitute(&class.member_map(&args, &owner));

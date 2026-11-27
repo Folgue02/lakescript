@@ -1131,7 +1131,7 @@ impl<'a> Compiler<'a> {
     /// A method or constructor: a function whose first parameter is `@`.
     fn method(&mut self, decl: &FunctionDecl) -> Compiled<u32> {
         let mut with_this = decl.clone();
-        with_this.params.insert(0, Param { name: "@".into(), ty: None, default: None, variadic: false, field: false });
+        with_this.params.insert(0, Param { name: "@".into(), ty: None, default: None, variadic: false, field: false, span: Span::default() });
         self.function(&with_this)
     }
 
@@ -1997,7 +1997,7 @@ fn dispatcher(name: &str, versions: &[(Vec<Option<TypeExpr>>, String)], class: &
     let at = |kind| Expr { kind, span };
     let count = versions.iter().map(|(p, _)| p.len()).max().unwrap_or(0);
     let params: Vec<Param> = (0..count)
-        .map(|i| Param { name: format!("_arg{i}"), ty: None, default: None, variadic: false, field: false })
+        .map(|i| Param { name: format!("_arg{i}"), ty: None, default: None, variadic: false, field: false, span: Span::default() })
         .collect();
     let mut body = Vec::new();
     for (types, hidden) in versions {
